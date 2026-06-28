@@ -729,36 +729,175 @@ function preloadActionBike(id) {
 
 // ── TICKETS ───────────────────────────────────────────────────────────────
 async function renderTickets(c) {
-  const tickets=await api('/api/repairs?status=open');
-  c.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.85rem">
-      <div class="section-title" style="margin:0">${tickets.length} open ticket${tickets.length!==1?'s':''}</div>
+  const [tickets, stats] = await Promise.all([
+    api('/api/repairs?status=open'),
+    api('/api/repairs/stats'),
+  ]);
+
+  const subtabs = ['queue', 'analytics'];
+  if (!window._ticketTab) window._ticketTab = 'queue';
+
+  c.innerHTML = `
+    <div class="subtab-row">
+      <button class="subtab${window._ticketTab==='queue'?' active':''}" onclick="switchTicketTab('queue')">Queue (${tickets.length})</button>
+      <button class="subtab${window._ticketTab==='analytics'?' active':''}" onclick="switchTicketTab('analytics')">Analytics</button>
     </div>
-    ${tickets.length===0
-      ?'<div class="empty-state"><p>No open repair tickets 🎉</p></div>'
-      :tickets.map(t=>{
-        const cats=JSON.parse(t.problem_categories||'[]');
-        const age=Math.floor((Date.now()-new Date(t.created_at+'Z').getTime())/3600000);
-        const pc=age>48?'priority-high':age>24?'priority-mid':'priority-low';
-        return `<div class="ticket-card ${pc}">
-          <div class="tk-header">
-            <span class="tk-bike">${t.bike_id}</span>
-            <span class="tk-rentable ${t.can_rent?'yes':'no'}">${t.can_rent?'Can rent':'Off fleet'}</span>
-          </div>
-          ${cats.length>0?`<div style="display:flex;flex-wrap:wrap;gap:0.3rem;margin-bottom:0.35rem">
-            ${cats.map(c=>`<span style="font-size:0.7rem;background:var(--red-light);color:var(--red);border-radius:20px;padding:1px 8px;font-weight:500">${c}</span>`).join('')}
-          </div>`:''}
-          <div class="tk-problem">${t.problem}</div>
-          <div class="tk-meta">Reported by ${t.reported_by} · ${fmtTime(t.created_at)} · ${age}h ago</div>
-          <div style="margin-top:0.6rem;display:flex;gap:0.5rem">
-            <button class="btn btn-sm btn-success" onclick="resolveTicket(${t.id},'${t.bike_id}')">Mark resolved</button>
-            <button class="btn btn-sm btn-secondary" onclick="showBike('${t.bike_id}')">View bike</button>
-          </div>
-        </div>`;
-      }).join('')}`;
+    <div id="ticket-tab-content"></div>`;
+
+  renderTicketTab(tickets, stats);
 }
 
-async function resolveTicket(ticketId,bikeId) {
+function switchTicketTab(tab) {
+  window._ticketTab = tab;
+  document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent.startsWith(tab==='queue'?'Queue':'Analytics')));
+  api('/api/repairs?status=open').then(tickets => {
+    api('/api/repairs/stats').then(stats => renderTicketTab(tickets, stats));
+  });
+}
+
+function renderTicketTab(tickets, stats) {
+  const el = document.getElementById('ticket-tab-content');
+  if (!el) return;
+  if (window._ticketTab === 'queue') {
+    el.innerHTML = renderTicketQueue(tickets);
+  } else {
+    el.innerHTML = renderTicketAnalytics(stats);
+  }
+}
+
+function renderTicketQueue(tickets) {
+  if (tickets.length === 0) return '<div class="empty-state"><p>No open repair tickets 🎉</p></div>';
+
+  return tickets.map(t => {
+    const cats = JSON.parse(t.problem_categories || '[]');
+    const hours = t.hours_waiting || 0;
+    const days = Math.floor(hours / 24);
+    const ageLabel = days > 0 ? `${days}d ${Math.floor(hours % 24)}h` : `${Math.floor(hours)}h`;
+    const priorityClass = t.priority_score > 500 ? 'priority-high' : t.priority_score > 150 ? 'priority-mid' : 'priority-low';
+    const complexLabels = {1:'Quick fix',2:'Simple',3:'Medium',4:'Complex',5:'Major'};
+
+    return `<div class="ticket-card ${priorityClass}">
+      <div class="tk-header">
+        <div>
+          <span class="tk-bike">${t.bike_id}</span>
+          <span class="tk-type-label">${t.type_label||''}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span class="tk-rentable ${t.can_rent?'yes':'no'}">${t.can_rent?'Can rent':'Off fleet'}</span>
+          <span class="tk-score" title="Priority score">${Math.round(t.priority_score)}</span>
+        </div>
+      </div>
+      ${cats.length>0?`<div class="tk-cats">${cats.map(c=>`<span class="tk-cat">${c}</span>`).join('')}</div>`:''}
+      ${t.problem&&t.problem!==cats.join(', ')?`<div class="tk-problem">${t.problem}</div>`:''}
+      <div class="tk-meta">
+        <span>⏱ ${ageLabel} waiting</span>
+        <span>· ${t.reported_by}</span>
+        ${t.rental_value_dkk?`<span>· ${Math.round(t.rental_value_dkk * (t.hours_waiting/24))} DKK lost</span>`:''}
+      </div>
+      <div class="tk-complexity-row">
+        <span style="font-size:0.75rem;color:var(--text3)">Complexity</span>
+        <div class="complexity-picker" data-ticket="${t.id}" data-current="${t.complexity||3}">
+          ${[1,2,3,4,5].map(n=>`<button class="complexity-dot${(t.complexity||3)>=n?' filled':''}" onclick="setComplexity(${t.id},${n})" title="${complexLabels[n]}">${n}</button>`).join('')}
+        </div>
+        <span style="font-size:0.72rem;color:var(--text3)">${complexLabels[t.complexity||3]}</span>
+      </div>
+      <div style="margin-top:0.6rem;display:flex;gap:0.5rem">
+        <button class="btn btn-sm btn-success" onclick="resolveTicket(${t.id},'${t.bike_id}')">✓ Resolved</button>
+        <button class="btn btn-sm btn-secondary" onclick="showBike('${t.bike_id}')">View bike</button>
+        ${t.can_rent?'':`<button class="btn btn-sm btn-secondary" onclick="toggleCanRent(${t.id},1)">Can rent now</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderTicketAnalytics(stats) {
+  const freq = stats.problem_frequency || [];
+  const byType = stats.resolution_by_type || [];
+  const worst = stats.worst_bikes || [];
+  const counts = stats.ticket_counts || [];
+  const totalOpen = counts.find(c=>c.status==='open')?.count || 0;
+  const totalDone = counts.find(c=>c.status==='done')?.count || 0;
+
+  const maxFreq = freq[0]?.count || 1;
+  const freqBars = freq.slice(0,10).map(f => `
+    <div class="stat-bar-row">
+      <div class="stat-bar-label">${f.category}</div>
+      <div class="stat-bar-track">
+        <div class="stat-bar-fill" style="width:${Math.round(f.count/maxFreq*100)}%"></div>
+      </div>
+      <div class="stat-bar-val">${f.count}${f.avg_hours?` · ${f.avg_hours}h avg`:''}</div>
+    </div>`).join('');
+
+  const typeBars = byType.filter(t=>t.ticket_count>0).map(t=>`
+    <div class="stat-bar-row">
+      <div class="stat-bar-label">${t.label}</div>
+      <div class="stat-bar-track">
+        <div class="stat-bar-fill amber" style="width:${Math.min(100,Math.round((t.avg_hours||0)/48*100))}%"></div>
+      </div>
+      <div class="stat-bar-val">${t.ticket_count} tickets${t.avg_hours?' · '+t.avg_hours+'h':''}</div>
+    </div>`).join('');
+
+  const worstList = worst.map(b=>`
+    <div class="detail-row">
+      <span class="dr-key"><strong style="color:var(--red)">${b.bike_id}</strong> ${b.bike_name||''}</span>
+      <span class="dr-val">${b.ticket_count} tickets${b.open_tickets>0?' · <span style="color:var(--red)">'+b.open_tickets+' open</span>':''}</span>
+    </div>`).join('');
+
+  return `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-num red">${totalOpen}</div>
+        <div class="stat-card-label">Open tickets</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-num green">${totalDone}</div>
+        <div class="stat-card-label">Resolved all time</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-num amber">${stats.resolution_overall?.avg_hours||'—'}</div>
+        <div class="stat-card-label">Avg hours to fix</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-num red">${stats.daily_revenue_lost>0?stats.daily_revenue_lost+' DKK':'0'}</div>
+        <div class="stat-card-label">Est. revenue lost</div>
+      </div>
+    </div>
+
+    ${freq.length>0?`
+    <div class="section-title" style="margin-top:1rem">Most common problems</div>
+    <div class="stats-section">${freqBars}</div>`:''}
+
+    ${byType.length>0?`
+    <div class="section-title">By bike type</div>
+    <div class="stats-section">${typeBars}</div>`:''}
+
+    ${worst.length>0?`
+    <div class="section-title">Bikes with most tickets</div>
+    <div class="stats-section detail-section" style="padding-top:0;border-top:none">${worstList}</div>`:''}
+
+    ${totalOpen===0&&totalDone===0?'<div class="empty-state"><p>No repair data yet — tickets will appear here once you start logging issues.</p></div>':''}
+  `;
+}
+
+async function setComplexity(ticketId, complexity) {
+  try {
+    await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ complexity } });
+    // Refresh just the queue
+    const [tickets, stats] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
+    renderTicketTab(tickets, stats);
+    toast('Complexity updated', 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleCanRent(ticketId, canRent) {
+  try {
+    await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ can_rent: canRent } });
+    const [tickets, stats] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
+    renderTicketTab(tickets, stats);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function resolveTicket(ticketId, bikeId) {
   openModal(`
     <div class="modal-title">Resolve ticket</div>
     <div class="form-group">
@@ -778,13 +917,13 @@ async function resolveTicket(ticketId,bikeId) {
     </div>`);
 }
 
-async function submitResolve(ticketId,bikeId) {
-  const note=document.getElementById('res-note')?.value?.trim();
-  const status=document.getElementById('res-status')?.value;
+async function submitResolve(ticketId, bikeId) {
+  const note = document.getElementById('res-note')?.value?.trim();
+  const status = document.getElementById('res-status')?.value;
   try {
-    await api(`/api/repairs/${ticketId}/resolve`,{method:'POST',body:{resolution_note:note,new_bike_status:status}});
-    closeModal(); toast('Ticket resolved','success'); await renderTab('tickets');
-  } catch(e){toast(e.message,'error');}
+    await api(`/api/repairs/${ticketId}/resolve`, { method:'POST', body:{ resolution_note:note, new_bike_status:status }});
+    closeModal(); toast('Ticket resolved', 'success'); await renderTab('tickets');
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ── LOG ───────────────────────────────────────────────────────────────────

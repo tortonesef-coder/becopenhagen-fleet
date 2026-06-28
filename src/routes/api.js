@@ -191,43 +191,5 @@ router.get('/team', (req, res) => {
   res.json(db().prepare('SELECT * FROM team_members WHERE active=1 ORDER BY role,name').all());
 });
 
-router.get('/repairs', (req, res) => {
-  const { status } = req.query;
-  let sql = `SELECT rt.*, b.type_id FROM repair_tickets rt JOIN bikes b ON b.id=rt.bike_id WHERE 1=1`;
-  const params = [];
-  if (status) { sql += ' AND rt.status=?'; params.push(status); }
-  sql += ' ORDER BY rt.created_at DESC';
-  res.json(db().prepare(sql).all(...params));
-});
-
-router.post('/repairs', (req, res) => {
-  const { bike_id, problem, problem_categories, can_rent } = req.body;
-  const actor = req.session?.actor || 'unknown';
-  if (!bike_id || !problem) return res.status(400).json({ error: 'bike_id and problem required' });
-  const cats = Array.isArray(problem_categories) ? problem_categories :
-    (typeof problem_categories === 'string' ? problem_categories : '[]');
-  const result = db().prepare(`INSERT INTO repair_tickets (bike_id,reported_by,problem,problem_categories,can_rent,status) VALUES (?,?,?,?,?,'open')`)
-    .run(bike_id, actor, problem, typeof cats === 'string' ? cats : JSON.stringify(cats), can_rent?1:0);
-  db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
-    .run(actor, 'repair_ticket', bike_id,
-      JSON.stringify({problem, can_rent, ticket_id: result.lastInsertRowid}));
-  res.json({ ok:true, ticket_id: result.lastInsertRowid });
-});
-
-router.post('/repairs/:id/resolve', (req, res) => {
-  const { resolution_note, new_bike_status } = req.body;
-  const actor = req.session?.actor || 'unknown';
-  db().prepare(`UPDATE repair_tickets SET status='done', resolved_by=?, resolved_at=datetime('now'), resolution_note=? WHERE id=?`)
-    .run(actor, resolution_note||null, req.params.id);
-  const ticket = db().prepare('SELECT bike_id FROM repair_tickets WHERE id=?').get(req.params.id);
-  if (ticket && new_bike_status) {
-    db().prepare(`UPDATE bike_status SET status=?, updated_at=datetime('now'), updated_by=? WHERE bike_id=?`)
-      .run(new_bike_status, actor, ticket.bike_id);
-    db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
-      .run(actor, 'ticket_resolved', ticket.bike_id,
-        JSON.stringify({ticket_id: req.params.id, resolution_note, new_bike_status}));
-  }
-  res.json({ ok: true });
-});
 
 module.exports = router;
