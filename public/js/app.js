@@ -176,6 +176,8 @@ function buildTabbar() {
   const role=state.actor?.role;
   const tabs = role==='mechanic'
     ? [{id:'today',label:'Today',icon:iconHome()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
+    : role==='admin'
+    ? [{id:'today',label:'Today',icon:iconHome()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
     : [{id:'today',label:'Today',icon:iconHome()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
@@ -193,7 +195,7 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets'};
+  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id==='today') await renderToday(c);
@@ -201,6 +203,7 @@ async function renderTab(id) {
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
   else if(id==='tickets') await renderTickets(c);
+  else if(id==='admin') await renderAdmin(c);
 }
 
 // ── TODAY ─────────────────────────────────────────────────────────────────
@@ -1037,3 +1040,227 @@ async function processVoiceRecording(actionType, mimeType, stream) {
     if (btn) { btn.innerHTML = '🎤 Tap to speak'; btn.disabled = false; }
   }
 }
+
+// ── ADMIN ─────────────────────────────────────────────────────────────────
+async function renderAdmin(c) {
+  if (!window._adminTab) window._adminTab = 'bikes';
+  c.innerHTML = `
+    <div class="subtab-row">
+      <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
+      <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
+    </div>
+    <div id="admin-tab-content"></div>`;
+  renderAdminTab(c);
+}
+
+async function switchAdminTab(tab) {
+  window._adminTab = tab;
+  document.querySelectorAll('.subtab').forEach(b =>
+    b.classList.toggle('active', b.textContent === (tab==='bikes'?'Fleet':'Log')));
+  renderAdminTab(document.getElementById('content'));
+}
+
+async function renderAdminTab(c) {
+  const el = document.getElementById('admin-tab-content');
+  if (!el) return;
+  if (window._adminTab === 'bikes') await renderAdminBikes(el);
+  else await renderAdminLog(el);
+}
+
+async function renderAdminBikes(el) {
+  const [bikes, types] = await Promise.all([
+    api('/api/fleet/bikes'),
+    api('/api/fleet/types'),
+  ]);
+
+  const typeMap = {};
+  types.forEach(t => typeMap[t.id] = t);
+
+  // Group by type
+  const grouped = {};
+  bikes.forEach(b => {
+    if (!grouped[b.type_id]) grouped[b.type_id] = [];
+    grouped[b.type_id].push(b);
+  });
+
+  el.innerHTML = `
+    <button class="btn btn-primary btn-full" style="margin-bottom:1rem" onclick="openAddBikeModal()">
+      + Add new bike
+    </button>
+    ${types.map(t => {
+      const typeBikes = grouped[t.id] || [];
+      const active = typeBikes.filter(b=>b.active);
+      const retired = typeBikes.filter(b=>!b.active);
+      return `
+        <div class="section-title">${t.label} <span style="color:var(--text3);font-weight:400">${active.length} active${retired.length>0?' · '+retired.length+' retired':''}</span></div>
+        <div class="bike-list" style="margin-bottom:0.75rem">
+          ${typeBikes.map(b=>`
+            <div class="bike-row${!b.active?' retired-bike':''}">
+              <span class="br-id" style="${!b.active?'color:var(--text3)':''}">${b.id}</span>
+              <div class="br-info">
+                <div class="br-name">${b.name||''} ${b.key_number?'<span style="font-size:0.72rem;color:var(--text3)">🔑'+b.key_number+'</span>':''}</div>
+                <div class="br-detail">${[b.frame_size?b.frame_size+'cm':'', b.model||''].filter(Boolean).join(' · ')}</div>
+              </div>
+              <div class="br-status">
+                ${!b.active?'<span class="badge" style="background:var(--bg3);color:var(--text3)">Retired</span>':statusBadge(b.status)}
+                <button class="btn btn-sm btn-secondary" style="margin-left:0.4rem;padding:2px 8px;font-size:0.72rem" onclick="openEditBikeModal('${b.id}')">Edit</button>
+              </div>
+            </div>`).join('')}
+        </div>`;
+    }).join('')}
+  `;
+}
+
+async function renderAdminLog(el) {
+  const log = await api('/api/log?limit=100');
+  const iconMap={checkout:'out',return:'ret',bulk_return:'ret',repair_ticket:'issue',city:'city',bike_added:'ret',bike_retired:'issue',bike_edited:'ret'};
+  const labelMap={checkout:'OUT',return:'RTN',bulk_return:'RTN',repair_ticket:'FIX',city:'PIN',bike_added:'NEW',bike_retired:'RET',bike_edited:'EDT'};
+  el.innerHTML = `
+    <div class="bike-list">
+      ${log.map(l=>{
+        const d=JSON.parse(l.details||'{}');
+        const who=d.customer_name||d.assigned_to||'';
+        return `<div class="activity-row">
+          <div class="ar-icon ${iconMap[l.action]||'ret'}">${labelMap[l.action]||'···'}</div>
+          <div class="ar-body">
+            <div class="ar-main">${l.bike_id||''} ${who?'· '+who:''} <span style="color:var(--text3);font-size:0.78rem">${l.action}</span></div>
+            <div class="ar-sub">${l.actor} · ${fmtTime(l.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('')||'<div class="empty-state"><p>No activity yet</p></div>'}
+    </div>`;
+}
+
+async function openAddBikeModal() {
+  const types = await api('/api/fleet/types');
+  openModal(`
+    <div class="modal-title">Add new bike</div>
+    <div class="form-group">
+      <label class="form-label">Bike ID</label>
+      <input class="form-input" id="ab-id" placeholder="e.g. A38, CC6, E12" autocapitalize="characters"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Type</label>
+      <select class="form-select" id="ab-type">
+        ${types.map(t=>`<option value="${t.id}">${t.label}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Celebrity name (optional)</label>
+      <input class="form-input" id="ab-name" placeholder="e.g. Birgitte Hjort Sørensen"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Frame size (cm)</label>
+      <input class="form-input" id="ab-size" placeholder="e.g. 50"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Key number</label>
+      <input class="form-input" id="ab-key" placeholder="e.g. 4521"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Frame number</label>
+      <input class="form-input" id="ab-frame" placeholder="e.g. WAV22374U"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Model</label>
+      <input class="form-input" id="ab-model" placeholder="e.g. Winther 4"/>
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label class="form-label">Notes</label>
+      <input class="form-input" id="ab-notes" placeholder="Any notes..."/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddBike()">Add bike</button>
+    </div>`);
+}
+
+async function submitAddBike() {
+  const id = document.getElementById('ab-id')?.value?.trim().toUpperCase();
+  const type_id = document.getElementById('ab-type')?.value;
+  if (!id) { toast('Bike ID required', 'error'); return; }
+  try {
+    await api('/api/fleet/bikes', { method:'POST', body:{
+      id, type_id,
+      name: document.getElementById('ab-name')?.value?.trim()||null,
+      frame_size: document.getElementById('ab-size')?.value?.trim()||null,
+      key_number: document.getElementById('ab-key')?.value?.trim()||null,
+      frame_number: document.getElementById('ab-frame')?.value?.trim()||null,
+      model: document.getElementById('ab-model')?.value?.trim()||null,
+      notes: document.getElementById('ab-notes')?.value?.trim()||null,
+    }});
+    closeModal();
+    toast(`${id} added`, 'success');
+    renderAdminTab(document.getElementById('content'));
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function openEditBikeModal(id) {
+  const [b, types] = await Promise.all([api(`/api/bikes/${id}`), api('/api/fleet/types')]);
+  openModal(`
+    <div class="modal-title">Edit ${id}</div>
+    <div class="form-group">
+      <label class="form-label">Type</label>
+      <select class="form-select" id="eb-type">
+        ${types.map(t=>`<option value="${t.id}"${b.type_id===t.id?' selected':''}>${t.label}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Celebrity name</label>
+      <input class="form-input" id="eb-name" value="${b.name||''}"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Frame size (cm)</label>
+      <input class="form-input" id="eb-size" value="${b.frame_size||''}"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Key number</label>
+      <input class="form-input" id="eb-key" value="${b.key_number||''}"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Frame number</label>
+      <input class="form-input" id="eb-frame" value="${b.frame_number||''}"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Model</label>
+      <input class="form-input" id="eb-model" value="${b.model||''}"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input class="form-input" id="eb-notes" value="${b.notes||''}"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" onclick="retireBike('${id}',${!b.active})">${b.active?'Retire bike':'Reactivate'}</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditBike('${id}')">Save</button>
+    </div>`);
+}
+
+async function submitEditBike(id) {
+  try {
+    await api(`/api/fleet/bikes/${id}`, { method:'PATCH', body:{
+      type_id: document.getElementById('eb-type')?.value,
+      name: document.getElementById('eb-name')?.value?.trim()||null,
+      frame_size: document.getElementById('eb-size')?.value?.trim()||null,
+      key_number: document.getElementById('eb-key')?.value?.trim()||null,
+      frame_number: document.getElementById('eb-frame')?.value?.trim()||null,
+      model: document.getElementById('eb-model')?.value?.trim()||null,
+      notes: document.getElementById('eb-notes')?.value?.trim()||null,
+    }});
+    closeModal();
+    toast(`${id} updated`, 'success');
+    renderAdminTab(document.getElementById('content'));
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function retireBike(id, reactivate) {
+  if (!reactivate && !window.confirm(`Retire ${id}? It will be hidden from the fleet.`)) return;
+  try {
+    await api(`/api/fleet/bikes/${id}`, { method:'PATCH', body:{ active: reactivate }});
+    closeModal();
+    toast(`${id} ${reactivate?'reactivated':'retired'}`, 'success');
+    renderAdminTab(document.getElementById('content'));
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function iconAdmin(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><path d="M12 12v9"/><path d="m15 15-3 3-3-3"/></svg>`;}

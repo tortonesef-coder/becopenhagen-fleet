@@ -1120,3 +1120,7 @@ html, body {
   text-align: right;
   flex-shrink: 0;
 }
+
+/* ── Admin / fleet management ── */
+.retired-bike { opacity: 0.45; }
+.retired-bike .br-id { text-decoration: line-through; }

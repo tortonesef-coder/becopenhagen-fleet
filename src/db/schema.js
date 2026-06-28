@@ -150,6 +150,11 @@ function initSchema() {
     INSERT OR IGNORE INTO repair_priority_weights (id) VALUES (1);
   `);
 
+  // Migrations - update rental values to real prices
+  const rentalValues = {A:80,SA:80,AC:80,AT:80,B:80,BM:80,TB:120,MB:80,CC:480,E:240};
+  const updType = db.prepare('UPDATE bike_types SET rental_value_dkk=? WHERE id=? AND rental_value_dkk!=?');
+  Object.entries(rentalValues).forEach(([id,val]) => updType.run(val,id,val));
+
   // Migrations - add columns if they don't exist
   const cols = db.prepare("PRAGMA table_info(bike_status)").all().map(c => c.name);
   if (!cols.includes('location_lat')) db.exec("ALTER TABLE bike_status ADD COLUMN location_lat REAL");
