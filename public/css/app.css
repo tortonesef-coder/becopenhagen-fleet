@@ -1124,3 +1124,8 @@ html, body {
 /* ── Admin / fleet management ── */
 .retired-bike { opacity: 0.45; }
 .retired-bike .br-id { text-decoration: line-through; }
+
+/* ── Details/summary browse toggle ── */
+details > summary { user-select: none; }
+details[open] > summary span:first-child { transform: rotate(90deg); display: inline-block; }
+details summary::-webkit-details-marker { display: none; }

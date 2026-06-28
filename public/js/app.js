@@ -419,7 +419,7 @@ async function selectActionType(actionId) {
 
     ${renderActionDetails(actionId)}
 
-    <div class="section-title">Bikes${def.multi?' (add as many as needed)':''}</div>
+    <div class="section-title">${def.multi?'Which bikes? (add as many as needed)':'Which bike?'}</div>
     <div class="bike-adder">
       <div class="bike-adder-input-row">
         <input class="form-input" id="bike-adder-input" placeholder="Type bike ID..." autocapitalize="characters" autocomplete="off"/>
@@ -432,23 +432,28 @@ async function selectActionType(actionId) {
       <div class="bike-adder-tags" id="bike-adder-tags"></div>
     </div>
 
-    <div class="bike-quick-list" id="bike-quick-list">
-      ${bikes.map(b=>`
-        <div class="bql-item${state.action.bikes.includes(b.id)?' selected':''}" id="bql-${b.id}" onclick="toggleBike('${b.id}','${b.name||''}','${b.status}')">
-          <span class="bql-id">${b.id}</span>
-          <div class="bql-info">
-            <span class="bql-name">${b.name||b.type_label||''}</span>
-            <span class="bql-size">${sizeLabel(b)}</span>
-          </div>
-          <span class="bql-status">${statusBadge(b.status)}</span>
-        </div>`).join('')}
-    </div>
-
-    <div id="action-submit-area" style="padding:1rem 0 0.5rem">
+    <div id="action-submit-area" style="padding:0.5rem 0 0.75rem">
       <button class="btn btn-primary btn-full" onclick="submitActionNew()" id="action-submit-btn" disabled>
         ${submitLabel(actionId, 0)}
       </button>
-    </div>`;
+    </div>
+
+    <details style="margin-bottom:1rem">
+      <summary style="font-size:0.8rem;color:var(--text2);cursor:pointer;padding:0.5rem 0;list-style:none;display:flex;align-items:center;gap:0.4rem">
+        <span>▶</span> Browse all bikes
+      </summary>
+      <div class="bike-quick-list" id="bike-quick-list" style="margin-top:0.5rem">
+        ${bikes.map(b=>`
+          <div class="bql-item${state.action.bikes.includes(b.id)?' selected':''}" id="bql-${b.id}" onclick="toggleBike('${b.id}','${b.name||''}','${b.status}')">
+            <span class="bql-id">${b.id}</span>
+            <div class="bql-info">
+              <span class="bql-name">${b.name||b.type_label||''}</span>
+              <span class="bql-size">${sizeLabel(b)}</span>
+            </div>
+            <span class="bql-status">${statusBadge(b.status)}</span>
+          </div>`).join('')}
+      </div>
+    </details>`;
 
   const input = document.getElementById('bike-adder-input');
   input.addEventListener('keydown', e=>{
@@ -693,7 +698,7 @@ async function submitActionNew() {
         const canRent = document.getElementById('af-can-rent')?.checked?1:0;
         const problem=[cats.join(', '),note].filter(Boolean).join(' — ')||'Issue reported';
         await api('/api/repairs',{method:'POST',body:{
-          bike_id:bikeId, problem, problem_categories:JSON.stringify(cats), can_rent:canRent
+          bike_id:bikeId, problem, problem_categories:cats, can_rent:canRent
         }});
         if(!canRent) await api(`/api/bikes/${bikeId}/return`,{method:'POST',body:{new_status:'repair',note:problem}});
 
