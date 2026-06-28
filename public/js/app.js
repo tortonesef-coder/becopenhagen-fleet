@@ -455,12 +455,11 @@ function renderAction(c) {
 
 async function selectActionType(actionId) {
   state.action.type = actionId;
-  state.action.bikes = [];
-  // If a bike was preloaded from "Do something with this bike", add it now
-  if (state.action.preloaded) {
-    state.action.bikes = [state.action.preloaded];
-    state.action.preloaded = null;
+  // Apply preloaded bike if not already selected
+  if (state.action.preloaded && !state.action.bikes.includes(state.action.preloaded)) {
+    state.action.bikes.push(state.action.preloaded);
   }
+  state.action.preloaded = null;
   const def = ACTION_TYPES.find(a=>a.id===actionId);
   const c = document.getElementById('content');
 
@@ -600,8 +599,8 @@ function renderActionDetails(actionId) {
   if(actionId==='city') return `
     <div class="action-details-card">
       <div class="form-group">
-        <label class="form-label">Location / address</label>
-        <input class="form-input" id="af-address" placeholder="e.g. Nørreport Station"/>
+        <label class="form-label">Location / address <span style="color:var(--red)">*</span></label>
+        <input class="form-input" id="af-address" placeholder="e.g. Nørreport Station — required"/>
         <button class="btn btn-secondary btn-sm btn-full" style="margin-top:0.4rem" onclick="useMyLocation()">📍 Use my GPS location</button>
         <div id="af-coords" style="font-size:0.72rem;color:var(--text3);margin-top:4px;text-align:center"></div>
       </div>
@@ -756,6 +755,10 @@ async function submitActionNew() {
         const address = document.getElementById('af-address')?.value?.trim();
         const cats = getSelectedProblems();
         const loc = state.action.location;
+        if (!address && !loc) {
+          toast('Please enter a location or use GPS', 'error');
+          return;
+        }
         const note = cats.join(', ');
         await api(`/api/bikes/${bikeId}/city`,{method:'POST',body:{
           note, location_address:address,
