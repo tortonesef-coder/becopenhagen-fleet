@@ -93,7 +93,9 @@ router.get('/stats', (req, res) => {
     try { cats = JSON.parse(t.problem_categories || '[]'); } catch(e) {}
     if (!cats.length && t.problem_categories) cats = [t.problem_categories];
 
-    const hoursToResolve = t.resolved_at
+    const hoursToResolve = t.estimated_hours
+      ? parseFloat(t.estimated_hours)
+      : t.resolved_at
       ? (new Date(t.resolved_at + 'Z') - new Date(t.created_at + 'Z')) / 3600000
       : null;
 
@@ -118,8 +120,11 @@ router.get('/stats', (req, res) => {
 
   // Avg resolution time overall
   const resolved = db().prepare(`
-    SELECT ROUND(AVG((julianday(resolved_at) - julianday(created_at)) * 24), 1) as avg_hours,
-           COUNT(*) as total
+    SELECT
+      ROUND(AVG(CASE WHEN estimated_hours IS NOT NULL THEN estimated_hours
+        ELSE (julianday(resolved_at) - julianday(created_at)) * 24 END), 1) as avg_hours,
+      COUNT(*) as total,
+      ROUND(AVG(estimated_hours), 1) as avg_actual_hours
     FROM repair_tickets WHERE status='done' AND resolved_at IS NOT NULL
   `).get();
 
@@ -127,8 +132,8 @@ router.get('/stats', (req, res) => {
   const byType = db().prepare(`
     SELECT bt.label, bt.id as type_id,
       COUNT(*) as ticket_count,
-      ROUND(AVG(CASE WHEN rt.resolved_at IS NOT NULL
-        THEN (julianday(rt.resolved_at) - julianday(rt.created_at)) * 24
+      ROUND(AVG(CASE WHEN rt.estimated_hours IS NOT NULL THEN rt.estimated_hours
+        WHEN rt.resolved_at IS NOT NULL THEN (julianday(rt.resolved_at) - julianday(rt.created_at)) * 24
         ELSE NULL END), 1) as avg_hours
     FROM repair_tickets rt
     JOIN bikes b ON b.id = rt.bike_id
@@ -222,12 +227,13 @@ router.patch('/:id', (req, res) => {
 
 // ── POST /api/repairs/:id/resolve ─────────────────────────────────────────
 router.post('/:id/resolve', (req, res) => {
-  const { resolution_note, new_bike_status } = req.body;
+  const { resolution_note, new_bike_status, actual_hours } = req.body;
   const actor = req.session?.actor || 'unknown';
 
   db().prepare(`
-    UPDATE repair_tickets SET status='done', resolved_by=?, resolved_at=datetime('now'), resolution_note=? WHERE id=?
-  `).run(actor, resolution_note || null, req.params.id);
+    UPDATE repair_tickets SET status='done', resolved_by=?, resolved_at=datetime('now'),
+    resolution_note=?, estimated_hours=? WHERE id=?
+  `).run(actor, resolution_note || null, actual_hours || null, req.params.id);
 
   const ticket = db().prepare('SELECT bike_id FROM repair_tickets WHERE id=?').get(req.params.id);
   if (ticket && new_bike_status) {

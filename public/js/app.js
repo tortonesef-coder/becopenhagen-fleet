@@ -939,6 +939,15 @@ async function resolveTicket(ticketId, bikeId) {
       <textarea class="form-textarea" id="res-note" placeholder="Describe what was done..."></textarea>
     </div>
     <div class="form-group">
+      <label class="form-label">How long did it take?</label>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <input class="form-input" id="res-hours" type="number" min="0" step="0.5" placeholder="0" style="width:80px"/>
+        <span style="font-size:0.88rem;color:var(--text2)">hours</span>
+        <input class="form-input" id="res-minutes" type="number" min="0" max="59" step="5" placeholder="0" style="width:80px"/>
+        <span style="font-size:0.88rem;color:var(--text2)">minutes</span>
+      </div>
+    </div>
+    <div class="form-group">
       <label class="form-label">Set bike status to</label>
       <select class="form-select" id="res-status">
         <option value="available">Available</option>
@@ -954,8 +963,11 @@ async function resolveTicket(ticketId, bikeId) {
 async function submitResolve(ticketId, bikeId) {
   const note = document.getElementById('res-note')?.value?.trim();
   const status = document.getElementById('res-status')?.value;
+  const hours = parseFloat(document.getElementById('res-hours')?.value || 0);
+  const minutes = parseFloat(document.getElementById('res-minutes')?.value || 0);
+  const actual_hours = hours + (minutes / 60) || null;
   try {
-    await api(`/api/repairs/${ticketId}/resolve`, { method:'POST', body:{ resolution_note:note, new_bike_status:status }});
+    await api(`/api/repairs/${ticketId}/resolve`, { method:'POST', body:{ resolution_note:note, new_bike_status:status, actual_hours }});
     closeModal(); toast('Ticket resolved', 'success'); await renderTab('tickets');
   } catch(e) { toast(e.message, 'error'); }
 }
