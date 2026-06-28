@@ -858,7 +858,7 @@ async function startVoiceRecording(actionType) {
     isRecording = true;
     const btn = document.getElementById('voice-btn');
     if (btn) { btn.classList.add('recording'); btn.innerHTML = '<span class="voice-dot"></span> Recording... tap to stop'; }
-    setTimeout(() => { if (isRecording) stopVoiceRecording(actionType); }, 15000);
+    // Manual stop only — user taps again to stop
   } catch(e) {
     toast('Microphone access denied', 'error');
   }
