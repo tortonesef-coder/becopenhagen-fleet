@@ -1,0 +1,233 @@
+const express = require('express');
+const router = express.Router();
+const { getDb } = require('../db/schema');
+
+function db() { return getDb(); }
+
+router.get('/availability', (req, res) => {
+  const rows = db().prepare(`
+    SELECT bt.id as type_id, bt.label, bt.sort_order,
+      COUNT(b.id) as total,
+      SUM(CASE WHEN bs.status='available' THEN 1 ELSE 0 END) as available,
+      SUM(CASE WHEN bs.status='out' THEN 1 ELSE 0 END) as out,
+      SUM(CASE WHEN bs.status='reserved' THEN 1 ELSE 0 END) as reserved,
+      SUM(CASE WHEN bs.status='repair' THEN 1 ELSE 0 END) as repair,
+      SUM(CASE WHEN bs.status='missing' THEN 1 ELSE 0 END) as missing,
+      SUM(CASE WHEN bs.status='city' THEN 1 ELSE 0 END) as city
+    FROM bike_types bt
+    LEFT JOIN bikes b ON b.type_id=bt.id AND b.active=1
+    LEFT JOIN bike_status bs ON bs.bike_id=b.id
+    GROUP BY bt.id ORDER BY bt.sort_order
+  `).all();
+  const adultRows = rows.filter(r => ['A','AC','AT'].includes(r.type_id));
+  const adult_pool = {
+    total: adultRows.reduce((s,r)=>s+(r.total||0),0),
+    available: adultRows.reduce((s,r)=>s+(r.available||0),0)
+  };
+  res.json({ types: rows, adult_pool });
+});
+
+router.get('/bikes', (req, res) => {
+  const { type, status, search } = req.query;
+  let sql = `
+    SELECT b.*, bt.label as type_label,
+      bs.status, bs.assigned_to, bs.assignment_type,
+      bs.customer_name, bs.out_since, bs.return_due,
+      bs.fareharbor_booking_ref, bs.note as status_note,
+      bs.location_lat, bs.location_lng, bs.location_address,
+      bs.updated_by, bs.updated_at,
+      bc.has_child_seat, bc.has_toddler_seat,
+      (SELECT COUNT(*) FROM repair_tickets rt WHERE rt.bike_id=b.id AND rt.status!='done') as open_tickets
+    FROM bikes b
+    JOIN bike_types bt ON bt.id=b.type_id
+    LEFT JOIN bike_status bs ON bs.bike_id=b.id
+    LEFT JOIN bike_configurations bc ON bc.bike_id=b.id
+    WHERE b.active=1
+  `;
+  const params = [];
+  if (type)   { sql += ' AND b.type_id=?'; params.push(type); }
+  if (status) { sql += ' AND bs.status=?'; params.push(status); }
+  if (search) {
+    sql += ' AND (b.id LIKE ? OR b.name LIKE ? OR bs.customer_name LIKE ? OR bs.assigned_to LIKE ?)';
+    const s = `%${search}%`; params.push(s,s,s,s);
+  }
+  sql += ' ORDER BY b.type_id, b.id';
+  res.json(db().prepare(sql).all(...params));
+});
+
+router.get('/bikes/:id', (req, res) => {
+  const bike = db().prepare(`
+    SELECT b.*, bt.label as type_label,
+      bs.status, bs.assigned_to, bs.assignment_type,
+      bs.customer_name, bs.out_since, bs.return_due,
+      bs.fareharbor_booking_ref, bs.note as status_note,
+      bs.location_lat, bs.location_lng, bs.location_address,
+      bc.has_child_seat, bc.has_toddler_seat
+    FROM bikes b
+    JOIN bike_types bt ON bt.id=b.type_id
+    LEFT JOIN bike_status bs ON bs.bike_id=b.id
+    LEFT JOIN bike_configurations bc ON bc.bike_id=b.id
+    WHERE b.id=?
+  `).get(req.params.id);
+  if (!bike) return res.status(404).json({ error: 'Bike not found' });
+  const tickets = db().prepare(`SELECT * FROM repair_tickets WHERE bike_id=? ORDER BY created_at DESC LIMIT 10`).all(req.params.id);
+  const log = db().prepare(`SELECT * FROM action_log WHERE bike_id=? ORDER BY created_at DESC LIMIT 20`).all(req.params.id);
+  res.json({ ...bike, tickets, log });
+});
+
+router.post('/bikes/:id/checkout', (req, res) => {
+  const { assigned_to, assignment_type, customer_name, fareharbor_booking_ref, return_due, note, force } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  const bike = db().prepare('SELECT * FROM bikes WHERE id=? AND active=1').get(req.params.id);
+  if (!bike) return res.status(404).json({ error: 'Bike not found' });
+  const status = db().prepare('SELECT status FROM bike_status WHERE bike_id=?').get(req.params.id);
+  if (status?.status === 'out' && !force) return res.status(400).json({ error: 'Bike already checked out' });
+  if (status?.status === 'repair' && !force) return res.status(400).json({ error: 'Bike is in repair' });
+
+  db().prepare(`UPDATE bike_status SET status='out', assigned_to=?, assignment_type=?, customer_name=?,
+    fareharbor_booking_ref=?, out_since=datetime('now'), return_due=?, note=?,
+    location_lat=NULL, location_lng=NULL, location_address=NULL,
+    updated_at=datetime('now'), updated_by=? WHERE bike_id=?`)
+    .run(assigned_to||null, assignment_type||'rental', customer_name||null,
+      fareharbor_booking_ref||null, return_due||null, note||null, actor, req.params.id);
+
+  db().prepare(`INSERT INTO action_log (actor,action,bike_id,booking_ref,details) VALUES (?,?,?,?,?)`)
+    .run(actor, 'checkout', req.params.id, fareharbor_booking_ref||null,
+      JSON.stringify({assigned_to, assignment_type, customer_name, note}));
+  res.json({ ok: true });
+});
+
+router.post('/bikes/:id/return', (req, res) => {
+  const { note, new_status } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  const finalStatus = new_status || 'available';
+  const prev = db().prepare('SELECT * FROM bike_status WHERE bike_id=?').get(req.params.id);
+
+  db().prepare(`UPDATE bike_status SET status=?, assigned_to=NULL, assignment_type=NULL,
+    customer_name=NULL, fareharbor_booking_ref=NULL, out_since=NULL, return_due=NULL,
+    location_lat=NULL, location_lng=NULL, location_address=NULL,
+    note=?, updated_at=datetime('now'), updated_by=? WHERE bike_id=?`)
+    .run(finalStatus, note||null, actor, req.params.id);
+
+  db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
+    .run(actor, 'return', req.params.id,
+      JSON.stringify({prev_assigned_to: prev?.assigned_to, note, new_status: finalStatus}));
+  res.json({ ok: true });
+});
+
+router.post('/bikes/:id/city', (req, res) => {
+  const { note, location_lat, location_lng, location_address, problem_categories, create_ticket } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  const bike = db().prepare('SELECT * FROM bikes WHERE id=? AND active=1').get(req.params.id);
+  if (!bike) return res.status(404).json({ error: 'Bike not found' });
+
+  db().prepare(`UPDATE bike_status SET status='city', assigned_to='In city', assignment_type='city',
+    customer_name=NULL, out_since=datetime('now'), note=?,
+    location_lat=?, location_lng=?, location_address=?,
+    updated_at=datetime('now'), updated_by=? WHERE bike_id=?`)
+    .run(note||null, location_lat||null, location_lng||null, location_address||null, actor, req.params.id);
+
+  db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
+    .run(actor, 'city', req.params.id,
+      JSON.stringify({note, location_lat, location_lng, location_address, problem_categories}));
+
+  if (create_ticket) {
+    const cats = Array.isArray(problem_categories) ? problem_categories : [];
+    const problem = [cats.join(', '), note].filter(Boolean).join(' — ') || 'Left in city';
+    db().prepare(`INSERT INTO repair_tickets (bike_id,reported_by,problem,problem_categories,can_rent,status) VALUES (?,?,?,?,0,'open')`)
+      .run(req.params.id, actor, problem, JSON.stringify(cats));
+  }
+  res.json({ ok: true });
+});
+
+router.post('/bikes/bulk-return', (req, res) => {
+  const { bike_ids, note } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  if (!Array.isArray(bike_ids) || bike_ids.length === 0)
+    return res.status(400).json({ error: 'No bike IDs provided' });
+  const results = [];
+  const upd = db().prepare(`UPDATE bike_status SET status='available', assigned_to=NULL, assignment_type=NULL,
+    customer_name=NULL, fareharbor_booking_ref=NULL, out_since=NULL, return_due=NULL,
+    location_lat=NULL, location_lng=NULL, location_address=NULL,
+    note=NULL, updated_at=datetime('now'), updated_by=? WHERE bike_id=?`);
+  const log = db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`);
+  for (const id of bike_ids) {
+    const bike = db().prepare('SELECT id FROM bikes WHERE id=? AND active=1').get(id);
+    if (!bike) { results.push({id, ok:false, error:'Not found'}); continue; }
+    upd.run(actor, id);
+    log.run(actor, 'bulk_return', id, JSON.stringify({note}));
+    results.push({id, ok:true});
+  }
+  res.json({ results });
+});
+
+router.get('/today', (req, res) => {
+  const today = new Date().toISOString().substring(0,10);
+  const checkouts = db().prepare(`
+    SELECT al.*, b.type_id, bt.label as type_label
+    FROM action_log al
+    LEFT JOIN bikes b ON b.id=al.bike_id
+    LEFT JOIN bike_types bt ON bt.id=b.type_id
+    WHERE al.action IN ('checkout','bulk_return','return','city','repair_ticket')
+    AND date(al.created_at)=? ORDER BY al.created_at DESC
+  `).all(today);
+  const pending = db().prepare(`SELECT * FROM pending_assignments WHERE date(booking_date)=? AND status='pending' ORDER BY start_time`).all(today);
+  res.json({ checkouts, pending });
+});
+
+router.get('/log', (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const rows = db().prepare(`
+    SELECT al.*, b.type_id, bt.label as type_label
+    FROM action_log al
+    LEFT JOIN bikes b ON b.id=al.bike_id
+    LEFT JOIN bike_types bt ON bt.id=b.type_id
+    ORDER BY al.created_at DESC LIMIT ?
+  `).all(limit);
+  res.json(rows);
+});
+
+router.get('/team', (req, res) => {
+  res.json(db().prepare('SELECT * FROM team_members WHERE active=1 ORDER BY role,name').all());
+});
+
+router.get('/repairs', (req, res) => {
+  const { status } = req.query;
+  let sql = `SELECT rt.*, b.type_id FROM repair_tickets rt JOIN bikes b ON b.id=rt.bike_id WHERE 1=1`;
+  const params = [];
+  if (status) { sql += ' AND rt.status=?'; params.push(status); }
+  sql += ' ORDER BY rt.created_at DESC';
+  res.json(db().prepare(sql).all(...params));
+});
+
+router.post('/repairs', (req, res) => {
+  const { bike_id, problem, problem_categories, can_rent } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  if (!bike_id || !problem) return res.status(400).json({ error: 'bike_id and problem required' });
+  const cats = Array.isArray(problem_categories) ? problem_categories :
+    (typeof problem_categories === 'string' ? problem_categories : '[]');
+  const result = db().prepare(`INSERT INTO repair_tickets (bike_id,reported_by,problem,problem_categories,can_rent,status) VALUES (?,?,?,?,?,'open')`)
+    .run(bike_id, actor, problem, typeof cats === 'string' ? cats : JSON.stringify(cats), can_rent?1:0);
+  db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
+    .run(actor, 'repair_ticket', bike_id,
+      JSON.stringify({problem, can_rent, ticket_id: result.lastInsertRowid}));
+  res.json({ ok:true, ticket_id: result.lastInsertRowid });
+});
+
+router.post('/repairs/:id/resolve', (req, res) => {
+  const { resolution_note, new_bike_status } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  db().prepare(`UPDATE repair_tickets SET status='done', resolved_by=?, resolved_at=datetime('now'), resolution_note=? WHERE id=?`)
+    .run(actor, resolution_note||null, req.params.id);
+  const ticket = db().prepare('SELECT bike_id FROM repair_tickets WHERE id=?').get(req.params.id);
+  if (ticket && new_bike_status) {
+    db().prepare(`UPDATE bike_status SET status=?, updated_at=datetime('now'), updated_by=? WHERE bike_id=?`)
+      .run(new_bike_status, actor, ticket.bike_id);
+    db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
+      .run(actor, 'ticket_resolved', ticket.bike_id,
+        JSON.stringify({ticket_id: req.params.id, resolution_note, new_bike_status}));
+  }
+  res.json({ ok: true });
+});
+
+module.exports = router;

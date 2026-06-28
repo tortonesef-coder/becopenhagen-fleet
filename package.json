@@ -1,0 +1,15 @@
+{
+  "name": "becopenhagen-fleet",
+  "version": "1.0.0",
+  "description": "BeCopenhagen bike fleet tracker",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --experimental-sqlite src/server.js",
+    "dev": "node --experimental-sqlite --watch src/server.js",
+    "seed": "node --experimental-sqlite src/db/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.18.3",
+    "express-session": "^1.18.0"
+  }
+}
