@@ -818,7 +818,15 @@ function renderTicketQueue(tickets) {
       <div class="tk-meta">
         <span>⏱ ${ageLabel} waiting</span>
         <span>· ${t.reported_by}</span>
-        ${t.rental_value_dkk?`<span>· ${Math.round(t.rental_value_dkk * (t.hours_waiting/24))} DKK lost</span>`:''}
+        ${(()=>{
+          if(!t.rental_value_dkk||t.hours_waiting<1) return '';
+          // Only meaningful if bike is off fleet (can_rent=0)
+          if(t.can_rent) return '';
+          const daysWaiting = t.hours_waiting / 24;
+          // We don't have scarcity here so just show raw opportunity cost with a note
+          const lost = Math.round(t.rental_value_dkk * daysWaiting);
+          return lost > 0 ? `<span>· ~${lost} DKK opportunity cost</span>` : '';
+        })()}
       </div>
       <div class="tk-complexity-row">
         <span style="font-size:0.75rem;color:var(--text3)">Complexity</span>

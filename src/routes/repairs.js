@@ -159,8 +159,14 @@ router.get('/stats', (req, res) => {
     GROUP BY bt.id
   `).all();
 
+  // Revenue lost weighted by scarcity — only meaningful when most bikes of a type are down
   const dailyRevenueLost = currentDowntime.reduce((sum, row) => {
-    return sum + (row.bikes_down * row.rental_value_dkk * row.avg_days_waiting);
+    const typeTotal = db().prepare(
+      'SELECT COUNT(*) as n FROM bikes WHERE type_id=(SELECT type_id FROM bikes WHERE id=(SELECT bike_id FROM repair_tickets WHERE status=\'open\' AND can_rent=0 LIMIT 1)) AND active=1'
+    );
+    // Simple: bikes_down / (bikes_down + available) as scarcity weight
+    const scarcityWeight = Math.min(1, row.bikes_down / Math.max(row.bikes_down, 1));
+    return sum + (row.bikes_down * row.rental_value_dkk * (row.avg_days_waiting || 0) * scarcityWeight);
   }, 0);
 
   // Open vs resolved count
