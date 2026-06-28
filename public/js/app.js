@@ -433,7 +433,7 @@ async function selectActionType(actionId) {
     </div>
 
     <div id="action-submit-area" style="padding:0.5rem 0 0.75rem">
-      <button class="btn btn-primary btn-full" onclick="submitActionNew()" id="action-submit-btn" disabled>
+      <button class="btn btn-primary btn-full" onclick="submitActionNew()" id="action-submit-btn">
         ${submitLabel(actionId, 0)}
       </button>
     </div>
@@ -636,9 +636,6 @@ function updateSubmitBtn() {
   const btn = document.getElementById('action-submit-btn');
   if(!btn) return;
   const count = state.action.bikes.length;
-  const def = ACTION_TYPES.find(a=>a.id===state.action.type);
-  const needsBikes = true; // all actions need at least one bike
-  btn.disabled = count === 0;
   btn.textContent = submitLabel(state.action.type, count);
 }
 
@@ -653,8 +650,12 @@ function useMyLocation() {
 }
 
 async function submitActionNew() {
+  // Auto-add whatever is typed in the input field before submitting
+  const input = document.getElementById('bike-adder-input');
+  if (input?.value?.trim()) addBikeById();
+
   const {type, bikes} = state.action;
-  if(!type||bikes.length===0){toast('Pick at least one bike','error');return;}
+  if(!type||bikes.length===0){toast('Type a bike ID and tap Add first','error');return;}
   const actor = state.actor?.id||'unknown';
 
   try {
