@@ -53,36 +53,53 @@ async function api(path, opts={}) {
 
 // ── Toast + Undo ──────────────────────────────────────────────────────────
 let _undoFn = null;
-let _undoTimer = null;
+let _toastTimer = null;
 
-function toast(msg, type='', undoFn=null) {
-  const el = document.getElementById('toast');
-  clearTimeout(el._t);
-  clearTimeout(_undoTimer);
+function toast(msg, type="", undoFn=null) {
+  const el = document.getElementById("toast");
+  clearTimeout(_toastTimer);
   _undoFn = undoFn;
-
   if (undoFn) {
     el.innerHTML = `<span>${msg}</span><button class="toast-undo-btn" onclick="triggerUndo()">Undo</button>`;
   } else {
     el.textContent = msg;
   }
-  el.className = 'toast ' + type + (undoFn ? ' has-undo' : '');
-  el._t = setTimeout(() => { el.classList.add('hidden'); _undoFn = null; }, 5000);
+  el.className = "toast " + type + (undoFn ? " has-undo" : "");
+  el.classList.remove("hidden");
+  _toastTimer = setTimeout(() => dismissToast(), undoFn ? 5000 : 2800);
+}
+
+function dismissToast() {
+  clearTimeout(_toastTimer);
+  document.getElementById("toast").classList.add("hidden");
+  _undoFn = null;
 }
 
 async function triggerUndo() {
-  if (!_undoFn) return;
+  clearTimeout(_toastTimer);
   const fn = _undoFn;
   _undoFn = null;
-  document.getElementById('toast').classList.add('hidden');
+  document.getElementById("toast").classList.add("hidden");
   try {
     await fn();
-    toast('Undone', 'success');
+    toast("Undone ✓", "success");
   } catch(e) {
-    toast('Could not undo: ' + e.message, 'error');
+    toast("Could not undo: " + e.message, "error");
   }
 }
 
+// Swipe to dismiss toast
+(function() {
+  let startX = 0;
+  document.addEventListener("touchstart", e => {
+    if (!document.getElementById("toast").classList.contains("hidden") && e.target.closest("#toast")) startX = e.touches[0].clientX;
+  }, {passive:true});
+  document.addEventListener("touchend", e => {
+    if (!startX) return;
+    if (Math.abs(e.changedTouches[0].clientX - startX) > 60) dismissToast();
+    startX = 0;
+  }, {passive:true});
+})();
 // ── Modal ─────────────────────────────────────────────────────────────────
 function openModal(html) {
   document.getElementById('modal-content').innerHTML=html;
@@ -840,7 +857,16 @@ async function submitActionNew() {
     }
 
     toast(`Done — ${label.toLowerCase()}`, 'success', undoFn);
-    renderAction(document.getElementById('content'));
+
+    // After return actions, clear selection and go to Today
+    if (['return', 'missing', 'city'].includes(type)) {
+      state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
+      await renderTab('today');
+    } else {
+      // For checkouts, clear selection but stay on action tab ready for next
+      state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
+      renderAction(document.getElementById('content'));
+    }
 
   } catch(e) { toast(e.message,'error'); }
 }
