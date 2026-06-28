@@ -359,7 +359,7 @@ async function showBike(id) {
     ${b.status==='out'?`Out with ${b.customer_name||b.assigned_to||'unknown'} · ${b.assignment_type||''}${b.out_since?' · since '+fmtTime(b.out_since):''}${b.fareharbor_booking_ref?' · #'+b.fareharbor_booking_ref:''}`:
       b.status==='repair'?`In repair${b.note?': '+b.note:''}`:
       b.status==='missing'?`Missing${b.note?': '+b.note:''}`:
-      b.status==='city'?`Left in city${b.note?': '+b.note:''}${b.location_address?' · '+b.location_address:''}`:b.status}
+      b.status==='city'?`Left in city${b.location_address?' · '+b.location_address:''}${b.note?'<br><small>'+b.note+'</small>':''}${b.location_lat&&b.location_lng?'<br><a href="https://www.openstreetmap.org/?mlat='+b.location_lat+'&mlon='+b.location_lng+'&zoom=17" target="_blank" style="font-size:0.78rem;color:#1a5fa8">📍 View on map</a>':'<br><small style="color:#a8a49f">No GPS recorded</small>'}`:b.status}
   </div>`:'';
   const log=(b.log||[]).slice(0,5).map(l=>`
     <div class="detail-row">
@@ -736,10 +736,12 @@ async function submitActionNew() {
         const note = document.getElementById('af-note')?.value?.trim();
         const canRent = document.getElementById('af-can-rent')?.checked?1:0;
         const problem=[cats.join(', '),note].filter(Boolean).join(' — ')||'Issue reported';
-        await api('/api/repairs',{method:'POST',body:{
+        const repRes = await api('/api/repairs',{method:'POST',body:{
           bike_id:bikeId, problem, problem_categories:cats, can_rent:canRent
         }});
         if(!canRent) await api(`/api/bikes/${bikeId}/return`,{method:'POST',body:{new_status:'repair',note:problem}});
+        // Store ticket ID for undo
+        if (repRes?.ticket_id) state.action._lastTicketId = repRes.ticket_id;
 
       } else if(type==='missing') {
         const note = document.getElementById('af-note')?.value?.trim();
@@ -765,21 +767,41 @@ async function submitActionNew() {
       };
     } else if (['rental','tour','borrowed'].includes(type)) {
       undoFn = async () => {
-        for (const id of bikes) await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+        for (const id of bikes) {
+          await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+          await api(`/api/log/undo`, {method:'POST', body:{bike_id:id, actions:['checkout','return'], limit:2}});
+        }
         renderAction(document.getElementById('content'));
       };
     } else if (type === 'missing') {
       undoFn = async () => {
-        for (const id of bikes) await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+        for (const id of bikes) {
+          await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+          await api(`/api/log/undo`, {method:'POST', body:{bike_id:id, actions:['return','missing'], limit:2}});
+        }
         renderAction(document.getElementById('content'));
       };
     } else if (type === 'city') {
       undoFn = async () => {
-        for (const id of bikes) await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+        for (const id of bikes) {
+          await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+          await api(`/api/log/undo`, {method:'POST', body:{bike_id:id, actions:['city','return'], limit:2}});
+        }
         renderAction(document.getElementById('content'));
       };
     }
-    // ticket undo handled separately in submitResolve
+    // Undo for ticket creation
+    if (type === 'ticket' && state.action._lastTicketId) {
+      const tid = state.action._lastTicketId;
+      undoFn = async () => {
+        await api(`/api/repairs/${tid}/delete`, {method:'DELETE'});
+        for (const id of bikes) {
+          const bs = await api(`/api/bikes/${id}`);
+          if (bs.status === 'repair') await api(`/api/bikes/${id}/return`,{method:'POST',body:{new_status:'available'}});
+        }
+        await renderTab('action');
+      };
+    }
 
     toast(`Done — ${label.toLowerCase()}`, 'success', undoFn);
     renderAction(document.getElementById('content'));

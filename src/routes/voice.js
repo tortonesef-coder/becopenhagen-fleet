@@ -65,13 +65,20 @@ The full list of active bikes is: ${bikeIds}.
 Return ONLY a JSON object like: {"bike_ids": ["A3", "CC2", "TB5"], "confidence": "high"}
 If no bike IDs are found, return: {"bike_ids": [], "confidence": "low"}
 People may say bike IDs in various ways: "A three", "alpha 3", "CC two", "cargo two", "touring five", etc.
-Common speech patterns:
-- "A" bikes: "A" + number, or "adult" + number
-- "CC" bikes: "cargo" + number, or "christiania" + number  
-- "TB" bikes: "touring" + number, or "TB" + number
-- "E" bikes: "electric" + number, or "E" + number
-- "SA" bikes: "small" + number, or "SA" + number
-Extract all bike IDs mentioned. Do not add bikes not mentioned.`,
+Common speech patterns — map these to bike IDs:
+- "A three" or "alpha 3" or "adult 3" → A3
+- "A seven" → A7, "A eight" → A8
+- "CC two" or "cargo two" or "cargo bike 2" → CC2
+- "TB five" or "touring five" or "touring bike 5" or "touring bike number 5" → TB5
+- "electric two" or "E two" → E2
+- "small adult one" or "SA one" → SA1
+- "AC one" or "child seat one" → AC1
+- "AT one" or "toddler one" → AT1
+- "mountain bike three" or "M three" → M3
+- Numbers can be spoken as words: "seven" → 7, "five" → 5, "twelve" → 12
+- People often say "and" between IDs: "A7, A8, and TB5" → [A7, A8, TB5]
+- Ignore filler words like "and", "also", "plus", "then"
+Extract ALL bike IDs mentioned. Do not add bikes not mentioned. Do not guess.`,
         messages: [{ role: 'user', content: `Action type: ${action_type || 'unknown'}\nTranscript: "${transcript}"\n\nExtract all bike IDs mentioned.` }],
       }),
     });

@@ -192,4 +192,16 @@ router.get('/team', (req, res) => {
 });
 
 
+// POST /api/log/undo — delete recent log entries for a bike (used by undo)
+router.post('/log/undo', (req, res) => {
+  const { bike_id, actions, limit } = req.body;
+  if (!bike_id) return res.status(400).json({ error: 'bike_id required' });
+  const n = limit || 2;
+  const rows = db().prepare(
+    `SELECT id FROM action_log WHERE bike_id=? ORDER BY created_at DESC LIMIT ?`
+  ).all(bike_id, n);
+  rows.forEach(r => db().prepare('DELETE FROM action_log WHERE id=?').run(r.id));
+  res.json({ ok: true, deleted: rows.length });
+});
+
 module.exports = router;
