@@ -201,7 +201,11 @@ async function returnBorrowedBikes() {
       await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Returned by borrower'}});
     }
     window._borrowedReminderIds = [];
-    toast(`${ids.length} bike${ids.length>1?'s':''} returned`, 'success');
+    const returnedIds = [...ids];
+    toast(`${ids.length} bike${ids.length>1?'s':''} returned`, 'success', async () => {
+      for(const id of returnedIds) await api(`/api/bikes/${id}/checkout`,{method:'POST',body:{assignment_type:'borrowed',assigned_to:state.actor?.name||'',force:true}});
+      renderTab(state.currentTab);
+    });
     renderTab(state.currentTab);
   } catch(e) {
     toast('Error: ' + e.message, 'error');
@@ -1352,7 +1356,10 @@ async function submitAddBike() {
       notes: document.getElementById('ab-notes')?.value?.trim()||null,
     }});
     closeModal();
-    toast(`${id} added`, 'success');
+    toast(`${id} added`, 'success', async () => {
+      await api(`/api/fleet/bikes/${id}`, {method:'PATCH', body:{active:false}});
+      renderAdminTab(document.getElementById('content'));
+    });
     renderAdminTab(document.getElementById('content'));
   } catch(e) { toast(e.message, 'error'); }
 }
@@ -1409,8 +1416,17 @@ async function submitEditBike(id) {
       model: document.getElementById('eb-model')?.value?.trim()||null,
       notes: document.getElementById('eb-notes')?.value?.trim()||null,
     }});
+    // Snapshot previous values for undo
+    const _prevBike = await api(`/api/bikes/${id}`);
     closeModal();
-    toast(`${id} updated`, 'success');
+    toast(`${id} updated`, 'success', async () => {
+      await api(`/api/fleet/bikes/${id}`, {method:'PATCH', body:{
+        type_id:_prevBike.type_id, name:_prevBike.name, frame_size:_prevBike.frame_size,
+        key_number:_prevBike.key_number, frame_number:_prevBike.frame_number,
+        model:_prevBike.model, notes:_prevBike.notes
+      }});
+      renderAdminTab(document.getElementById('content'));
+    });
     renderAdminTab(document.getElementById('content'));
   } catch(e) { toast(e.message, 'error'); }
 }
@@ -1420,7 +1436,10 @@ async function retireBike(id, reactivate) {
   try {
     await api(`/api/fleet/bikes/${id}`, { method:'PATCH', body:{ active: reactivate }});
     closeModal();
-    toast(`${id} ${reactivate?'reactivated':'retired'}`, 'success');
+    toast(`${id} ${reactivate?'reactivated':'retired'}`, 'success', async () => {
+      await api(`/api/fleet/bikes/${id}`, {method:'PATCH', body:{active: reactivate ? false : true}});
+      renderAdminTab(document.getElementById('content'));
+    });
     renderAdminTab(document.getElementById('content'));
   } catch(e) { toast(e.message, 'error'); }
 }
