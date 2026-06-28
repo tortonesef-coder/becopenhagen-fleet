@@ -369,8 +369,7 @@ async function showBike(id) {
 const ACTION_TYPES = [
   { id:'return',       emoji:'✅', label:'Return',        sub:'Mark bikes back in shop',   multi:true  },
   { id:'rental',       emoji:'🚲', label:'Rental',        sub:'Customer walk-in or online', multi:true  },
-  { id:'tour',         emoji:'🗺️', label:'Group tour',    sub:'Guide takes the fleet out',  multi:true  },
-  { id:'private_tour', emoji:'⭐', label:'Private tour',  sub:'Assigned bikes for a group', multi:true  },
+  { id:'tour',         emoji:'🗺️', label:'Tour',          sub:'Guide or private, any group', multi:true  },
   { id:'borrowed',     emoji:'🤝', label:'Borrowed',      sub:'Staff personal use',         multi:false },
   { id:'city',         emoji:'📍', label:'Left in city',  sub:'Broke down on tour',         multi:false },
   { id:'ticket',       emoji:'🔧', label:'Report issue',  sub:'Repair ticket',              multi:false },
@@ -488,27 +487,20 @@ function renderActionDetails(actionId) {
   if(actionId==='tour') return `
     <div class="action-details-card">
       <div class="form-group">
-        <label class="form-label">Guide</label>
-        <input class="form-input" id="af-name" value="${state.actor?.name||''}" placeholder="Guide name"/>
+        <label class="form-label">Guide / customer name</label>
+        <input class="form-input" id="af-name" value="${state.actor?.name||''}" placeholder="Name"/>
       </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">Tour (optional)</label>
+      <div class="form-group">
+        <label class="form-label">Tour type (optional)</label>
         <select class="form-select" id="af-tour-type">
           <option value="">— select —</option>
           <option>A3 Architecture</option>
           <option>L3 History</option>
           <option>F3 Food</option>
           <option>H3 New History</option>
+          <option>Private</option>
           <option>Other</option>
         </select>
-      </div>
-    </div>`;
-
-  if(actionId==='private_tour') return `
-    <div class="action-details-card">
-      <div class="form-group">
-        <label class="form-label">Customer name</label>
-        <input class="form-input" id="af-name" placeholder="Name"/>
       </div>
       <div class="form-group" style="margin-bottom:0">
         <label class="form-label">FareHarbor booking ref (optional)</label>
@@ -569,7 +561,7 @@ function submitLabel(actionId, count) {
   const n = count > 0 ? ` ${count} bike${count>1?'s':''}` : '';
   const labels = {
     return:`Return${n}`, rental:`Check out${n}`, tour:`Start tour${n}`,
-    private_tour:`Assign${n}`, borrowed:`Mark borrowed${n}`,
+    borrowed:`Mark borrowed${n}`,
     city:'Mark left in city', ticket:'Create repair ticket', missing:'Mark missing',
   };
   return labels[actionId]||'Submit';
@@ -580,7 +572,7 @@ function toggleBike(id, name, currentStatus) {
   if(!def) return;
 
   // Warn if already out and checking out again
-  const isCheckout = ['rental','tour','private_tour','borrowed','city'].includes(state.action.type);
+  const isCheckout = ['rental','tour','borrowed','city'].includes(state.action.type);
   if(isCheckout && currentStatus==='out' && !state.action.bikes.includes(id)) {
     if(!confirm(`${id} is already marked as out. Add anyway?`)) return;
   }
@@ -663,7 +655,7 @@ async function submitActionNew() {
         const newStatus = document.getElementById('af-ret-status')?.value||'available';
         await api(`/api/bikes/${bikeId}/return`,{method:'POST',body:{new_status:newStatus}});
 
-      } else if(['rental','tour','private_tour'].includes(type)) {
+      } else if(['rental','tour'].includes(type)) {
         const name = document.getElementById('af-name')?.value?.trim();
         const due = document.getElementById('af-due')?.value;
         const ref = document.getElementById('af-ref')?.value?.trim();
