@@ -163,11 +163,23 @@ async function checkBorrowedReminder() {
   if(!state.actor) return;
   const todayKey=`bc_borrowed_${state.actor.id}_${new Date().toISOString().substring(0,10)}`;
   if(localStorage.getItem(todayKey)) return;
-  const bikes=await api('/api/bikes?status=out');
-  const borrowed=bikes.filter(b=>b.assignment_type==='borrowed'&&(b.assigned_to===state.actor.id||b.assigned_to===state.actor.name));
-  if(borrowed.length===0) return;
+
+  // Always check live status — bike may have been returned or re-assigned by someone else
+  const allOut = await api('/api/bikes?status=out');
+  const borrowed = allOut.filter(b =>
+    b.assignment_type === 'borrowed' &&
+    (b.assigned_to === state.actor.id || b.assigned_to === state.actor.name)
+  );
+
+  // If nothing is borrowed by this person, mark today as shown and stop
+  if(borrowed.length === 0) { localStorage.setItem(todayKey,'1'); return; }
+
   localStorage.setItem(todayKey,'1');
-  const list=borrowed.map(b=>`<strong>${b.id}</strong>${b.name?' ('+b.name+')':''}`).join(', ');
+
+  // Store borrowed IDs in module scope so the button can access them safely
+  window._borrowedReminderIds = borrowed.map(b => b.id);
+
+  const list = borrowed.map(b=>`<strong>${b.id}</strong>${b.name?' ('+b.name+')':''}`).join(', ');
   openModal(`
     <div style="text-align:center;padding:0.5rem 0 0">
       <div style="font-size:2.5rem;margin-bottom:0.5rem">🚲</div>
@@ -176,15 +188,24 @@ async function checkBorrowedReminder() {
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal()">Not yet</button>
-      <button class="btn btn-success" onclick="returnBorrowedBikes(${JSON.stringify(borrowed.map(b=>b.id))})">Yes, returned</button>
+      <button class="btn btn-success" onclick="returnBorrowedBikes()">Yes, returned</button>
     </div>`);
 }
 
-async function returnBorrowedBikes(ids) {
+async function returnBorrowedBikes() {
+  const ids = window._borrowedReminderIds || [];
+  if(ids.length === 0) { closeModal(); return; }
   closeModal();
-  for(const id of ids) await api(`/api/bikes/${id}/return`,{method:'POST',body:{new_status:'available',note:'Returned by borrower'}});
-  toast(`${ids.length} bike${ids.length>1?'s':''} returned`,'success');
-  renderTab(state.currentTab);
+  try {
+    for(const id of ids) {
+      await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Returned by borrower'}});
+    }
+    window._borrowedReminderIds = [];
+    toast(`${ids.length} bike${ids.length>1?'s':''} returned`, 'success');
+    renderTab(state.currentTab);
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
