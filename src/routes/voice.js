@@ -59,27 +59,41 @@ router.post('/transcribe', async (req, res) => {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 256,
-        system: `You extract bike IDs from speech transcripts for a bike rental company.
-Valid bike IDs follow these patterns: A1-A37, SA1-SA7, AC1-AC5, AT1-AT5, B1-B5, BM1-BM4, TB1-TB18, M3-M7, CC1-CC5, E2-E11.
-The full list of active bikes is: ${bikeIds}.
-Return ONLY a JSON object like: {"bike_ids": ["A3", "CC2", "TB5"], "confidence": "high"}
-If no bike IDs are found, return: {"bike_ids": [], "confidence": "low"}
-People may say bike IDs in various ways: "A three", "alpha 3", "CC two", "cargo two", "touring five", etc.
-Common speech patterns — map these to bike IDs:
-- "A three" or "alpha 3" or "adult 3" → A3
-- "A seven" → A7, "A eight" → A8
-- "CC two" or "cargo two" or "cargo bike 2" → CC2
-- "TB five" or "touring five" or "touring bike 5" or "touring bike number 5" → TB5
-- "electric two" or "E two" → E2
-- "small adult one" or "SA one" → SA1
-- "AC one" or "child seat one" → AC1
-- "AT one" or "toddler one" → AT1
-- "mountain bike three" or "M three" → M3
-- Numbers can be spoken as words: "seven" → 7, "five" → 5, "twelve" → 12
-- People often say "and" between IDs: "A7, A8, and TB5" → [A7, A8, TB5]
-- Ignore filler words like "and", "also", "plus", "then"
-Extract ALL bike IDs mentioned. Do not add bikes not mentioned. Do not guess.`,
-        messages: [{ role: 'user', content: `Action type: ${action_type || 'unknown'}\nTranscript: "${transcript}"\n\nExtract all bike IDs mentioned.` }],
+        system: `You extract bike IDs from speech transcripts for a bike rental company in Copenhagen.
+
+BIKE TYPE PREFIXES:
+- A = adult bike (also called "adult", "city bike", just a number alone like "twelve")
+- SA = small adult bike (also "small adult", "small bike")
+- CC = cargo bike / Christiania bike (also "cargo", "cargo bike", "Christiania")
+- TB = touring bike (also "touring", "touring bike")
+- E = electric bike (also "electric", "e-bike")
+- AC = adult with child seat (also "child seat", "AC")
+- AT = adult with toddler seat (also "toddler", "toddler seat", "AT")
+- B = kids bike small (also "kids bike", "child bike", "children's bike")
+- BM = kids bike medium
+- M or MB = mountain bike (also "mountain", "mountain bike")
+
+EXAMPLES — always follow this pattern:
+- "A12" or "A twelve" or "adult twelve" or "twelve" → A12
+- "A7" or "A seven" or "adult seven" → A7
+- "TB4" or "TB four" or "touring bike 4" or "touring four" or "touring bike four" → TB4
+- "TB5" or "touring bike 5" or "touring five" → TB5
+- "CC2" or "cargo bike 2" or "cargo two" or "cargo bike two" or "Christiania two" → CC2
+- "CC1" or "cargo one" or "cargo bike one" → CC1
+- "E2" or "electric two" or "electric bike 2" → E2
+- "SA1" or "small adult one" or "small one" → SA1
+- "AC1" or "child seat one" → AC1
+- "AT1" or "toddler one" → AT1
+- "M3" or "mountain three" or "mountain bike 3" → M3
+
+RULES:
+- Numbers can be words: "four" → 4, "twelve" → 12, "two" → 2
+- Ignore: "and", "also", "plus", "then", "with", "the"
+- Extract ALL bike IDs mentioned in the transcript
+- Return ONLY valid JSON: {"bike_ids": ["A12", "TB4", "CC2"], "confidence": "high"}
+- If nothing found: {"bike_ids": [], "confidence": "low"}
+- Do NOT invent bikes. Do NOT skip any mentioned bike.`,
+        messages: [{ role: 'user', content: `Extract all bike IDs from this transcript. Return JSON only.\n\nTranscript: \"${transcript}\"` }],
       }),
     });
 
