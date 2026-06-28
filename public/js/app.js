@@ -1197,16 +1197,24 @@ async function processVoiceRecording(actionType, mimeType, stream) {
     const btn = document.getElementById('voice-btn');
     const transcript = document.getElementById('voice-transcript');
 
-    if (result.bike_ids && result.bike_ids.length > 0) {
-      result.bike_ids.forEach(id => { if (!state.action.bikes.includes(id)) state.action.bikes.push(id); });
+    const found = result.bike_ids || [];
+    const notFound = result.not_found || [];
+
+    if (found.length > 0) {
+      found.forEach(id => { if (!state.action.bikes.includes(id)) state.action.bikes.push(id); });
       refreshBikeAdder();
       updateQuickListSelection();
       updateSubmitBtn();
-      toast('Heard: ' + result.bike_ids.join(', '), 'success');
-      if (transcript) transcript.textContent = '\u201c' + result.transcript + '\u201d';
+      let msg = found.length === 1 ? 'Added: ' + found[0] : 'Added: ' + found.join(', ');
+      if (notFound.length > 0) msg += '  ·  not in fleet: ' + notFound.join(', ');
+      toast(msg, notFound.length > 0 ? ''  : 'success');
+      if (transcript) transcript.textContent = '“' + result.transcript + '”';
+    } else if (notFound.length > 0) {
+      toast('Heard ' + notFound.join(', ') + '  but not found in fleet', 'error');
+      if (transcript) transcript.textContent = '“' + result.transcript + '”';
     } else {
-      toast(result.transcript ? 'No bike IDs found in: "' + result.transcript + '"' : 'Nothing heard, try again', 'error');
-      if (transcript && result.transcript) transcript.textContent = '\u201c' + result.transcript + '\u201d';
+      toast(result.transcript ? 'Nothing recognised in: "' + result.transcript + '"' : 'Nothing heard, try again', 'error');
+      if (transcript && result.transcript) transcript.textContent = '“' + result.transcript + '”';
     }
 
     if (btn) { btn.innerHTML = '🎤 Tap to speak'; btn.disabled = false; }

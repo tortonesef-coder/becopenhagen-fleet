@@ -100,13 +100,16 @@ Extract ALL bike IDs mentioned. Do not add bikes not mentioned. Do not guess.`,
       console.error('Claude parse error:', claudeText);
     }
 
-    // Validate IDs against actual DB
+    // Validate IDs against actual DB — split into found and not found
     const validIds = new Set(allBikes.map(b => b.id));
-    const confirmedIds = (parsed.bike_ids || []).filter(id => validIds.has(id.toUpperCase())).map(id => id.toUpperCase());
+    const parsedIds = (parsed.bike_ids || []).map(id => id.toUpperCase());
+    const confirmedIds = parsedIds.filter(id => validIds.has(id));
+    const notFoundIds = parsedIds.filter(id => !validIds.has(id));
 
     res.json({
       transcript,
       bike_ids: confirmedIds,
+      not_found: notFoundIds,
       confidence: parsed.confidence || 'medium',
       raw: claudeText,
     });
