@@ -75,8 +75,7 @@ document.getElementById('modal-overlay').addEventListener('click',e=>{
 // ── Identity ──────────────────────────────────────────────────────────────
 async function initIdentity() {
   const team = await api('/api/team');
-  const order={admin:0,desk:1,guide:2,mechanic:3};
-  team.sort((a,b)=>order[a.role]-order[b.role]||a.name.localeCompare(b.name));
+  team.sort((a,b)=>a.name.localeCompare(b.name));
   document.getElementById('identity-grid').innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
       <span class="iname">${m.name}</span>
@@ -101,8 +100,7 @@ async function checkSession() {
 function switchUser() {
   openModal(`<div class="modal-title">Switch user</div><div id="switch-grid" class="identity-grid" style="max-width:none;margin-top:0.5rem"></div>`);
   api('/api/team').then(team=>{
-    const order={admin:0,desk:1,guide:2,mechanic:3};
-    team.sort((a,b)=>order[a.role]-order[b.role]||a.name.localeCompare(b.name));
+    team.sort((a,b)=>a.name.localeCompare(b.name));
     document.getElementById('switch-grid').innerHTML=team.map(m=>`
       <button class="identity-btn role-${m.role}${state.actor?.id===m.id?' active-user':''}" data-id="${m.id}">
         <span class="iname">${m.name}</span>
