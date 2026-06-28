@@ -399,6 +399,11 @@ function renderAction(c) {
 async function selectActionType(actionId) {
   state.action.type = actionId;
   state.action.bikes = [];
+  // If a bike was preloaded from "Do something with this bike", add it now
+  if (state.action.preloaded) {
+    state.action.bikes = [state.action.preloaded];
+    state.action.preloaded = null;
+  }
   const def = ACTION_TYPES.find(a=>a.id===actionId);
   const c = document.getElementById('content');
 
@@ -459,6 +464,13 @@ async function selectActionType(actionId) {
   input.addEventListener('keydown', e=>{
     if(e.key==='Enter'||e.key===','){e.preventDefault();addBikeById();}
   });
+
+  // If bikes were preloaded, show them immediately
+  if (state.action.bikes.length > 0) {
+    refreshBikeAdder();
+    updateSubmitBtn();
+    updateQuickListSelection();
+  }
 
   // Filter quick list on input
   let t;
@@ -655,7 +667,8 @@ async function submitActionNew() {
   if (input?.value?.trim()) addBikeById();
 
   const {type, bikes} = state.action;
-  if(!type||bikes.length===0){toast('Type a bike ID and tap Add first','error');return;}
+  if(!type){toast('Select an action type first','error');return;}
+  if(bikes.length===0){toast('No bike selected — type a bike ID and tap Add','error');return;}
   const actor = state.actor?.id||'unknown';
 
   try {
@@ -733,7 +746,11 @@ function getSelectedProblems() {
 }
 
 function preloadActionBike(id) {
-  toggleBike(id,'','');
+  // Store preloaded bike — will be added when action type is selected
+  state.action.preloaded = id;
+  // Also show it in the adder input so user sees it
+  const input = document.getElementById('bike-adder-input');
+  if (input) { input.value = id; }
 }
 
 // ── TICKETS ───────────────────────────────────────────────────────────────
