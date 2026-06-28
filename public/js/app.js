@@ -490,6 +490,7 @@ async function selectActionType(actionId) {
         🎤 <span>Tap to speak bike IDs</span>
       </button>
       <div class="voice-transcript" id="voice-transcript"></div>
+      <div class="voice-result" id="voice-result"></div>
       <div class="bike-adder-tags" id="bike-adder-tags"></div>
     </div>
 
@@ -1200,21 +1201,32 @@ async function processVoiceRecording(actionType, mimeType, stream) {
     const found = result.bike_ids || [];
     const notFound = result.not_found || [];
 
+    // Update transcript display
+    if (transcript && result.transcript) {
+      transcript.innerHTML = '“' + result.transcript + '”';
+    }
+
+    // Build persistent result line
+    const resultEl = document.getElementById('voice-result');
     if (found.length > 0) {
       found.forEach(id => { if (!state.action.bikes.includes(id)) state.action.bikes.push(id); });
       refreshBikeAdder();
       updateQuickListSelection();
       updateSubmitBtn();
-      let msg = found.length === 1 ? 'Added: ' + found[0] : 'Added: ' + found.join(', ');
-      if (notFound.length > 0) msg += '  ·  not in fleet: ' + notFound.join(', ');
-      toast(msg, notFound.length > 0 ? ''  : 'success');
-      if (transcript) transcript.textContent = '“' + result.transcript + '”';
+      let toastMsg = 'Added: ' + found.join(', ');
+      let resultMsg = '<span style="color:var(--green)">✓ Added: ' + found.join(', ') + '</span>';
+      if (notFound.length > 0) {
+        toastMsg += ' · not in fleet: ' + notFound.join(', ');
+        resultMsg += '<br><span style="color:var(--red)">✗ Not in fleet: ' + notFound.join(', ') + '</span>';
+      }
+      toast(toastMsg, notFound.length > 0 ? '' : 'success');
+      if (resultEl) resultEl.innerHTML = resultMsg;
     } else if (notFound.length > 0) {
-      toast('Heard ' + notFound.join(', ') + '  but not found in fleet', 'error');
-      if (transcript) transcript.textContent = '“' + result.transcript + '”';
+      toast('Not found in fleet: ' + notFound.join(', '), 'error');
+      if (resultEl) resultEl.innerHTML = '<span style="color:var(--red)">✗ Not in fleet: ' + notFound.join(', ') + '</span>';
     } else {
-      toast(result.transcript ? 'Nothing recognised in: "' + result.transcript + '"' : 'Nothing heard, try again', 'error');
-      if (transcript && result.transcript) transcript.textContent = '“' + result.transcript + '”';
+      toast(result.transcript ? 'Nothing recognised' : 'Nothing heard, try again', 'error');
+      if (resultEl) resultEl.innerHTML = '<span style="color:var(--text3)">Nothing recognised</span>';
     }
 
     if (btn) { btn.innerHTML = '🎤 Tap to speak'; btn.disabled = false; }
