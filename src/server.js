@@ -32,10 +32,10 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api', require('./routes/api'));
 app.use('/api/voice', require('./routes/voice'));
 app.use('/api/repairs', require('./routes/repairs'));
 app.use('/api/fleet', require('./routes/fleet'));
+app.use('/api', require('./routes/api'));
 
 app.post('/session/login', (req, res) => {
   const { actor_id } = req.body;
