@@ -430,9 +430,16 @@ const ACTION_TYPES = [
 ];
 
 function renderAction(c) {
-  state.action = { type: null, bikes: [], searchQ: '' };
+  // Preserve selected bikes and preloaded bike when going back
+  const preservedBikes = state.action.bikes || [];
+  const preservedPreloaded = state.action.preloaded || null;
+  state.action = { type: null, bikes: preservedBikes, searchQ: '', preloaded: preservedPreloaded };
   c.innerHTML = `
-    <div class="section-title" style="margin-top:0">What are you doing?</div>
+    ${state.action.bikes.length>0?`<div class="selected-bikes-bar">
+      <span class="sbb-label">Selected:</span>
+      ${state.action.bikes.map(id=>`<span class="return-tag">${id}<span class="return-tag-remove" onclick="toggleBike('${id}','','');renderAction(document.getElementById('content'))">&times;</span></span>`).join('')}
+    </div>`:''}
+  <div class="section-title" style="margin-top:0">What are you doing?</div>
     <div class="action-type-list" id="action-type-list">
       ${ACTION_TYPES.map(a=>`
         <button class="action-type-btn" data-action="${a.id}" onclick="selectActionType('${a.id}')">

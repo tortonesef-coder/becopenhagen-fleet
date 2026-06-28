@@ -1150,3 +1150,24 @@ details summary::-webkit-details-marker { display: none; }
   flex-shrink: 0;
 }
 .toast-undo-btn:active { background: rgba(255,255,255,0.35); }
+
+/* ── Selected bikes bar on action screen ── */
+.selected-bikes-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  background: var(--red-light);
+  border: 1.5px solid var(--red-mid);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+.sbb-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--red);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
