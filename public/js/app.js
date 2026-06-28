@@ -76,12 +76,22 @@ document.getElementById('modal-overlay').addEventListener('click',e=>{
 async function initIdentity() {
   const team = await api('/api/team');
   team.sort((a,b)=>a.name.localeCompare(b.name));
-  document.getElementById('identity-grid').innerHTML = team.map(m=>`
+  // Pick columns: min 3, prefer fewest cols with even distribution
+  const n = team.length;
+  let cols = 3;
+  if (n % 4 === 0) cols = 4;
+  else if (n % 3 === 0) cols = 3;
+  else if (n % 4 === 1) cols = 3; // e.g. 10 → 3+3+4 is fine
+  else cols = 3;
+
+  const grid = document.getElementById('identity-grid');
+  grid.style.setProperty('--id-cols', cols);
+  grid.innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
       <span class="iname">${m.name}</span>
       <span class="irole">${m.role}</span>
     </button>`).join('');
-  document.getElementById('identity-grid').querySelectorAll('.identity-btn').forEach(btn=>{
+  grid.querySelectorAll('.identity-btn').forEach(btn=>{
     btn.addEventListener('click',()=>login(btn.dataset.id));
   });
 }
@@ -101,7 +111,10 @@ function switchUser() {
   openModal(`<div class="modal-title">Switch user</div><div id="switch-grid" class="identity-grid" style="max-width:none;margin-top:0.5rem"></div>`);
   api('/api/team').then(team=>{
     team.sort((a,b)=>a.name.localeCompare(b.name));
-    document.getElementById('switch-grid').innerHTML=team.map(m=>`
+    const sg = document.getElementById('switch-grid');
+    const sn = team.length;
+    sg.style.setProperty('--id-cols', sn % 4 === 0 ? 4 : 3);
+    sg.innerHTML=team.map(m=>`
       <button class="identity-btn role-${m.role}${state.actor?.id===m.id?' active-user':''}" data-id="${m.id}">
         <span class="iname">${m.name}</span>
         <span class="irole">${m.role}</span>

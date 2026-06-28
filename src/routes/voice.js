@@ -8,6 +8,11 @@ router.post('/transcribe', async (req, res) => {
   const { audio_base64, audio_type, action_type, context } = req.body;
   if (!audio_base64) return res.status(400).json({ error: 'No audio provided' });
 
+  // Debug: confirm keys are loaded
+  console.log('Voice request received, action:', action_type);
+  console.log('OpenAI key set:', !!process.env.OPENAI_API_KEY);
+  console.log('Anthropic key set:', !!process.env.ANTHROPIC_API_KEY);
+
   try {
     // Step 1: Transcribe with Whisper
     const audioBuffer = Buffer.from(audio_base64, 'base64');

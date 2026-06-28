@@ -101,15 +101,15 @@ html, body {
   margin-bottom: 0.75rem;
   text-align: center;
   width: 100%;
-  max-width: 340px;
+  max-width: 520px;
 }
 
 .identity-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(var(--id-cols, 3), 1fr);
   gap: 0.5rem;
   width: 100%;
-  max-width: 340px;
+  max-width: 520px;
 }
 
 .identity-btn {

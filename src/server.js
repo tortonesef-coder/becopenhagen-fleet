@@ -1,3 +1,14 @@
+// Load environment variables from /etc/environment if not already set
+const fs = require('fs');
+try {
+  const envFile = fs.readFileSync('/etc/environment','utf8');
+  envFile.split('
+').forEach(line => {
+    const m = line.match(/^([^=]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g,'');
+  });
+} catch(e) {}
+
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
