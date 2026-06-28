@@ -51,11 +51,36 @@ async function api(path, opts={}) {
   return r.json();
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────
-function toast(msg, type='') {
-  const el=document.getElementById('toast');
-  el.textContent=msg; el.className='toast '+type;
-  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.add('hidden'),2800);
+// ── Toast + Undo ──────────────────────────────────────────────────────────
+let _undoFn = null;
+let _undoTimer = null;
+
+function toast(msg, type='', undoFn=null) {
+  const el = document.getElementById('toast');
+  clearTimeout(el._t);
+  clearTimeout(_undoTimer);
+  _undoFn = undoFn;
+
+  if (undoFn) {
+    el.innerHTML = `<span>${msg}</span><button class="toast-undo-btn" onclick="triggerUndo()">Undo</button>`;
+  } else {
+    el.textContent = msg;
+  }
+  el.className = 'toast ' + type + (undoFn ? ' has-undo' : '');
+  el._t = setTimeout(() => { el.classList.add('hidden'); _undoFn = null; }, 5000);
+}
+
+async function triggerUndo() {
+  if (!_undoFn) return;
+  const fn = _undoFn;
+  _undoFn = null;
+  document.getElementById('toast').classList.add('hidden');
+  try {
+    await fn();
+    toast('Undone', 'success');
+  } catch(e) {
+    toast('Could not undo: ' + e.message, 'error');
+  }
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────
@@ -723,7 +748,40 @@ async function submitActionNew() {
     }
 
     const label = submitLabel(type, bikes.length);
-    toast(`Done — ${label.toLowerCase()}`, 'success');
+
+    // Build undo function based on action type
+    let undoFn = null;
+    if (type === 'return') {
+      const prevStatuses = bikes.map(id => {
+        const b = null; // we don't have prev status here, best we can do is re-checkout
+        return id;
+      });
+      // Undo return = mark as out again (approximate)
+      undoFn = async () => {
+        for (const id of bikes) {
+          await api(`/api/bikes/${id}/checkout`, {method:'POST', body:{assignment_type:'rental', assigned_to:'(undone return)', force:true}});
+        }
+        renderAction(document.getElementById('content'));
+      };
+    } else if (['rental','tour','borrowed'].includes(type)) {
+      undoFn = async () => {
+        for (const id of bikes) await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+        renderAction(document.getElementById('content'));
+      };
+    } else if (type === 'missing') {
+      undoFn = async () => {
+        for (const id of bikes) await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+        renderAction(document.getElementById('content'));
+      };
+    } else if (type === 'city') {
+      undoFn = async () => {
+        for (const id of bikes) await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Undone'}});
+        renderAction(document.getElementById('content'));
+      };
+    }
+    // ticket undo handled separately in submitResolve
+
+    toast(`Done — ${label.toLowerCase()}`, 'success', undoFn);
     renderAction(document.getElementById('content'));
 
   } catch(e) { toast(e.message,'error'); }
@@ -915,11 +973,17 @@ function renderTicketAnalytics(stats) {
 
 async function setComplexity(ticketId, complexity) {
   try {
+    // Find previous complexity from DOM before updating
+    const picker = document.querySelector(`.complexity-picker[data-ticket="${ticketId}"]`);
+    const prev = parseInt(picker?.dataset.current) || 3;
     await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ complexity } });
-    // Refresh just the queue
     const [tickets, stats] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
     renderTicketTab(tickets, stats);
-    toast('Complexity updated', 'success');
+    toast('Complexity updated', 'success', async () => {
+      await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ complexity: prev } });
+      const [t2, s2] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
+      renderTicketTab(t2, s2);
+    });
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -928,6 +992,12 @@ async function toggleCanRent(ticketId, canRent) {
     await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ can_rent: canRent } });
     const [tickets, stats] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
     renderTicketTab(tickets, stats);
+    const prev = canRent ? 0 : 1;
+    toast(canRent ? 'Marked: can rent' : 'Marked: off fleet', 'success', async () => {
+      await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ can_rent: prev } });
+      const [t2, s2] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
+      renderTicketTab(t2, s2);
+    });
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -968,7 +1038,13 @@ async function submitResolve(ticketId, bikeId) {
   const actual_hours = hours + (minutes / 60) || null;
   try {
     await api(`/api/repairs/${ticketId}/resolve`, { method:'POST', body:{ resolution_note:note, new_bike_status:status, actual_hours }});
-    closeModal(); toast('Ticket resolved', 'success'); await renderTab('tickets');
+    closeModal();
+    await renderTab('tickets');
+    toast('Ticket resolved ✓', 'success', async () => {
+      await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ status:'open' }});
+      if (bikeId) await api(`/api/bikes/${bikeId}/return`, {method:'POST', body:{new_status:'repair', note:'Undo resolve'}});
+      await renderTab('tickets');
+    });
   } catch(e) { toast(e.message, 'error'); }
 }
 

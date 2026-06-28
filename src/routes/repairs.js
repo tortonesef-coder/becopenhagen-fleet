@@ -210,14 +210,14 @@ router.post('/', (req, res) => {
 
 // ── PATCH /api/repairs/:id ────────────────────────────────────────────────
 router.patch('/:id', (req, res) => {
-  const { complexity, can_rent, problem } = req.body;
+  const { complexity, can_rent, problem, status } = req.body;
   const actor = req.session?.actor || 'unknown';
   const ticket = db().prepare('SELECT * FROM repair_tickets WHERE id=?').get(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-
   if (complexity !== undefined) db().prepare('UPDATE repair_tickets SET complexity=? WHERE id=?').run(complexity, req.params.id);
   if (can_rent !== undefined) db().prepare('UPDATE repair_tickets SET can_rent=? WHERE id=?').run(can_rent ? 1 : 0, req.params.id);
   if (problem !== undefined) db().prepare('UPDATE repair_tickets SET problem=? WHERE id=?').run(problem, req.params.id);
+  if (status !== undefined) db().prepare('UPDATE repair_tickets SET status=?, resolved_at=NULL, resolved_by=NULL WHERE id=?').run(status, req.params.id);
 
   db().prepare(`INSERT INTO action_log (actor,action,bike_id,details) VALUES (?,?,?,?)`)
     .run(actor, 'ticket_updated', ticket.bike_id, JSON.stringify({ ticket_id: req.params.id, complexity, can_rent }));

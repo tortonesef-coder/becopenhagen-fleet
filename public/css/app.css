@@ -1129,3 +1129,24 @@ html, body {
 details > summary { user-select: none; }
 details[open] > summary span:first-child { transform: rotate(90deg); display: inline-block; }
 details summary::-webkit-details-marker { display: none; }
+
+/* ── Undo toast ── */
+.toast.has-undo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-right: 0.75rem;
+}
+.toast-undo-btn {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.toast-undo-btn:active { background: rgba(255,255,255,0.35); }
