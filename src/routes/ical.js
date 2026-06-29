@@ -20,9 +20,16 @@ const TOUR_FEEDS = [
   { id: '2-D', itemId: '190977', label: '2-Day Rental',                 type: 'rental' },
   { id: '3-D', itemId: '190978', label: '3-Day Rental',                 type: 'rental' },
   { id: '4-D', itemId: '190980', label: '4-Day Rental',                 type: 'rental' },
-  { id: '5-D', itemId: '651114', label: '5-Day Rental',                 type: 'rental' },
-  { id: '6-D', itemId: '651124', label: '6-Day Rental',                 type: 'rental' },
-  { id: '7-D', itemId: '190983', label: '7-Day Rental',                 type: 'rental' },
+  { id: '5-D',  itemId: '651114', label: '5-Day Rental',  type: 'rental' },
+  { id: '6-D',  itemId: '651124', label: '6-Day Rental',  type: 'rental' },
+  { id: '7-D',  itemId: '190983', label: '7-Day Rental',  type: 'rental' },
+  { id: '8-D',  itemId: '651812', label: '8-Day Rental',  type: 'rental' },
+  { id: '9-D',  itemId: '652669', label: '9-Day Rental',  type: 'rental' },
+  { id: '10-D', itemId: '652693', label: '10-Day Rental', type: 'rental' },
+  { id: '11-D', itemId: '652695', label: '11-Day Rental', type: 'rental' },
+  { id: '12-D', itemId: '652697', label: '12-Day Rental', type: 'rental' },
+  { id: '13-D', itemId: '652699', label: '13-Day Rental', type: 'rental' },
+  { id: '14-D', itemId: '652703', label: '14-Day Rental', type: 'rental' },
 ];
 
 // ── iCal parser ─────────────────────────────────────────────────────────
