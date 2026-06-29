@@ -1686,7 +1686,7 @@ function renderToursList(el, tours, isGuideView) {
           </div>
           <div class="tour-pax">${a.booking_count} booking${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
         </div>
-        ${a.guide ? `<div class="tour-guide">👤 ${a.guide}</div>` : '<div class="tour-guide" style="color:var(--text3)">No guide assigned</div>'}
+        ${a.guide ? `<div class="tour-guide">👤 ${a.guide}</div>` : '<div class="tour-no-guide">⚠️ No guide assigned yet</div>'}
         ${needsBikes ? `<div class="tour-bikes">${bikeStr}</div>` : ''}
       </div>`;
     }).join('')}
@@ -1744,11 +1744,19 @@ async function openTourDetail(availId) {
 
     <div class="detail-section">
       <div class="detail-section-title">Bookings</div>
-      ${bookings.map(b=>`
-        <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:1px;padding:0.4rem 0">
-          <span style="font-weight:600;font-size:0.88rem">${b.name||'Unknown'}</span>
-          <span style="font-size:0.75rem;color:var(--text3)">#${b.ref}${b.phone?' · '+b.phone:''}</span>
-        </div>`).join('')}
+      ${bookings.map(b=>{
+        const what = b.what || "";
+        const heights = b.heights ? "📏 " + b.heights : "";
+        const comments = b.comments ? "💬 " + b.comments : "";
+        return "<div style='padding:0.65rem 0;border-bottom:1px solid var(--border)'>"
+          + "<div style='font-weight:600;font-size:0.9rem'>" + (b.name||"Unknown") + "</div>"
+          + "<div style='font-size:0.75rem;color:var(--text3);margin-top:2px'>#" + b.ref + (b.phone?" · "+b.phone:"") + "</div>"
+          + (b.email && !b.email.includes("reply.") ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")
+          + (what ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>"+what+"</div>" : "")
+          + (heights ? "<div style='font-size:0.72rem;color:var(--blue)'>"+heights+"</div>" : "")
+          + (comments ? "<div style='font-size:0.72rem;color:var(--amber);margin-top:2px'>"+comments+"</div>" : "")
+          + "</div>";
+      }).join("")}
     </div>
 
     ${t.url ? `<a href="${t.url}" target="_blank" class="btn btn-secondary btn-full" style="margin-top:0.5rem;text-decoration:none">Open in FareHarbor</a>` : ''}

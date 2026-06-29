@@ -1237,3 +1237,14 @@ details summary::-webkit-details-marker { display: none; }
   font-weight: 500;
   margin-top: 0.2rem;
 }
+
+.tour-no-guide {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  display: inline-block;
+  margin-bottom: 0.2rem;
+}

@@ -62,9 +62,13 @@ function parseIcal(text) {
       return new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`);
     };
 
-    const start = parseDate(dtstart);
-    const end = parseDate(dtend);
+    let start = parseDate(dtstart);
+    let end = parseDate(dtend);
     if (!start) return;
+    // FareHarbor iCal is UTC — Copenhagen is UTC+2 in summer (CEST)
+    const offsetMs = 2 * 60 * 60 * 1000;
+    start = new Date(start.getTime() + offsetMs);
+    if (end) end = new Date(end.getTime() + offsetMs);
 
     // Extract guide from LOCATION field
     // Formats: "Crew 1 (Guide - Andrew)", "Hasse Sørensen (Guide)", ""
@@ -110,11 +114,26 @@ function parseIcal(text) {
     bookingBlocks.slice(1).forEach(b => {
       const lines = b.split('\n').map(l=>l.trim()).filter(Boolean);
       const ref = lines[0]?.trim();
-      const name = lines[1]?.trim();
-      const phone = lines[2]?.match(/^\+/) ? lines[2].trim() : null;
-      const emailLine = phone ? lines[3] : lines[2];
-      const email = emailLine?.includes('@') ? emailLine.trim() : null;
-      if (ref) bookings.push({ ref, name, phone, email });
+      if (!ref || !/^\d+$/.test(ref)) return;
+
+      // Name is first non-empty line after ref
+      const name = lines[1]?.trim() || 'Unknown';
+
+      // Phone: line starting with +
+      const phone = lines.find(l => /^\+\d/.test(l)) || null;
+
+      // Email: line with @, skip getyourguide/tripadvisor relay addresses
+      const emailRaw = lines.find(l => l.includes('@') && !l.startsWith('+'));
+      const email = emailRaw && !emailRaw.includes('reply.getyourguide') && !emailRaw.includes('expmessaging') ? emailRaw : null;
+
+      // What they booked: line with "Adult" or "Child" quantities
+      const whatLine = lines.find(l => /\d+\s+(Adult|Child)/i.test(l) && !l.startsWith('#'));
+
+      // Custom fields: heights, comments
+      const heights = description.match(/Passenger Heights:\s*([^\n#]+)/)?.[1]?.trim() || null;
+      const comments = b.match(/Comments:\s*\n([^\n#]+)/)?.[1]?.trim() || null;
+
+      bookings.push({ ref, name, phone, email, what: whatLine || null, heights, comments });
     });
 
     // Extract availability ID from UID
