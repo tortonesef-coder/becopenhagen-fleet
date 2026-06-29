@@ -1745,16 +1745,24 @@ async function openTourDetail(availId) {
     <div class="detail-section">
       <div class="detail-section-title">Bookings</div>
       ${bookings.map(b=>{
-        const what = b.what || "";
-        const heights = b.heights ? "📏 " + b.heights : "";
-        const comments = b.comments ? "💬 " + b.comments : "";
+        const src = b.source && b.source !== "direct"
+          ? "<span style='font-size:0.68rem;background:var(--blue-bg);color:var(--blue);padding:1px 6px;border-radius:10px;margin-left:5px'>"+b.source+"</span>"
+          : "";
+        const unpaid = b.due && b.due !== "DKK0.00"
+          ? "<span style='font-size:0.68rem;background:#fdecea;color:#e04040;padding:1px 6px;border-radius:10px;margin-left:4px'>Due: "+b.due+"</span>"
+          : "";
         return "<div style='padding:0.65rem 0;border-bottom:1px solid var(--border)'>"
-          + "<div style='font-weight:600;font-size:0.9rem'>" + (b.name||"Unknown") + "</div>"
-          + "<div style='font-size:0.75rem;color:var(--text3);margin-top:2px'>#" + b.ref + (b.phone?" · "+b.phone:"") + "</div>"
-          + (b.email && !b.email.includes("reply.") ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")
-          + (what ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>"+what+"</div>" : "")
-          + (heights ? "<div style='font-size:0.72rem;color:var(--blue)'>"+heights+"</div>" : "")
-          + (comments ? "<div style='font-size:0.72rem;color:var(--amber);margin-top:2px'>"+comments+"</div>" : "")
+          + "<div style='display:flex;align-items:center;flex-wrap:wrap;gap:3px'>"
+          + "<span style='font-weight:700;font-size:0.9rem'>"+(b.name||"Unknown")+"</span>"
+          + src + unpaid
+          + "</div>"
+          + (b.phone ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>📞 "+b.phone+"</div>" : "")
+          + (b.email ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")
+          + "<div style='font-size:0.75rem;color:var(--text3);margin-top:2px'>#"+b.ref+" · "+(b.total||"")+"</div>"
+          + (b.what ? "<div style='font-size:0.8rem;color:var(--text2);margin-top:4px;font-weight:500'>"+b.what+"</div>" : "")
+          + (b.heights ? "<div style='font-size:0.75rem;color:var(--blue);margin-top:3px'>📏 "+b.heights+"</div>" : "")
+          + (b.comments ? "<div style='font-size:0.75rem;color:var(--amber);margin-top:3px;font-style:italic'>💬 "+b.comments+"</div>" : "")
+          + (b.language ? "<div style='font-size:0.72rem;color:var(--text3)'>🌐 "+b.language+"</div>" : "")
           + "</div>";
       }).join("")}
     </div>

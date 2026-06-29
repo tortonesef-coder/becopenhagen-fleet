@@ -66,9 +66,10 @@ function parseIcal(text) {
     let end = parseDate(dtend);
     if (!start) return;
     // FareHarbor iCal is UTC — Copenhagen is UTC+2 in summer (CEST)
+    // We store times as local Copenhagen time strings directly
     const offsetMs = 2 * 60 * 60 * 1000;
-    start = new Date(start.getTime() + offsetMs);
-    if (end) end = new Date(end.getTime() + offsetMs);
+    const localStart = new Date(start.getTime() + offsetMs);
+    const localEnd = end ? new Date(end.getTime() + offsetMs) : null;
 
     // Extract guide from LOCATION field
     // Formats: "Crew 1 (Guide - Andrew)", "Hasse Sørensen (Guide)", ""
@@ -111,29 +112,78 @@ function parseIcal(text) {
     // Parse individual bookings from description
     const bookings = [];
     const bookingBlocks = description.split(/BOOKING #/);
-    bookingBlocks.slice(1).forEach(b => {
-      const lines = b.split('\n').map(l=>l.trim()).filter(Boolean);
+    bookingBlocks.slice(1).forEach(block => {
+      const raw = block.replace(/\\n/g, '\n');
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      if (!lines.length) return;
+
       const ref = lines[0]?.trim();
       if (!ref || !/^\d+$/.test(ref)) return;
 
-      // Name is first non-empty line after ref
-      const name = lines[1]?.trim() || 'Unknown';
+      // Name: first non-empty line after ref that isn't a phone/email/total
+      const name = lines.slice(1).find(l =>
+        l && !l.startsWith('+') && !l.includes('@') &&
+        !l.startsWith('Total') && !l.startsWith('Due') &&
+        !l.startsWith('#') && !/^\d+\s+(Adult|Child|People)/i.test(l)
+      ) || 'Unknown';
 
-      // Phone: line starting with +
-      const phone = lines.find(l => /^\+\d/.test(l)) || null;
+      // Phone: line starting with + followed by digits
+      const phone = lines.find(l => /^\+[\d\s\-().]{6,}/.test(l)) || null;
 
-      // Email: line with @, skip getyourguide/tripadvisor relay addresses
-      const emailRaw = lines.find(l => l.includes('@') && !l.startsWith('+'));
-      const email = emailRaw && !emailRaw.includes('reply.getyourguide') && !emailRaw.includes('expmessaging') ? emailRaw : null;
+      // Email: line with @ — skip relay addresses from GYG/TripAdvisor/Airbnb
+      const emailRaw = lines.find(l =>
+        l.includes('@') && !l.startsWith('+') &&
+        !l.includes('reply.getyourguide') &&
+        !l.includes('expmessaging.tripadvisor') &&
+        !l.includes('airbnb') &&
+        !l.includes('reply.')
+      ) || null;
 
-      // What they booked: line with "Adult" or "Child" quantities
-      const whatLine = lines.find(l => /\d+\s+(Adult|Child)/i.test(l) && !l.startsWith('#'));
+      // Total paid
+      const totalLine = lines.find(l => l.startsWith('Total:'));
+      const total = totalLine ? totalLine.replace('Total:', '').trim() : null;
 
-      // Custom fields: heights, comments
-      const heights = description.match(/Passenger Heights:\s*([^\n#]+)/)?.[1]?.trim() || null;
-      const comments = b.match(/Comments:\s*\n([^\n#]+)/)?.[1]?.trim() || null;
+      // Due amount
+      const dueLine = lines.find(l => l.startsWith('Due:'));
+      const due = dueLine ? dueLine.replace('Due:', '').trim() : null;
+      const fullyPaid = due === 'DKK0.00' || due === null;
 
-      bookings.push({ ref, name, phone, email, what: whatLine || null, heights, comments });
+      // What they booked — lines with adult/child/people counts or bike descriptions
+      const whatLines = lines.filter(l =>
+        (/\d+\s+(Adult|Child|People)/i.test(l) && !l.startsWith('#')) ||
+        (/\d+\s+(regular|ebike|e-bike|electric|SA|touring|cargo)/i.test(l))
+      );
+      const what = whatLines.join(', ') || null;
+
+      // Passenger heights from #### Custom Fields
+      const heightMatch = block.match(/Passenger Heights:\s*([^\n#\\]+)/);
+      const heights = heightMatch ? heightMatch[1].trim() : null;
+
+      // Comments (filter out empty/boilerplate)
+      const commentMatch = block.match(/Comments:\s*\n([^#\\]+)/);
+      const comments = commentMatch ?
+        commentMatch[1].trim().replace(/\n/g,' ').trim() : null;
+      const cleanComments = comments && comments.length > 3 ? comments : null;
+
+      // Language preference
+      const langMatch = block.match(/Language Option:\s*\n([^\n#\\]+)/);
+      const language = langMatch ? langMatch[1].trim() : null;
+
+      // Source: GYG, TripAdvisor, direct, etc
+      let source = 'direct';
+      if (emailRaw === null && block.includes('getyourguide')) source = 'GetYourGuide';
+      else if (block.includes('tripadvisor')) source = 'TripAdvisor';
+      else if (block.includes('viator')) source = 'Viator';
+
+      bookings.push({
+        ref, name, phone,
+        email: emailRaw,
+        total, due, fullyPaid,
+        what, heights,
+        comments: cleanComments,
+        language,
+        source,
+      });
     });
 
     // Extract availability ID from UID
@@ -144,11 +194,11 @@ function parseIcal(text) {
       summary: summary.replace(/\s*\(.*\)/, '').trim(),
       location,
       guide,
-      start: start.toISOString(),
-      end: end.toISOString(),
-      start_date: start.toISOString().substring(0,10),
-      start_time: start.toISOString().substring(11,16),
-      end_time: end.toISOString().substring(11,16),
+      start: localStart.toISOString(),
+      end: localEnd ? localEnd.toISOString() : null,
+      start_date: localStart.toISOString().substring(0,10),
+      start_time: localStart.toISOString().substring(11,16),
+      end_time: localEnd ? localEnd.toISOString().substring(11,16) : null,
       bikes_needed: bikesNeeded,
       total_bikes: totalBikesNeeded,
       bookings,
