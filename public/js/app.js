@@ -1726,9 +1726,10 @@ function renderRentalsList(el, rentals) {
 }
 
 async function openTourDetail(availId) {
-  const tours = await api('/api/ical/tours');
-  const t = tours.find(x=>x.availability_id===availId);
-  if (!t) return;
+  // Fetch with extended window to ensure we find it
+  const tours = await api('/api/ical/tours?days=60');
+  const t = tours.find(x=>String(x.availability_id)===String(availId));
+  if (!t) { toast('Tour not found — try refreshing', 'error'); return; }
 
   const bikes = t.bikes_needed || {};
   const bikeStr = Object.entries(bikes).filter(([,n])=>n>0).map(([type,n])=>n+'× '+type).join(', ');
