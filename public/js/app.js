@@ -244,8 +244,8 @@ function buildTabbar() {
   const tabs = role==='mechanic'
     ? [{id:'today',label:'Today',icon:iconHome()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
     : role==='admin'
-    ? [{id:'today',label:'Today',icon:iconHome()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
-    : [{id:'today',label:'Today',icon:iconHome()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
+    ? [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
+    : [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
@@ -262,7 +262,7 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin'};
+  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours & Rentals'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id==='today') await renderToday(c);
@@ -271,6 +271,7 @@ async function renderTab(id) {
   else if(id==='log') await renderLog(c);
   else if(id==='tickets') await renderTickets(c);
   else if(id==='admin') await renderAdmin(c);
+  else if(id==='tours') await renderTours(c);
 }
 
 // ── TODAY ─────────────────────────────────────────────────────────────────
@@ -1504,6 +1505,7 @@ async function retireBike(id, reactivate) {
   } catch(e) { toast(e.message, 'error'); }
 }
 
+function iconTours(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;}
 function iconAdmin(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><path d="M12 12v9"/><path d="m15 15-3 3-3-3"/></svg>`;}
 
 // ── PENDING ASSIGNMENTS ───────────────────────────────────────────────────
@@ -1598,5 +1600,179 @@ function fmtDate(d) {
   if (!d) return '';
   try {
     return new Date(d+'T00:00:00Z').toLocaleDateString('da-DK', {day:'numeric',month:'short'});
+  } catch { return d; }
+}
+
+// ── TOURS TAB ─────────────────────────────────────────────────────────────
+async function renderTours(c) {
+  if (!window._toursTab) window._toursTab = 'tours';
+
+  c.innerHTML = `
+    <div class="subtab-row">
+      <button class="subtab${window._toursTab==='tours'?' active':''}" onclick="switchToursTab('tours')">Tours</button>
+      <button class="subtab${window._toursTab==='rentals'?' active':''}" onclick="switchToursTab('rentals')">Rentals</button>
+    </div>
+    <div id="tours-tab-content"><div class="empty-state"><p>Loading...</p></div></div>`;
+
+  loadToursTab();
+}
+
+function switchToursTab(tab) {
+  window._toursTab = tab;
+  document.querySelectorAll('.subtab').forEach(b =>
+    b.classList.toggle('active', b.textContent === (tab==='tours'?'Tours':'Rentals')));
+  loadToursTab();
+}
+
+async function loadToursTab() {
+  const el = document.getElementById('tours-tab-content');
+  if (!el) return;
+
+  if (window._toursTab === 'tours') {
+    // Filter by guide if current user is a guide
+    const role = state.actor?.role;
+    const name = state.actor?.name;
+    const isGuide = role === 'guide';
+    const tours = await api('/api/ical/tours' + (isGuide ? `?guide=${encodeURIComponent(name)}` : ''));
+    renderToursList(el, tours, isGuide);
+  } else {
+    const rentals = await api('/api/ical/rentals');
+    renderRentalsList(el, rentals);
+  }
+}
+
+function renderToursList(el, tours, isGuideView) {
+  if (tours.length === 0) {
+    el.innerHTML = '<div class="empty-state"><p>' + (isGuideView ? 'No upcoming tours assigned to you' : 'No upcoming tours') + '</p></div>';
+    return;
+  }
+
+  // Group by date
+  const byDate = {};
+  tours.forEach(t => {
+    const d = t.start_date || t.start_at?.substring(0,10);
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(t);
+  });
+
+  el.innerHTML = Object.entries(byDate).map(([date, avails]) => `
+    <div class="section-title">${fmtDateFull(date)}</div>
+    ${avails.map(a => {
+      const bikes = a.bikes_needed || {};
+      const bikeStr = Object.entries(bikes)
+        .filter(([,n])=>n>0)
+        .map(([t,n])=>n+'× '+t)
+        .join(', ');
+      const needsBikes = a.total_bikes > 0;
+
+      return `<div class="tour-card" onclick="openTourDetail('${a.availability_id}')">
+        <div class="tour-card-header">
+          <div>
+            <span class="tour-badge">${a.feed_id}</span>
+            <span class="tour-time">${a.start_time}–${a.end_time}</span>
+          </div>
+          <div class="tour-pax">${a.booking_count} booking${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
+        </div>
+        ${a.guide ? `<div class="tour-guide">👤 ${a.guide}</div>` : '<div class="tour-guide" style="color:var(--text3)">No guide assigned</div>'}
+        ${needsBikes ? `<div class="tour-bikes">${bikeStr}</div>` : ''}
+      </div>`;
+    }).join('')}
+  `).join('');
+}
+
+function renderRentalsList(el, rentals) {
+  if (rentals.length === 0) {
+    el.innerHTML = '<div class="empty-state"><p>No upcoming rentals</p></div>';
+    return;
+  }
+
+  const byDate = {};
+  rentals.forEach(r => {
+    const d = r.start_date || r.start_at?.substring(0,10);
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(r);
+  });
+
+  el.innerHTML = Object.entries(byDate).map(([date, items]) => `
+    <div class="section-title">${fmtDateFull(date)}</div>
+    ${items.map(r => {
+      const bookings = r.bookings || [];
+      return `<div class="tour-card" onclick="openRentalDetail('${r.availability_id}')">
+        <div class="tour-card-header">
+          <div>
+            <span class="tour-badge" style="background:var(--blue-bg);color:var(--blue)">${r.feed_id}</span>
+            <span class="tour-time">${r.start_time || ''}${r.end_time?'–'+r.end_time:''}</span>
+          </div>
+          <div class="tour-pax">${bookings.length} booking${bookings.length!==1?'s':''}</div>
+        </div>
+        ${bookings.slice(0,2).map(b=>`<div style="font-size:0.8rem;color:var(--text2);margin-top:2px">${b.name||''}</div>`).join('')}
+        ${bookings.length > 2 ? `<div style="font-size:0.75rem;color:var(--text3)">+${bookings.length-2} more</div>` : ''}
+      </div>`;
+    }).join('')}
+  `).join('');
+}
+
+async function openTourDetail(availId) {
+  const tours = await api('/api/ical/tours');
+  const t = tours.find(x=>x.availability_id===availId);
+  if (!t) return;
+
+  const bikes = t.bikes_needed || {};
+  const bikeStr = Object.entries(bikes).filter(([,n])=>n>0).map(([type,n])=>n+'× '+type).join(', ');
+  const bookings = t.bookings || [];
+
+  openModal(`
+    <div class="modal-title">${t.feed_id} · ${fmtDateFull(t.start_date)}</div>
+    <div style="font-size:0.88rem;color:var(--text2);margin-bottom:0.75rem">${t.start_time}–${t.end_time}</div>
+
+    ${t.guide ? `<div class="detail-row"><span class="dr-key">Guide</span><span class="dr-val">${t.guide}</span></div>` : ''}
+    ${bikeStr ? `<div class="detail-row"><span class="dr-key">Bikes needed</span><span class="dr-val" style="color:var(--red)">${bikeStr}</span></div>` : ''}
+    <div class="detail-row"><span class="dr-key">Bookings</span><span class="dr-val">${bookings.length}</span></div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Bookings</div>
+      ${bookings.map(b=>`
+        <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:1px;padding:0.4rem 0">
+          <span style="font-weight:600;font-size:0.88rem">${b.name||'Unknown'}</span>
+          <span style="font-size:0.75rem;color:var(--text3)">#${b.ref}${b.phone?' · '+b.phone:''}</span>
+        </div>`).join('')}
+    </div>
+
+    ${t.url ? `<a href="${t.url}" target="_blank" class="btn btn-secondary btn-full" style="margin-top:0.5rem;text-decoration:none">Open in FareHarbor</a>` : ''}
+    <button class="btn btn-primary btn-full" style="margin-top:0.5rem" onclick="closeModal();goCheckoutForTour('${t.feed_id}','${t.guide||''}')">Record bikes for this tour</button>
+  `);
+}
+
+async function openRentalDetail(availId) {
+  const rentals = await api('/api/ical/rentals');
+  const r = rentals.find(x=>x.availability_id===availId);
+  if (!r) return;
+  const bookings = r.bookings || [];
+
+  openModal(`
+    <div class="modal-title">${r.feed_label} · ${fmtDateFull(r.start_date)}</div>
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      ${bookings.map(b=>`
+        <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:1px;padding:0.4rem 0">
+          <span style="font-weight:600;font-size:0.88rem">${b.name||'Unknown'}</span>
+          <span style="font-size:0.75rem;color:var(--text3)">#${b.ref}${b.phone?' · '+b.phone:''}</span>
+          ${b.email?`<span style="font-size:0.72rem;color:var(--text3)">${b.email}</span>`:''}
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:0.5rem" onclick="closeModal();renderTab('action')">Check out bikes</button>
+  `);
+}
+
+function goCheckoutForTour(tourId, guide) {
+  // Pre-set action to tour with guide name
+  state.action = { type: 'tour', bikes: [], searchQ: '', preloaded: null };
+  renderTab('action');
+  setTimeout(() => selectActionType('tour'), 100);
+}
+
+function fmtDateFull(d) {
+  if (!d) return '';
+  try {
+    return new Date(d+'T12:00:00Z').toLocaleDateString('en-DK', {weekday:'short',day:'numeric',month:'short'});
   } catch { return d; }
 }

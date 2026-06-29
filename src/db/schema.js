@@ -148,6 +148,26 @@ function initSchema() {
     );
 
     INSERT OR IGNORE INTO repair_priority_weights (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS tour_availabilities (
+      availability_id TEXT PRIMARY KEY,
+      feed_id TEXT NOT NULL,
+      feed_label TEXT,
+      feed_type TEXT DEFAULT 'tour',
+      guide TEXT,
+      start_at TEXT,
+      end_at TEXT,
+      start_date TEXT,
+      start_time TEXT,
+      end_time TEXT,
+      summary TEXT,
+      bikes_needed TEXT DEFAULT '{}',
+      total_bikes INTEGER DEFAULT 0,
+      booking_count INTEGER DEFAULT 0,
+      bookings_json TEXT DEFAULT '[]',
+      url TEXT,
+      last_synced TEXT
+    );
   `);
 
   // Migrations - update rental values to real prices

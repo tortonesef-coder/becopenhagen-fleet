@@ -34,6 +34,8 @@ app.use((req, res, next) => {
 
 app.use('/api/voice', require('./routes/voice'));
 app.use('/webhooks', require('./routes/webhooks'));
+const { router: icalRouter, startPolling } = require('./routes/ical');
+app.use('/api/ical', icalRouter);
 app.use('/api/repairs', require('./routes/repairs'));
 app.use('/api/fleet', require('./routes/fleet'));
 app.use('/api', require('./routes/api'));
@@ -64,6 +66,9 @@ app.get('*', (req, res) => {
 });
 
 getDb();
+
+// Start iCal polling after DB is ready
+startPolling();
 
 app.listen(PORT, () => {
   console.log(`BC Fleet running on port ${PORT}`);
