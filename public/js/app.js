@@ -296,14 +296,18 @@ async function renderToday(c) {
   c.innerHTML=`
     <div class="type-grid">${cards}</div>
     ${pending.length>0?`
-      <div class="section-title">Pending assignments</div>
+    ${pending.length>0?`
+      <div class="section-title">Incoming bookings — assign bikes</div>
       ${pending.map(p=>`<div class="pending-card">
         <div class="pc-ref">#${p.fareharbor_booking_ref||'No ref'}</div>
         <div class="pc-name">${p.customer_name||'Unknown'}</div>
-        <div class="pc-time">${p.booking_date||''} ${p.start_time||''}</div>
-        <div class="pc-action"><button class="btn btn-sm btn-primary" onclick="renderTab('action')">Assign bikes</button></div>
-      </div>`).join('')}`:''}
-    <div class="section-title">Today's activity</div>
+        <div class="pc-time">${p.booking_date||''}${p.start_time?' · '+p.start_time:''}${p.end_time?'–'+p.end_time:''}</div>
+        <div class="pc-bikes">${p.bikes_needed||'Bikes TBD'}</div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.6rem;flex-wrap:wrap">
+          ${p.customer_email?`<a href="mailto:${p.customer_email}" class="btn btn-sm btn-secondary">Email</a>`:''}  
+          <button class="btn btn-sm btn-primary" onclick="openAssignModal(${p.id})">Assign bikes</button>
+          <button class="btn btn-sm btn-secondary" onclick="dismissAssignment(${p.id})">Dismiss</button>
+        </div>
     ${activity.length===0
       ?'<div style="text-align:center;padding:1.5rem 0;color:var(--text3);font-size:0.88rem">No activity yet today</div>'
       :activity.slice(0,25).map(a=>{
@@ -1501,3 +1505,98 @@ async function retireBike(id, reactivate) {
 }
 
 function iconAdmin(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><path d="M12 12v9"/><path d="m15 15-3 3-3-3"/></svg>`;}
+
+// ── PENDING ASSIGNMENTS ───────────────────────────────────────────────────
+async function openAssignModal(assignmentId) {
+  const assignments = await api('/api/today');
+  const p = (assignments.pending || []).find(x => x.id === assignmentId);
+  if (!p) { toast('Assignment not found', 'error'); return; }
+
+  openModal(`
+    <div class="modal-title">Assign bikes</div>
+    <div style="margin-bottom:0.85rem">
+      <div style="font-size:0.95rem;font-weight:600">${p.customer_name||'Unknown'}</div>
+      <div style="font-size:0.82rem;color:var(--text2)">#${p.fareharbor_booking_ref||''} · ${p.booking_date||''} ${p.start_time||''}</div>
+      <div style="font-size:0.82rem;color:var(--red);margin-top:3px">Needs: ${p.bikes_needed||'TBD'}</div>
+    </div>
+    <div class="form-label">Assign specific bikes</div>
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+      <input class="form-input" id="assign-input" placeholder="Type bike ID..." autocapitalize="characters"/>
+      <button class="btn btn-secondary btn-sm" onclick="addAssignBike()">Add</button>
+    </div>
+    <div id="assign-tags" class="return-tags" style="margin-bottom:0.75rem"></div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input class="form-input" id="assign-note" placeholder="Any notes for this booking..."/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAssignment(${assignmentId}, '${p.fareharbor_booking_ref||''}', '${p.start_time||''}', '${p.end_time||''}', '${p.booking_date||''}')">Confirm assignment</button>
+    </div>`);
+
+  window._assignBikes = [];
+  document.getElementById('assign-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addAssignBike(); }
+  });
+}
+
+function addAssignBike() {
+  const input = document.getElementById('assign-input');
+  const id = input.value.trim().toUpperCase().replace(/,/g,'');
+  if (!id || window._assignBikes.includes(id)) { input.value=''; return; }
+  window._assignBikes.push(id);
+  input.value = '';
+  const tags = document.getElementById('assign-tags');
+  if (tags) tags.innerHTML = window._assignBikes.map(b =>
+    `<span class="return-tag">${b}<span class="return-tag-remove" onclick="removeAssignBike('${b}')">&times;</span></span>`
+  ).join('');
+  input.focus();
+}
+
+function removeAssignBike(id) {
+  window._assignBikes = (window._assignBikes||[]).filter(x=>x!==id);
+  const tags = document.getElementById('assign-tags');
+  if (tags) tags.innerHTML = window._assignBikes.map(b =>
+    `<span class="return-tag">${b}<span class="return-tag-remove" onclick="removeAssignBike('${b}')">&times;</span></span>`
+  ).join('');
+}
+
+async function submitAssignment(assignmentId, bookingRef, startTime, endTime, bookingDate) {
+  const bikes = window._assignBikes || [];
+  const note = document.getElementById('assign-note')?.value?.trim();
+  if (bikes.length === 0) { toast('Add at least one bike', 'error'); return; }
+
+  try {
+    // Check out all assigned bikes
+    for (const bikeId of bikes) {
+      await api(`/api/bikes/${bikeId}/checkout`, { method:'POST', body:{
+        assignment_type: 'rental',
+        fareharbor_booking_ref: bookingRef,
+        assigned_to: 'FareHarbor booking',
+        note: note || null,
+        return_due: bookingDate && endTime ? `${bookingDate}T${endTime}` : null,
+        force: true,
+      }});
+    }
+
+    // Mark assignment as assigned
+    await api(`/api/assignments/${assignmentId}/assign`, { method:'POST', body:{ bike_ids: bikes, note }});
+
+    closeModal();
+    toast(`${bikes.length} bike${bikes.length>1?'s':''} assigned to #${bookingRef}`, 'success');
+    await renderTab('today');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function dismissAssignment(assignmentId) {
+  await api(`/api/assignments/${assignmentId}/assign`, { method:'POST', body:{ bike_ids:[], dismissed:true }});
+  toast('Dismissed', 'success');
+  await renderTab('today');
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  try {
+    return new Date(d+'T00:00:00Z').toLocaleDateString('da-DK', {day:'numeric',month:'short'});
+  } catch { return d; }
+}

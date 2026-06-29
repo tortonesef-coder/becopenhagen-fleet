@@ -171,7 +171,7 @@ router.get('/today', (req, res) => {
     WHERE al.action IN ('checkout','bulk_return','return','city','repair_ticket')
     AND date(al.created_at)=? ORDER BY al.created_at DESC
   `).all(today);
-  const pending = db().prepare(`SELECT * FROM pending_assignments WHERE date(booking_date)=? AND status='pending' ORDER BY start_time`).all(today);
+  const pending = db().prepare(`SELECT * FROM pending_assignments WHERE status='pending' AND (booking_date IS NULL OR booking_date >= date('now')) ORDER BY booking_date, start_time LIMIT 10`).all();
   res.json({ checkouts, pending });
 });
 
@@ -191,6 +191,26 @@ router.get('/team', (req, res) => {
   res.json(db().prepare('SELECT * FROM team_members WHERE active=1 ORDER BY role,name').all());
 });
 
+
+// GET /api/assignments — all pending
+router.get('/assignments', (req, res) => {
+  const { status } = req.query;
+  let sql = 'SELECT * FROM pending_assignments WHERE 1=1';
+  const params = [];
+  if (status) { sql += ' AND status=?'; params.push(status); }
+  sql += ' ORDER BY booking_date, start_time';
+  res.json(db().prepare(sql).all(...params));
+});
+
+// POST /api/assignments/:id/assign — mark assigned or dismissed
+router.post('/assignments/:id/assign', (req, res) => {
+  const { bike_ids, note, dismissed } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  const status = dismissed ? 'cancelled' : 'assigned';
+  db().prepare(`UPDATE pending_assignments SET status=?, assigned_at=datetime('now'), assigned_by=?, notes=? WHERE id=?`)
+    .run(status, actor, note||null, req.params.id);
+  res.json({ ok: true });
+});
 
 // POST /api/log/undo — delete recent log entries for a bike (used by undo)
 router.post('/log/undo', (req, res) => {

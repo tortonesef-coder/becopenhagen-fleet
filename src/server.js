@@ -33,6 +33,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/api/voice', require('./routes/voice'));
+app.use('/webhooks', require('./routes/webhooks'));
 app.use('/api/repairs', require('./routes/repairs'));
 app.use('/api/fleet', require('./routes/fleet'));
 app.use('/api', require('./routes/api'));
