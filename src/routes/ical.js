@@ -224,10 +224,11 @@ function syncFeedToDB(feed, events) {
        booking_count, bookings_json, url, last_synced)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
     ON CONFLICT(availability_id) DO UPDATE SET
-      guide=excluded.guide, bikes_needed=excluded.bikes_needed,
-      total_bikes=excluded.total_bikes, booking_count=excluded.booking_count,
-      bookings_json=excluded.bookings_json, last_synced=excluded.last_synced,
-      summary=excluded.summary
+      guide=excluded.guide, start_at=excluded.start_at, end_at=excluded.end_at,
+      start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
+      bikes_needed=excluded.bikes_needed, total_bikes=excluded.total_bikes,
+      booking_count=excluded.booking_count, bookings_json=excluded.bookings_json,
+      last_synced=excluded.last_synced, summary=excluded.summary
   `);
 
   events.forEach(e => {
