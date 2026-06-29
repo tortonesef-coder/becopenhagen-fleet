@@ -50,7 +50,12 @@ function parseIcal(text) {
     const dtstart = get('DTSTART') || '';
     const dtend = get('DTEND') || '';
     const descRaw = block.match(/^DESCRIPTION:(.+?)(?=\n[A-Z])/ms)?.[1] || '';
-    const description = descRaw.replace(/\\n/g, '\n').replace(/\n\s/g, '').trim();
+    const description = descRaw
+      .replace(/\n[ \t]/g, '')  // unfold continuation lines
+      .replace(/\\n/g, '\n')     // unescape literal \n to real newlines
+      .trim();
+    // Debug: log first booking block found
+    //console.log('DESC sample:', description.substring(0, 200));
 
     if (!dtstart) return;
 
@@ -113,8 +118,7 @@ function parseIcal(text) {
     const bookings = [];
     const bookingBlocks = description.split(/BOOKING #/);
     bookingBlocks.slice(1).forEach(block => {
-      const raw = block.replace(/\\n/g, '\n');
-      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
       if (!lines.length) return;
 
       const ref = lines[0]?.trim();
@@ -336,6 +340,14 @@ router.get('/rentals', (req, res) => {
     bikes_needed: JSON.parse(r.bikes_needed || '{}'),
     bookings: JSON.parse(r.bookings_json || '[]'),
   })));
+});
+
+// GET /api/ical/debug — inspect raw stored data
+router.get('/debug', (req, res) => {
+  try {
+    const rows = db().prepare('SELECT availability_id, feed_id, booking_count, bookings_json, substr(bookings_json,1,500) as preview FROM tour_availabilities LIMIT 3').all();
+    res.json(rows);
+  } catch(e) { res.status(500).json({error: e.message}); }
 });
 
 // POST /api/ical/sync — manual sync trigger
