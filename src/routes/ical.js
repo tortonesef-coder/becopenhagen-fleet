@@ -170,7 +170,32 @@ function syncFeedToDB(feed, events) {
 }
 
 // ── Fetch and sync all feeds ─────────────────────────────────────────────
+async function ensureTable() {
+  try {
+    db().exec(`CREATE TABLE IF NOT EXISTS tour_availabilities (
+      availability_id TEXT PRIMARY KEY,
+      feed_id TEXT NOT NULL,
+      feed_label TEXT,
+      feed_type TEXT DEFAULT 'tour',
+      guide TEXT,
+      start_at TEXT,
+      end_at TEXT,
+      start_date TEXT,
+      start_time TEXT,
+      end_time TEXT,
+      summary TEXT,
+      bikes_needed TEXT DEFAULT '{}',
+      total_bikes INTEGER DEFAULT 0,
+      booking_count INTEGER DEFAULT 0,
+      bookings_json TEXT DEFAULT '[]',
+      url TEXT,
+      last_synced TEXT
+    )`);
+  } catch(e) { console.error('Table creation error:', e.message); }
+}
+
 async function syncAllFeeds() {
+  await ensureTable();
   console.log('Syncing iCal feeds...');
   let total = 0;
   for (const feed of TOUR_FEEDS) {
@@ -192,8 +217,13 @@ async function syncAllFeeds() {
 // Start polling every 5 minutes
 let syncTimer = null;
 function startPolling() {
-  syncAllFeeds();
-  syncTimer = setInterval(syncAllFeeds, 5 * 60 * 1000);
+  // Delay first sync by 3 seconds to let DB fully initialise
+  setTimeout(() => {
+    syncAllFeeds().catch(e => console.error('Initial iCal sync failed:', e.message));
+  }, 3000);
+  syncTimer = setInterval(() => {
+    syncAllFeeds().catch(e => console.error('iCal sync failed:', e.message));
+  }, 5 * 60 * 1000);
 }
 
 // ── API endpoints ────────────────────────────────────────────────────────
