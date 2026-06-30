@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
 const { hashPassword, verifyPassword, generateToken } = require('../auth');
-const { sendPasswordResetEmail } = require('../email');
+const { sendPasswordResetEmail, sendVerificationCodeEmail } = require('../email');
 
 function db() { return getDb(); }
 
@@ -19,7 +19,7 @@ router.post('/login', (req, res) => {
   if (!member) return res.status(404).json({ error: 'Unknown team member' });
 
   if (member.needs_password_setup) {
-    return res.json({ needs_setup: true });
+    return res.json({ needs_setup: true, email_on_file: member.email || null });
   }
 
   if (!password) return res.status(400).json({ error: 'Password required' });
@@ -32,6 +32,45 @@ router.post('/login', (req, res) => {
   req.session.actor_name = member.name;
   req.session.actor_role = member.role;
   res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role } });
+});
+
+// POST /auth/send-verification — sends a 6-digit code to confirm email ownership before first-time setup
+router.post('/send-verification', async (req, res) => {
+  const { member_id, email } = req.body;
+  if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email required' });
+
+  const member = db().prepare('SELECT * FROM team_members WHERE id=? AND active=1').get(member_id);
+  if (!member) return res.status(404).json({ error: 'Unknown team member' });
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  db().prepare('INSERT INTO email_verifications (member_id, email, code, expires_at) VALUES (?,?,?,?)')
+    .run(member_id, email, code, expiresAt);
+
+  const result = await sendVerificationCodeEmail(email, member.name, code);
+  if (!result.ok) return res.status(500).json({ error: 'Could not send verification email' });
+
+  res.json({ ok: true });
+});
+
+// POST /auth/verify-code — checks the 6-digit code
+router.post('/verify-code', (req, res) => {
+  const { member_id, email, code } = req.body;
+  const verification = db().prepare(`
+    SELECT * FROM email_verifications
+    WHERE member_id=? AND email=? AND code=? AND used=0
+    ORDER BY created_at DESC LIMIT 1
+  `).get(member_id, email, code);
+
+  if (!verification) return res.status(400).json({ error: 'Incorrect code' });
+  if (new Date(verification.expires_at) < new Date()) return res.status(400).json({ error: 'Code has expired, request a new one' });
+
+  db().prepare('UPDATE email_verifications SET used=1 WHERE id=?').run(verification.id);
+  // Save the verified email onto the member record now
+  db().prepare('UPDATE team_members SET email=? WHERE id=?').run(email, member_id);
+
+  res.json({ ok: true });
 });
 
 // POST /auth/set-password — first-time password setup

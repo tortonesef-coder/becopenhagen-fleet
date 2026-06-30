@@ -151,6 +151,16 @@ function initSchema() {
       used INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_id TEXT NOT NULL REFERENCES team_members(id),
+      email TEXT NOT NULL,
+      code TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT,
+      used INTEGER DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS shop_pin (
       id INTEGER PRIMARY KEY CHECK(id = 1),
       pin_hash TEXT,

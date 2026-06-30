@@ -149,9 +149,67 @@ async function selectMember(memberId) {
   const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId } });
 
   if (data.needs_setup) {
-    showSetPasswordScreen(memberId, true);
+    showConfirmEmailScreen(memberId, data.email_on_file);
   } else {
     showPasswordScreen(memberId);
+  }
+}
+
+function showConfirmEmailScreen(memberId, emailOnFile) {
+  openModal(`
+    <div class="modal-title">Confirm your email</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">First time logging in. We'll send a code to verify it's you.</p>
+    <div class="form-group">
+      <input class="form-input" type="email" id="confirm-email" placeholder="you@example.com" value="${emailOnFile||''}" autofocus/>
+    </div>
+    <div id="confirm-email-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitConfirmEmail('${memberId}')">Send code</button>
+    </div>
+  `);
+}
+
+async function submitConfirmEmail(memberId) {
+  const email = document.getElementById('confirm-email')?.value?.trim();
+  const err = document.getElementById('confirm-email-error');
+  if (!email || !email.includes('@')) { if(err) err.textContent = 'Enter a valid email'; return; }
+
+  try {
+    await api('/auth/send-verification', { method:'POST', body:{ member_id: memberId, email }});
+    showEnterCodeScreen(memberId, email);
+  } catch(e) {
+    if (err) err.textContent = e.message;
+  }
+}
+
+function showEnterCodeScreen(memberId, email) {
+  openModal(`
+    <div class="modal-title">Enter the code</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">We sent a 6-digit code to ${email}</p>
+    <div class="form-group">
+      <input class="form-input" type="tel" maxlength="6" id="verify-code" placeholder="123456" style="text-align:center;font-size:1.4rem;letter-spacing:0.4rem" autofocus/>
+    </div>
+    <div id="verify-code-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="showConfirmEmailScreen('${memberId}','${email}')">Back</button>
+      <button class="btn btn-primary" onclick="submitVerifyCode('${memberId}','${email}')">Verify</button>
+    </div>
+    <button onclick="submitConfirmEmail('${memberId}')" style="background:none;border:none;color:var(--text3);font-size:0.78rem;margin-top:0.85rem;width:100%;cursor:pointer">Resend code</button>
+  `);
+  document.getElementById('verify-code').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitVerifyCode(memberId, email);
+  });
+}
+
+async function submitVerifyCode(memberId, email) {
+  const code = document.getElementById('verify-code')?.value?.trim();
+  const err = document.getElementById('verify-code-error');
+  try {
+    await api('/auth/verify-code', { method:'POST', body:{ member_id: memberId, email, code }});
+    showSetPasswordScreen(memberId, true);
+  } catch(e) {
+    if (err) err.textContent = e.message;
   }
 }
 
@@ -189,7 +247,7 @@ async function submitLogin(memberId) {
 function showSetPasswordScreen(memberId, isFirstTime) {
   openModal(`
     <div class="modal-title">${isFirstTime ? 'Set your password' : 'Choose a new password'}</div>
-    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">${isFirstTime ? "First time logging in — set a password to protect your account." : ''}</p>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">${isFirstTime ? "Email confirmed! Now set a password to protect your account." : ''}</p>
     <div class="form-group">
       <input class="form-input" type="password" id="setup-password" placeholder="New password (min 6 characters)" autofocus/>
     </div>
@@ -214,34 +272,6 @@ async function submitSetPassword(memberId) {
   try {
     const data = await api('/auth/set-password', { method:'POST', body:{ member_id: memberId, password: pw }});
     state.actor = data.actor;
-    closeModal();
-    showSetEmailScreen(memberId);
-  } catch(e) {
-    if (err) err.textContent = e.message;
-  }
-}
-
-function showSetEmailScreen(memberId) {
-  openModal(`
-    <div class="modal-title">Add your email</div>
-    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">Needed in case you forget your password later.</p>
-    <div class="form-group">
-      <input class="form-input" type="email" id="setup-email" placeholder="you@example.com" autofocus/>
-    </div>
-    <div id="setup-email-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal();showMain()">Skip for now</button>
-      <button class="btn btn-primary" onclick="submitSetEmail('${memberId}')">Save</button>
-    </div>
-  `);
-}
-
-async function submitSetEmail(memberId) {
-  const email = document.getElementById('setup-email')?.value?.trim();
-  const err = document.getElementById('setup-email-error');
-  if (!email || !email.includes('@')) { if(err) err.textContent = 'Enter a valid email'; return; }
-  try {
-    await api('/auth/set-email', { method:'POST', body:{ member_id: memberId, email }});
     closeModal();
     showMain();
   } catch(e) {

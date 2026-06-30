@@ -51,4 +51,21 @@ async function sendPasswordResetEmail(toEmail, toName, resetUrl) {
   });
 }
 
-module.exports = { sendEmail, sendPasswordResetEmail };
+async function sendVerificationCodeEmail(toEmail, toName, code) {
+  return sendEmail({
+    to: toEmail,
+    toName,
+    subject: 'Your BC Fleet verification code',
+    htmlContent: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+        <h2 style="color:#C8102E">BC Fleet</h2>
+        <p>Hi ${toName},</p>
+        <p>Your verification code is:</p>
+        <p style="font-size:32px;font-weight:700;letter-spacing:6px;color:#C8102E;text-align:center;padding:16px;background:#fdf0f2;border-radius:8px">${code}</p>
+        <p style="color:#888;font-size:13px">This code expires in 10 minutes. If you didn't request this, you can safely ignore this email.</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendEmail, sendPasswordResetEmail, sendVerificationCodeEmail };
