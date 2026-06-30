@@ -16,6 +16,7 @@ const TOUR_FEEDS = [
   { id: 'F3',  itemId: '729348', label: 'Food Tour (3h)',               type: 'tour' },
   { id: 'F3P', itemId: '730640', label: 'Private Food Tour (3h)',       type: 'tour' },
   { id: 'H3',  itemId: '741878', label: 'History Tour New (3h)',        type: 'tour' },
+  { id: 'CUSTOM', itemId: '650858', label: 'Custom Tour',               type: 'tour' },
   { id: '1-D', itemId: '190975', label: '1-Day Rental',                 type: 'rental' },
   { id: '2-D', itemId: '190977', label: '2-Day Rental',                 type: 'rental' },
   { id: '3-D', itemId: '190978', label: '3-Day Rental',                 type: 'rental' },
@@ -394,9 +395,12 @@ router.get('/tours', (req, res) => {
 
   let rows = db().prepare(sql).all();
 
-  // Fuzzy-filter by guide name in JS (handles accents/typos that SQL LIKE can't)
+  // Fuzzy-filter by guide name in JS (handles accents/typos that SQL LIKE can't).
+  // Unassigned tours (no guide set) are intentionally excluded here — they
+  // should only be visible to admins (who call this endpoint without ?guide=),
+  // not to individual guides, since an unclaimed tour isn't "theirs" yet.
   if (guide) {
-    rows = rows.filter(r => !r.guide || guideMatches(r.guide, guide));
+    rows = rows.filter(r => r.guide && guideMatches(r.guide, guide));
   }
 
   res.json(rows.map(r => ({
