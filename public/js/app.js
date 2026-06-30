@@ -553,7 +553,7 @@ function buildTabbar() {
   }
   const role=state.actor?.role;
   const tabs = role==='mechanic'
-    ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
+    ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}]
     : role==='admin'
     ? [{id:'bikes',label:'Bikes',icon:iconBike()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
     : [{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
