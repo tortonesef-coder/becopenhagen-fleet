@@ -51,7 +51,7 @@ function runAgentScript(args) {
 
 // POST /api/fareharbor-agent/create-booking
 router.post('/create-booking', async (req, res) => {
-  const { customer_name, phone, email, days, payment_method, bike_ids } = req.body;
+  const { customer_name, phone, email, days, payment_method, bike_ids, start_datetime } = req.body;
   const actor = req.session?.actor || 'unknown';
 
   if (!customer_name) return res.status(400).json({ error: 'Customer name required' });
@@ -73,41 +73,38 @@ router.post('/create-booking', async (req, res) => {
     bikesByType[bike.fareharbor_resource].push(bike.id);
   }
 
-  const typeLabels = Object.keys(bikesByType);
-  if (typeLabels.length > 1) {
-    // The underlying script currently books ONE bike type per call.
-    // For a mixed-type rental (e.g. 1 adult bike + 1 cargo bike), we'd need
-    // multiple sequential bookings or a multi-type-aware script version.
-    // For now: reject mixed-type bookings with a clear message rather than
-    // silently booking only one type.
-    return res.status(400).json({
-      error: `Mixed bike types in one rental (${typeLabels.join(', ')}) aren't supported yet — please check out each type separately.`,
-    });
-  }
-
-  const bikeTypeLabel = typeLabels[0];
-  const matchingBikeIds = bikesByType[bikeTypeLabel];
+  const bikeTypeLabels = Object.keys(bikesByType);
+  const items = bikeTypeLabels.map(label => ({
+    bikeTypeLabel: label,
+    qty: bikesByType[label].length,
+    bikeIds: bikesByType[label],
+  }));
+  const allBikeIds = bikeTypeLabels.flatMap(label => bikesByType[label]);
 
   const itemId = RENTAL_ITEM_BY_DAYS[days] || RENTAL_ITEM_BY_DAYS[1];
 
-  // Booking date/time: rentals created from the app start NOW, today, at the current time
-  const now = new Date();
-  const date = now.toISOString().substring(0, 10);
-  const time = now.toTimeString().substring(0, 5);
+  // Booking date/time: defaults to right now (walk-in), or a future date/time
+  // if the rental form specified one.
+  let bookingMoment;
+  if (start_datetime) {
+    bookingMoment = new Date(start_datetime);
+    if (isNaN(bookingMoment.getTime())) return res.status(400).json({ error: 'Invalid start_datetime' });
+  } else {
+    bookingMoment = new Date();
+  }
+  const date = bookingMoment.toISOString().substring(0, 10);
+  const time = bookingMoment.toTimeString().substring(0, 5);
 
   const paymentMethod = payment_method === 'card' ? 'card' : 'cash';
-  const paymentComment = payment_method === 'card' ? 'POS' : undefined;
 
-  console.log('Triggering FareHarbor agent:', { itemId, date, time, bikeTypeLabel, qty: matchingBikeIds.length, customer_name, paymentMethod });
+  console.log('Triggering FareHarbor agent:', { itemId, date, time, items: items.map(i=>`${i.bikeTypeLabel} x${i.qty}`), customer_name, paymentMethod });
 
   try {
     const result = await runAgentScript({
       item: itemId,
       date,
       time,
-      bikeType: bikeTypeLabel,
-      qty: matchingBikeIds.length,
-      bikeIds: matchingBikeIds.join(','),
+      items: JSON.stringify(items),
       customerName: customer_name,
       phone: phone || '',
       email: email || '',
@@ -115,8 +112,8 @@ router.post('/create-booking', async (req, res) => {
     });
 
     db().prepare(`INSERT INTO action_log (actor,action,bike_id,booking_ref,details) VALUES (?,?,?,?,?)`)
-      .run(actor, 'fareharbor_booking_created', matchingBikeIds.join(','), result.booking_ref,
-        JSON.stringify({ customer_name, bike_ids: matchingBikeIds, days, payment_method: paymentMethod }));
+      .run(actor, 'fareharbor_booking_created', allBikeIds.join(','), result.booking_ref,
+        JSON.stringify({ customer_name, bike_ids: allBikeIds, days, payment_method: paymentMethod, start_datetime: start_datetime || null }));
 
     res.json({ ok: true, booking_ref: result.booking_ref });
   } catch (e) {

@@ -273,7 +273,7 @@ async function getMaxAvailable(page, bikeTypeLabel) {
 
 // ── Step 4: fill and submit the booking ───────────────────────────────────
 async function createBooking({
-  itemId, availabilityId, bikeTypeLabel, qty, bikeIds,
+  itemId, availabilityId, items, // items: [{ bikeTypeLabel, qty, bikeIds }, ...]
   customerName, phone, email, paymentMethod, paymentComment,
 }) {
   const browser = await chromium.launch({ headless: true });
@@ -308,21 +308,25 @@ async function createBooking({
       if (await emailField.count() > 0) await emailField.fill(email);
     }
 
-    // Quantity — respecting the overbooking guard
-    const { select, maxSafe } = await getMaxAvailable(page, bikeTypeLabel);
-    if (qty > maxSafe) {
-      throw new Error(`Only ${maxSafe} of "${bikeTypeLabel}" available without overbooking (requested ${qty}).`);
+    // Set quantity for EACH bike type in this booking — respecting the
+    // overbooking guard independently for each one.
+    const allBikeIds = [];
+    for (const item of items) {
+      const { select, maxSafe } = await getMaxAvailable(page, item.bikeTypeLabel);
+      if (item.qty > maxSafe) {
+        throw new Error(`Only ${maxSafe} of "${item.bikeTypeLabel}" available without overbooking (requested ${item.qty}).`);
+      }
+      await select.selectOption(String(item.qty));
+      await page.waitForTimeout(500);
+      if (item.bikeIds && item.bikeIds.length > 0) allBikeIds.push(...item.bikeIds);
     }
-    await select.selectOption(String(qty));
-    await page.waitForTimeout(800); // let FareHarbor recalculate price/payment panel
+    await page.waitForTimeout(800); // let FareHarbor recalculate price/payment panel after all quantities set
 
-    // Bike IDs (staff-only field)
-    if (bikeIds && bikeIds.length > 0) {
-      const bikeIdField = page.locator('textarea[placeholder*="Bike IDs"], textarea').filter({ hasText: '' }).first();
-      // More reliable: find by preceding label text "Bike IDs"
+    // Bike IDs (staff-only field) — one combined list across all bike types
+    if (allBikeIds.length > 0) {
       const bikeIdsLabel = page.locator('text="Bike IDs"').first();
       const bikeIdsTextarea = bikeIdsLabel.locator('xpath=following::textarea[1]');
-      await bikeIdsTextarea.fill(bikeIds.join('\n'));
+      await bikeIdsTextarea.fill(allBikeIds.join('\n'));
     }
 
     // Payment method
@@ -403,12 +407,25 @@ async function main() {
   await browser.close();
 
   console.log('Creating booking...');
+
+  // Support two CLI shapes:
+  // 1. Simple single-type: --bikeType=... --qty=... --bikeIds=A,B,C
+  // 2. Multi-type: --items='[{"bikeTypeLabel":"Adult'\''s Bikes","qty":1,"bikeIds":["A22"]},...]'
+  let items;
+  if (args.items) {
+    items = JSON.parse(args.items);
+  } else {
+    items = [{
+      bikeTypeLabel: args.bikeType,
+      qty: parseInt(args.qty, 10),
+      bikeIds: args.bikeIds ? args.bikeIds.split(',') : [],
+    }];
+  }
+
   const result = await createBooking({
     itemId: args.item,
     availabilityId,
-    bikeTypeLabel: args.bikeType,
-    qty: parseInt(args.qty, 10),
-    bikeIds: args.bikeIds ? args.bikeIds.split(',') : [],
+    items,
     customerName: args.customerName,
     phone: args.phone,
     email: args.email,

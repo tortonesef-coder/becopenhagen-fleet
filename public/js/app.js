@@ -868,6 +868,17 @@ function renderActionDetails(actionId) {
         <input class="form-input" id="af-email" placeholder="customer@email.com"/>
       </div>
       <div class="form-group">
+        <label class="form-label">When</label>
+        <select class="form-select" id="af-when" onchange="document.getElementById('af-future-datetime').style.display = this.value==='future' ? 'block' : 'none'">
+          <option value="now">Walk-in — starting now</option>
+          <option value="future">Future booking — pick date/time</option>
+        </select>
+      </div>
+      <div class="form-group" id="af-future-datetime" style="display:none">
+        <label class="form-label">Start date &amp; time</label>
+        <input class="form-input" id="af-start-datetime" type="datetime-local"/>
+      </div>
+      <div class="form-group">
         <label class="form-label">Number of days</label>
         <select class="form-select" id="af-days">
           ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14].map(n=>`<option value="${n}">${n} day${n>1?'s':''}</option>`).join('')}
@@ -1132,13 +1143,20 @@ async function submitActionNew() {
       const email = document.getElementById('af-email')?.value?.trim();
       const days = parseInt(document.getElementById('af-days')?.value) || 1;
       const payment = document.getElementById('af-payment')?.value || '';
+      const when = document.getElementById('af-when')?.value || 'now';
+      const startDatetime = document.getElementById('af-start-datetime')?.value || null;
+
+      if (when === 'future' && !startDatetime) {
+        toast('Pick a date and time for the future booking', 'error');
+        return;
+      }
 
       if (customerName) {
         toast('Creating FareHarbor booking...', '');
         try {
           const fhResult = await api('/api/fareharbor-agent/create-booking', { method:'POST', body:{
             customer_name: customerName, phone, email, days, payment_method: payment,
-            bike_ids: bikes,
+            bike_ids: bikes, start_datetime: when === 'future' ? startDatetime : null,
           }});
           if (fhResult?.booking_ref) {
             for (const bikeId of bikes) {
