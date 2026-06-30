@@ -309,19 +309,79 @@ function startPolling() {
 
 // ── API endpoints ────────────────────────────────────────────────────────
 
+// Normalize a name for fuzzy comparison: lowercase, strip accents, remove non-letters
+function normalizeName(s) {
+  if (!s) return '';
+  return s.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[^a-z]/g, ''); // keep only letters
+}
+
+// Levenshtein distance for fuzzy matching typos
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const matrix = Array.from({length: a.length+1}, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i-1][j] + 1,
+        matrix[i][j-1] + 1,
+        matrix[i-1][j-1] + cost
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+// Does the guide string on the availability match this person's name?
+// Handles accents, case, typos, and partial matches (first name only, etc.)
+function guideMatches(availGuide, personName) {
+  if (!availGuide || !personName) return false;
+  const a = normalizeName(availGuide);
+  const p = normalizeName(personName);
+  if (!a || !p) return false;
+
+  // Exact normalized match or substring either direction
+  if (a === p || a.includes(p) || p.includes(a)) return true;
+
+  // Fuzzy match: allow up to 2 character edits per ~6 chars (handles typos)
+  const maxDist = Math.max(1, Math.floor(Math.min(a.length, p.length) / 3));
+  if (levenshtein(a, p) <= maxDist) return true;
+
+  // Word-level match: any word in availGuide fuzzy-matches any word in personName
+  const aWords = availGuide.toLowerCase().split(/\s+/).map(normalizeName).filter(Boolean);
+  const pWords = personName.toLowerCase().split(/\s+/).map(normalizeName).filter(Boolean);
+  for (const aw of aWords) {
+    for (const pw of pWords) {
+      if (aw.length < 3 || pw.length < 3) continue;
+      if (aw === pw) return true;
+      const d = Math.max(1, Math.floor(Math.min(aw.length, pw.length) / 3));
+      if (levenshtein(aw, pw) <= d) return true;
+    }
+  }
+  return false;
+}
+
 // GET /api/ical/tours — upcoming tour availabilities
 router.get('/tours', (req, res) => {
   const { guide, days } = req.query;
   const limit = parseInt(days) || 30;
 
-  let sql = `SELECT * FROM tour_availabilities
+  const sql = `SELECT * FROM tour_availabilities
     WHERE feed_type='tour' AND start_at >= datetime('now', '-1 hour')
-    AND start_at <= datetime('now', '+${limit} days')`;
-  const params = [];
-  if (guide) { sql += ` AND (guide LIKE ? OR guide IS NULL)`; params.push(`%${guide}%`); }
-  sql += ' ORDER BY start_at';
+    AND start_at <= datetime('now', '+${limit} days') ORDER BY start_at`;
 
-  const rows = db().prepare(sql).all(...params);
+  let rows = db().prepare(sql).all();
+
+  // Fuzzy-filter by guide name in JS (handles accents/typos that SQL LIKE can't)
+  if (guide) {
+    rows = rows.filter(r => !r.guide || guideMatches(r.guide, guide));
+  }
+
   res.json(rows.map(r => ({
     ...r,
     bikes_needed: JSON.parse(r.bikes_needed || '{}'),
