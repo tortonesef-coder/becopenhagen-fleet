@@ -131,10 +131,24 @@ async function loginToDashboard(browser) {
   await page.goto(DASHBOARD_LOGIN_URL, { waitUntil: 'networkidle' });
   console.log('Login page title:', await page.title());
   console.log('Login page URL:', page.url());
+
+  // Step 1 of 2: FareHarbor first asks for the company "Shortname" before
+  // showing the actual email/password form for that company.
+  const shortnameField = page.locator('input').first();
+  const hasShortnameStep = await page.locator('text="Shortname"').count() > 0;
+  if (hasShortnameStep) {
+    console.log('Shortname step detected, filling:', COMPANY_SLUG);
+    await shortnameField.fill(COMPANY_SLUG);
+    const nextBtn = page.locator('button:has-text("Next")').first();
+    await nextBtn.click();
+    await page.waitForTimeout(1500);
+  }
+
   await page.screenshot({ path: '/tmp/fh-debug-5-login-page.png', fullPage: true });
   console.log('Saved debug screenshot: /tmp/fh-debug-5-login-page.png');
 
-  // Try a broad set of likely selectors for the email/username field
+  // Try a broad set of likely selectors for the email field, including
+  // label-based lookup since FareHarbor's form may not use name/id/type=email.
   const emailSelectors = [
     'input[name="email"]', 'input[type="email"]', 'input[name="username"]',
     'input#id_email', 'input#email', 'input[placeholder*="mail" i]',
@@ -146,10 +160,15 @@ async function loginToDashboard(browser) {
     if (await loc.count() > 0) { emailField = loc; console.log('Email field matched selector:', sel); break; }
   }
   if (!emailField) {
+    // Fallback: find the input that follows the "Email" label text
+    const byLabel = page.locator('text="Email"').locator('xpath=following::input[1]').first();
+    if (await byLabel.count() > 0) { emailField = byLabel; console.log('Email field matched via label fallback'); }
+  }
+  if (!emailField) {
     const bodyText = await page.locator('body').innerText();
     console.log('--- Login page text (first 1000 chars) ---');
     console.log(bodyText.substring(0, 1000));
-    throw new Error('Could not find email/username field on login page. See /tmp/fh-debug-5-login-page.png');
+    throw new Error('Could not find email field on login page. See /tmp/fh-debug-5-login-page.png');
   }
   await emailField.fill(FAREHARBOR_EMAIL);
 
@@ -159,10 +178,14 @@ async function loginToDashboard(browser) {
     const loc = page.locator(sel).first();
     if (await loc.count() > 0) { passwordField = loc; console.log('Password field matched selector:', sel); break; }
   }
+  if (!passwordField) {
+    const byLabel = page.locator('text="Password"').locator('xpath=following::input[1]').first();
+    if (await byLabel.count() > 0) { passwordField = byLabel; console.log('Password field matched via label fallback'); }
+  }
   if (!passwordField) throw new Error('Could not find password field on login page.');
   await passwordField.fill(FAREHARBOR_PASSWORD);
 
-  const submitSelectors = ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Log in")', 'button:has-text("Sign in")'];
+  const submitSelectors = ['button:has-text("Log in")', 'button:has-text("Sign in")', 'button[type="submit"]', 'input[type="submit"]'];
   let submitBtn = null;
   for (const sel of submitSelectors) {
     const loc = page.locator(sel).first();
