@@ -243,4 +243,14 @@ router.post('/log/attribute', (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/fareharbor-agent-log — recent agent activity (successes + failures)
+router.get('/fareharbor-agent-log', (req, res) => {
+  const rows = db().prepare(`
+    SELECT * FROM action_log
+    WHERE action IN ('fareharbor_booking_created','fareharbor_booking_failed')
+    ORDER BY created_at DESC LIMIT 50
+  `).all();
+  res.json(rows.map(r => ({ ...r, details: JSON.parse(r.details || '{}') })));
+});
+
 module.exports = router;

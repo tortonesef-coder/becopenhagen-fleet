@@ -118,6 +118,9 @@ router.post('/create-booking', async (req, res) => {
     res.json({ ok: true, booking_ref: result.booking_ref });
   } catch (e) {
     console.error('FareHarbor agent failed:', e.message);
+    db().prepare(`INSERT INTO action_log (actor,action,bike_id,booking_ref,details) VALUES (?,?,?,?,?)`)
+      .run(actor, 'fareharbor_booking_failed', allBikeIds.join(','), null,
+        JSON.stringify({ customer_name, bike_ids: allBikeIds, days, payment_method: paymentMethod, error: e.message }));
     res.status(500).json({ error: e.message });
   }
 });

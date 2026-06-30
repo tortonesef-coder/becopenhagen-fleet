@@ -1670,6 +1670,7 @@ async function renderAdmin(c) {
     <div class="subtab-row">
       <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
       <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
+      <button class="subtab${window._adminTab==='fareharbor'?' active':''}" onclick="switchAdminTab('fareharbor')">FareHarbor</button>
       <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
     </div>
     <div id="admin-tab-content"></div>`;
@@ -1678,8 +1679,8 @@ async function renderAdmin(c) {
 
 async function switchAdminTab(tab) {
   window._adminTab = tab;
-  document.querySelectorAll('.subtab').forEach(b =>
-    b.classList.toggle('active', b.textContent === (tab==='bikes'?'Fleet':tab==='log'?'Log':'View as')));
+  const labels = {bikes:'Fleet', log:'Log', fareharbor:'FareHarbor', viewas:'View as'};
+  document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   renderAdminTab(document.getElementById('content'));
 }
 
@@ -1688,7 +1689,39 @@ async function renderAdminTab(c) {
   if (!el) return;
   if (window._adminTab === 'bikes') await renderAdminBikes(el);
   else if (window._adminTab === 'viewas') await renderViewAs(el);
+  else if (window._adminTab === 'fareharbor') await renderFareHarborLog(el);
   else await renderAdminLog(el);
+}
+
+async function renderFareHarborLog(el) {
+  el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  const rows = await api('/api/fareharbor-agent-log').catch(() => []);
+
+  if (rows.length === 0) {
+    el.innerHTML = '<div class="empty-state"><p>No FareHarbor agent activity yet</p></div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <button class="btn btn-sm btn-secondary" style="margin-bottom:0.85rem" onclick="renderFareHarborLog(document.getElementById('admin-tab-content'))">↻ Refresh</button>
+    <div class="bike-list">
+      ${rows.map(r => {
+        const isSuccess = r.action === 'fareharbor_booking_created';
+        const d = r.details || {};
+        return `<div class="activity-row" style="align-items:flex-start">
+          <div class="ar-icon ${isSuccess?'ret':'issue'}">${isSuccess?'OK':'ERR'}</div>
+          <div class="ar-body">
+            <div class="ar-main">
+              ${isSuccess
+                ? `Booking #${r.booking_ref} — ${d.customer_name||''}`
+                : `Failed — ${d.customer_name||'unknown customer'}`}
+            </div>
+            <div class="ar-sub">${(d.bike_ids||[]).join(', ')} · ${d.payment_method||''} · ${fmtTime(r.created_at)}</div>
+            ${!isSuccess && d.error ? `<div style="font-size:0.78rem;color:var(--red);margin-top:4px;font-family:monospace;background:var(--bg3);padding:6px 8px;border-radius:6px">${d.error}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 async function renderAdminBikes(el) {
