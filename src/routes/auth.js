@@ -60,6 +60,13 @@ router.post('/send-verification', async (req, res) => {
 // POST /auth/verify-code — checks the 6-digit code
 router.post('/verify-code', (req, res) => {
   const { member_id, email, code } = req.body;
+
+  // Emergency bypass while email delivery is being fixed — remove once Brevo domain is verified
+  if (code === process.env.EMERGENCY_BYPASS_CODE) {
+    db().prepare('UPDATE team_members SET email=? WHERE id=?').run(email, member_id);
+    return res.json({ ok: true });
+  }
+
   const verification = db().prepare(`
     SELECT * FROM email_verifications
     WHERE member_id=? AND email=? AND code=? AND used=0
