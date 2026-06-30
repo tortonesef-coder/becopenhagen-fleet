@@ -859,7 +859,34 @@ function renderActionDetails(actionId) {
         <label class="form-label">Customer name</label>
         <input class="form-input" id="af-name" placeholder="Name"/>
       </div>
-      <div class="form-group" style="margin-bottom:0">
+      <div class="form-group">
+        <label class="form-label">Phone (optional)</label>
+        <input class="form-input" id="af-phone" placeholder="+45..."/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email (optional)</label>
+        <input class="form-input" id="af-email" placeholder="customer@email.com"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Number of days</label>
+        <select class="form-select" id="af-days">
+          ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14].map(n=>`<option value="${n}">${n} day${n>1?'s':''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payment method</label>
+        <select class="form-select" id="af-payment">
+          <option value="">— not paid yet —</option>
+          <option value="cash">Cash</option>
+          <option value="card">Card terminal / POS</option>
+          <option value="online">Already paid online</option>
+        </select>
+      </div>
+      <div class="toggle-row" style="padding-top:0.5rem">
+        <span class="toggle-label">Create booking in FareHarbor</span>
+        <label class="toggle"><input type="checkbox" id="af-create-fh" checked/><span class="toggle-track"></span></label>
+      </div>
+      <div class="form-group" style="margin-top:0.5rem;margin-bottom:0">
         <label class="form-label">Return due (optional)</label>
         <input class="form-input" id="af-due" type="datetime-local"/>
       </div>
@@ -1058,7 +1085,6 @@ async function submitActionNew() {
           assignment_type: type, customer_name: name, assigned_to: name||actor,
           return_due: due, fareharbor_booking_ref: ref, note, force:true
         }});
-
       } else if(type==='borrowed') {
         const name = document.getElementById('af-name')?.value?.trim();
         const note = document.getElementById('af-note')?.value?.trim();
@@ -1096,6 +1122,36 @@ async function submitActionNew() {
       } else if(type==='missing') {
         const note = document.getElementById('af-note')?.value?.trim();
         await api(`/api/bikes/${bikeId}/return`,{method:'POST',body:{new_status:'missing',note}});
+      }
+    }
+
+    // Create a single FareHarbor booking covering all bikes in this rental
+    if (type === 'rental' && document.getElementById('af-create-fh')?.checked) {
+      const customerName = document.getElementById('af-name')?.value?.trim();
+      const phone = document.getElementById('af-phone')?.value?.trim();
+      const email = document.getElementById('af-email')?.value?.trim();
+      const days = parseInt(document.getElementById('af-days')?.value) || 1;
+      const payment = document.getElementById('af-payment')?.value || '';
+
+      if (customerName) {
+        toast('Creating FareHarbor booking...', '');
+        try {
+          const fhResult = await api('/api/fareharbor-agent/create-booking', { method:'POST', body:{
+            customer_name: customerName, phone, email, days, payment_method: payment,
+            bike_ids: bikes,
+          }});
+          if (fhResult?.booking_ref) {
+            for (const bikeId of bikes) {
+              await api(`/api/bikes/${bikeId}/checkout`, {method:'POST', body:{
+                fareharbor_booking_ref: fhResult.booking_ref, force:true,
+                assignment_type:'rental', assigned_to: customerName,
+              }});
+            }
+            toast(`FareHarbor booking #${fhResult.booking_ref} created`, 'success');
+          }
+        } catch(e) {
+          toast('FareHarbor booking failed: ' + e.message, 'error');
+        }
       }
     }
 

@@ -1,0 +1,239 @@
+#!/usr/bin/env node
+/**
+ * FareHarbor Booking Agent
+ *
+ * Creates a real booking on FareHarbor for a walk-in rental, using a
+ * logged-in staff session. Marks payment as Cash or Previously paid (POS),
+ * fills the staff-only Bike IDs field, and respects FareHarbor's own
+ * "Overbooking" threshold per resource type (never books past it).
+ *
+ * Usage (manual test):
+ *   node create-booking.js --item=190975 --date=2026-07-02 --time=10:00 \
+ *     --bikeType="Adult's Bikes" --qty=1 --bikeIds=A22 \
+ *     --customerName="Test Customer" --payment=cash
+ *
+ * Required env vars:
+ *   FAREHARBOR_EMAIL, FAREHARBOR_PASSWORD
+ */
+
+const { chromium } = require('playwright');
+
+const FAREHARBOR_EMAIL = process.env.FAREHARBOR_EMAIL;
+const FAREHARBOR_PASSWORD = process.env.FAREHARBOR_PASSWORD;
+const COMPANY_SLUG = 'becopenhagen';
+const DASHBOARD_LOGIN_URL = 'https://fareharbor.com/users/login/';
+
+// ── Step 1: find the availability ID using an ANONYMOUS context ──────────
+// The public booking widget requires being logged out, so we use a
+// separate, fully isolated browser context (no cookies shared with the
+// authenticated dashboard context) purely to discover the availability_id
+// for a given item + date + time.
+async function findAvailabilityId(browser, { itemId, date, time }) {
+  const context = await browser.newContext(); // fresh, anonymous, no auth
+  const page = await context.newPage();
+
+  try {
+    const url = `https://fareharbor.com/embeds/book/${COMPANY_SLUG}/items/${itemId}/`;
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 });
+
+    // The widget shows a calendar; we need to navigate to the right date
+    // and click the matching time slot. FareHarbor's embed renders dates
+    // as clickable day cells, then time slots appear for the selected day.
+    // We look for a link/button whose text or data attributes match the date.
+
+    // Try direct calendar date click (FareHarbor uses YYYY-MM-DD in various places)
+    const dateSelector = `[data-date="${date}"], [aria-label*="${date}"]`;
+    const dateEl = await page.locator(dateSelector).first();
+    if (await dateEl.count() > 0) {
+      await dateEl.click();
+      await page.waitForTimeout(1500);
+    }
+
+    // Now look for the time slot matching `time` (e.g. "10:00")
+    const timeLocator = page.locator(`text="${time}"`).first();
+    await timeLocator.waitFor({ timeout: 10000 });
+    await timeLocator.click();
+    await page.waitForTimeout(1500);
+
+    // After clicking, the URL or an inner link should contain availability/<id>
+    const currentUrl = page.url();
+    let match = currentUrl.match(/availability\/(\d+)/);
+
+    if (!match) {
+      // Sometimes the click opens a panel with a "Book Now" link containing the ID
+      const bookLink = await page.locator('a[href*="/availability/"]').first();
+      if (await bookLink.count() > 0) {
+        const href = await bookLink.getAttribute('href');
+        match = href.match(/availability\/(\d+)/);
+      }
+    }
+
+    if (!match) {
+      throw new Error(`Could not find availability ID for item ${itemId} on ${date} ${time}. The page structure may have changed.`);
+    }
+
+    return match[1];
+  } finally {
+    await context.close();
+  }
+}
+
+// ── Step 2: log into the staff dashboard (AUTHENTICATED context) ─────────
+async function loginToDashboard(browser) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await page.goto(DASHBOARD_LOGIN_URL, { waitUntil: 'networkidle' });
+
+  // FareHarbor's login form — field names confirmed via inspection;
+  // adjust selectors here if FareHarbor changes their login page.
+  await page.fill('input[name="email"], input[type="email"]', FAREHARBOR_EMAIL);
+  await page.fill('input[name="password"], input[type="password"]', FAREHARBOR_PASSWORD);
+  await page.click('button[type="submit"]');
+
+  await page.waitForURL('**/dashboard/**', { timeout: 15000 }).catch(() => {
+    // Some accounts land elsewhere after login; not fatal, continue.
+  });
+
+  return { context, page };
+}
+
+// ── Step 3: check the quantity dropdown for the real (non-overbooking) max ─
+async function getMaxAvailable(page, bikeTypeLabel) {
+  // Find the <select> associated with the bike type row by its visible label text
+  const row = page.locator(`text="${bikeTypeLabel}"`).first();
+  const select = row.locator('xpath=ancestor::*[self::div][1]//select').first();
+
+  const options = await select.locator('option').allTextContents();
+  // Options appear in order: 0,1,2,...N, then "Overbooking:" separator, then more numbers.
+  // We only trust options BEFORE any option whose text includes "Overbooking".
+  let maxSafe = 0;
+  for (const opt of options) {
+    const trimmed = opt.trim();
+    if (/overbooking/i.test(trimmed)) break;
+    const n = parseInt(trimmed, 10);
+    if (!isNaN(n)) maxSafe = Math.max(maxSafe, n);
+  }
+  return { select, maxSafe };
+}
+
+// ── Step 4: fill and submit the booking ───────────────────────────────────
+async function createBooking({
+  itemId, availabilityId, bikeTypeLabel, qty, bikeIds,
+  customerName, phone, email, paymentMethod, paymentComment,
+}) {
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const { page } = await loginToDashboard(browser);
+
+    const bookUrl = `https://fareharbor.com/${COMPANY_SLUG}/items/${itemId}/availability/${availabilityId}/book/`;
+    await page.goto(bookUrl, { waitUntil: 'networkidle', timeout: 20000 });
+
+    // Customer details
+    await page.fill('input[placeholder="Full name"], input[name*="name"]', customerName);
+    if (phone) await page.fill('input[placeholder="Phone number"]', phone);
+    if (email) await page.fill('input[placeholder="Email Address"]', email);
+
+    // Quantity — respecting the overbooking guard
+    const { select, maxSafe } = await getMaxAvailable(page, bikeTypeLabel);
+    if (qty > maxSafe) {
+      throw new Error(`Only ${maxSafe} of "${bikeTypeLabel}" available without overbooking (requested ${qty}).`);
+    }
+    await select.selectOption(String(qty));
+    await page.waitForTimeout(800); // let FareHarbor recalculate price/payment panel
+
+    // Bike IDs (staff-only field)
+    if (bikeIds && bikeIds.length > 0) {
+      const bikeIdField = page.locator('textarea[placeholder*="Bike IDs"], textarea').filter({ hasText: '' }).first();
+      // More reliable: find by preceding label text "Bike IDs"
+      const bikeIdsLabel = page.locator('text="Bike IDs"').first();
+      const bikeIdsTextarea = bikeIdsLabel.locator('xpath=following::textarea[1]');
+      await bikeIdsTextarea.fill(bikeIds.join('\n'));
+    }
+
+    // Payment method
+    const paymentLabel = paymentMethod === 'cash' ? 'Cash' : 'Previously paid';
+    await page.locator(`text="${paymentLabel}"`).first().click();
+
+    // Ensure "Pay in full" is selected (not partial/no payment)
+    const payInFull = page.locator('text="Pay in full"').first();
+    if (await payInFull.count() > 0) await payInFull.click();
+
+    // Payment comment (only visible to staff)
+    if (paymentComment) {
+      const addComment = page.locator('text="Add comment to payment"').first();
+      if (await addComment.count() > 0) {
+        await addComment.click();
+        await page.waitForTimeout(300);
+        const commentBox = page.locator('textarea[placeholder*="Payment comment"]').first();
+        await commentBox.fill(paymentComment);
+      }
+    }
+
+    // Final submit
+    const completeBtn = page.locator('button:has-text("Complete booking")').first();
+    await completeBtn.waitFor({ timeout: 10000 });
+    await completeBtn.click();
+
+    // Wait for confirmation — booking ref typically appears in the URL or a confirmation panel
+    await page.waitForTimeout(3000);
+    const finalUrl = page.url();
+    const bookingMatch = finalUrl.match(/bookings\/(\d+)/) || finalUrl.match(/#(\d{6,})/);
+    const bookingRef = bookingMatch ? bookingMatch[1] : null;
+
+    return { ok: true, booking_ref: bookingRef, final_url: finalUrl };
+
+  } finally {
+    await browser.close();
+  }
+}
+
+// ── CLI entry point for manual testing ────────────────────────────────────
+async function main() {
+  const args = Object.fromEntries(
+    process.argv.slice(2).map(a => {
+      const [k, ...v] = a.replace(/^--/, '').split('=');
+      return [k, v.join('=')];
+    })
+  );
+
+  if (!FAREHARBOR_EMAIL || !FAREHARBOR_PASSWORD) {
+    console.error('Missing FAREHARBOR_EMAIL / FAREHARBOR_PASSWORD environment variables.');
+    process.exit(1);
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  let availabilityId = args.availabilityId;
+
+  if (!availabilityId) {
+    console.log('Looking up availability ID...');
+    availabilityId = await findAvailabilityId(browser, {
+      itemId: args.item, date: args.date, time: args.time,
+    });
+    console.log('Found availability ID:', availabilityId);
+  }
+  await browser.close();
+
+  console.log('Creating booking...');
+  const result = await createBooking({
+    itemId: args.item,
+    availabilityId,
+    bikeTypeLabel: args.bikeType,
+    qty: parseInt(args.qty, 10),
+    bikeIds: args.bikeIds ? args.bikeIds.split(',') : [],
+    customerName: args.customerName,
+    phone: args.phone,
+    email: args.email,
+    paymentMethod: args.payment || 'cash',
+    paymentComment: args.payment === 'card' ? 'POS' : undefined,
+  });
+
+  console.log('Result:', JSON.stringify(result, null, 2));
+}
+
+if (require.main === module) {
+  main().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+}
+
+module.exports = { findAvailabilityId, createBooking, getMaxAvailable };
