@@ -1757,7 +1757,7 @@ async function openTourDetail(availId) {
           + "<span style='font-weight:700;font-size:0.9rem'>"+(b.name||"Unknown")+"</span>"
           + src + unpaid
           + "</div>"
-          + (b.created_at && new Date(b.created_at) < new Date('2026-07-01T00:00:00+02:00')
+          + ((!b.created_at || new Date(b.created_at) < new Date('2026-07-01T00:00:00+02:00'))
               ? '<span style="font-size:0.68rem;background:var(--purple-bg);color:var(--purple);padding:1px 6px;border-radius:10px;margin-left:4px">🏳️ Booked before Jul 1</span>'
               : '')
           + (b.phone ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>📞 "+b.phone+"</div>" : "")
