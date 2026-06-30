@@ -21,7 +21,7 @@ const { chromium } = require('playwright');
 const FAREHARBOR_EMAIL = process.env.FAREHARBOR_EMAIL;
 const FAREHARBOR_PASSWORD = process.env.FAREHARBOR_PASSWORD;
 const COMPANY_SLUG = 'becopenhagen';
-const DASHBOARD_LOGIN_URL = 'https://fareharbor.com/users/login/';
+const DASHBOARD_LOGIN_URL = 'https://fareharbor.com/login/';
 
 // ── Step 1: find the availability ID using an ANONYMOUS context ──────────
 // The public booking widget requires being logged out, so we use a
