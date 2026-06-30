@@ -304,7 +304,7 @@ function startPolling() {
   }, 3000);
   syncTimer = setInterval(() => {
     syncAllFeeds().catch(e => console.error('iCal sync failed:', e.message));
-  }, 5 * 60 * 1000);
+  }, 90 * 1000);
 }
 
 // ── API endpoints ────────────────────────────────────────────────────────
