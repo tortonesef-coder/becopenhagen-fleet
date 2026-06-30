@@ -337,11 +337,25 @@ async function createBooking({
     await completeBtn.waitFor({ timeout: 10000 });
     await completeBtn.click();
 
-    // Wait for confirmation — booking ref typically appears in the URL or a confirmation panel
+    // Wait for confirmation and extract the real booking reference from the
+    // page text itself ("Booking #359158707"), which is far more reliable
+    // than guessing at a URL pattern.
     await page.waitForTimeout(3000);
     const finalUrl = page.url();
-    const bookingMatch = finalUrl.match(/bookings\/(\d+)/) || finalUrl.match(/#(\d{6,})/);
-    const bookingRef = bookingMatch ? bookingMatch[1] : null;
+
+    let bookingRef = null;
+    const refLocator = page.locator('text=/Booking #\\d+/').first();
+    if (await refLocator.count() > 0) {
+      const refText = await refLocator.innerText();
+      const m = refText.match(/Booking #(\d+)/);
+      if (m) bookingRef = m[1];
+    }
+    if (!bookingRef) {
+      // Fallback: scan the whole page body text for the same pattern
+      const bodyText = await page.locator('body').innerText();
+      const m = bodyText.match(/Booking #(\d+)/);
+      if (m) bookingRef = m[1];
+    }
 
     return { ok: true, booking_ref: bookingRef, final_url: finalUrl };
 
