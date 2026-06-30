@@ -1398,3 +1398,52 @@ details summary::-webkit-details-marker { display: none; }
   transition: transform 0.15s;
 }
 .availability-summary[open] summary::after { transform: rotate(180deg); }
+
+/* ── PIN entry (Shop mode) ── */
+.pin-dots {
+  display: flex;
+  gap: 0.85rem;
+  justify-content: center;
+  margin: 1rem 0 1.5rem;
+}
+.pin-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: transparent;
+  transition: all 0.15s;
+}
+.pin-dot.filled {
+  background: var(--red);
+  border-color: var(--red);
+  transform: scale(1.1);
+}
+
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 280px;
+}
+.pin-key {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--bg2);
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pin-key:active {
+  background: var(--red-light);
+  border-color: var(--red);
+  color: var(--red);
+  transform: scale(0.95);
+}

@@ -387,6 +387,40 @@ async function initShopMode() {
   }
 }
 
+function pinDotsHtml(id) {
+  return `<div class="pin-dots" id="${id}-dots">
+    <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+  </div>`;
+}
+
+function pinKeypadHtml(id) {
+  const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  return `<div class="pin-keypad">
+    ${keys.map(k => k === '' ? '<div></div>' :
+      `<button type="button" class="pin-key" onclick="pinKeyPress('${id}','${k}')">${k}</button>`
+    ).join('')}
+  </div>`;
+}
+
+function pinKeyPress(id, key) {
+  const input = document.getElementById(id);
+  let val = input.value;
+  if (key === '⌫') val = val.slice(0, -1);
+  else if (val.length < 4) val += key;
+  input.value = val;
+  updatePinDots(id);
+  if (val.length === 4) {
+    if (id === 'shop-pin-setup') submitShopPinSetup();
+    else submitShopPin();
+  }
+}
+
+function updatePinDots(id) {
+  const val = document.getElementById(id)?.value || '';
+  const dots = document.querySelectorAll(`#${id}-dots .pin-dot`);
+  dots.forEach((d, i) => d.classList.toggle('filled', i < val.length));
+}
+
 function showShopPinSetup() {
   document.getElementById('screen-identity').innerHTML = `
     <div class="identity-wrap">
@@ -396,8 +430,9 @@ function showShopPinSetup() {
         <div class="bc-sub-label">Shop Mode Setup</div>
       </div>
       <p style="font-size:0.85rem;color:var(--text2);text-align:center;margin-bottom:1rem">Set a 4-digit PIN for this shop device.</p>
-      <input class="form-input" type="tel" maxlength="4" id="shop-pin-setup" placeholder="••••" style="text-align:center;font-size:1.5rem;letter-spacing:0.5rem;max-width:160px" autofocus/>
-      <button class="btn btn-primary" style="margin-top:1rem;max-width:160px" onclick="submitShopPinSetup()">Set PIN</button>
+      <input type="hidden" id="shop-pin-setup" value=""/>
+      ${pinDotsHtml('shop-pin-setup')}
+      ${pinKeypadHtml('shop-pin-setup')}
     </div>`;
 }
 
@@ -416,13 +451,11 @@ function showShopPinEntry() {
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
         <div class="bc-sub-label">Shop Mode</div>
       </div>
-      <input class="form-input" type="tel" maxlength="4" id="shop-pin-entry" placeholder="Enter PIN" style="text-align:center;font-size:1.5rem;letter-spacing:0.5rem;max-width:160px" autofocus/>
-      <div id="shop-pin-error" style="color:#e04040;font-size:0.85rem;margin-top:0.5rem"></div>
-      <button class="btn btn-primary" style="margin-top:1rem;max-width:160px" onclick="submitShopPin()">Unlock</button>
+      <input type="hidden" id="shop-pin-entry" value=""/>
+      ${pinDotsHtml('shop-pin-entry')}
+      <div id="shop-pin-error" style="color:#e04040;font-size:0.85rem;margin:0.5rem 0;text-align:center"></div>
+      ${pinKeypadHtml('shop-pin-entry')}
     </div>`;
-  document.getElementById('shop-pin-entry').addEventListener('keydown', e => {
-    if (e.key === 'Enter') submitShopPin();
-  });
 }
 
 async function submitShopPin() {
@@ -435,6 +468,8 @@ async function submitShopPin() {
   } catch(e) {
     const err = document.getElementById('shop-pin-error');
     if (err) err.textContent = e.message || 'Something went wrong';
+    const input = document.getElementById('shop-pin-entry');
+    if (input) { input.value = ''; updatePinDots('shop-pin-entry'); }
     console.error('Shop PIN error:', e);
   }
 }
