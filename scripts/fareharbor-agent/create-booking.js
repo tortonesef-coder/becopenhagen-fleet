@@ -35,6 +35,10 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
   try {
     const url = `https://fareharbor.com/embeds/book/${COMPANY_SLUG}/items/${itemId}/`;
     await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 });
+    await page.screenshot({ path: '/tmp/fh-debug-1-initial.png', fullPage: true });
+    console.log('Saved debug screenshot: /tmp/fh-debug-1-initial.png');
+    console.log('Page title:', await page.title());
+    console.log('Page URL:', page.url());
 
     // The widget shows a calendar; we need to navigate to the right date
     // and click the matching time slot. FareHarbor's embed renders dates
@@ -44,13 +48,29 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
     // Try direct calendar date click (FareHarbor uses YYYY-MM-DD in various places)
     const dateSelector = `[data-date="${date}"], [aria-label*="${date}"]`;
     const dateEl = await page.locator(dateSelector).first();
-    if (await dateEl.count() > 0) {
+    const dateCount = await dateEl.count();
+    console.log('Date selector matches found:', dateCount);
+    if (dateCount > 0) {
       await dateEl.click();
       await page.waitForTimeout(1500);
+      await page.screenshot({ path: '/tmp/fh-debug-2-after-date-click.png', fullPage: true });
+      console.log('Saved debug screenshot: /tmp/fh-debug-2-after-date-click.png');
+    } else {
+      console.log('WARNING: no date element matched, calendar may need manual navigation');
     }
 
     // Now look for the time slot matching `time` (e.g. "10:00")
     const timeLocator = page.locator(`text="${time}"`).first();
+    const timeCount = await timeLocator.count();
+    console.log('Time text matches found on page:', timeCount);
+    if (timeCount === 0) {
+      await page.screenshot({ path: '/tmp/fh-debug-3-no-time-found.png', fullPage: true });
+      console.log('Saved debug screenshot: /tmp/fh-debug-3-no-time-found.png');
+      const bodyText = await page.locator('body').innerText();
+      console.log('--- Page text (first 1500 chars) ---');
+      console.log(bodyText.substring(0, 1500));
+      console.log('--- end page text ---');
+    }
     await timeLocator.waitFor({ timeout: 10000 });
     await timeLocator.click();
     await page.waitForTimeout(1500);
