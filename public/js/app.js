@@ -52,53 +52,58 @@ async function api(path, opts={}) {
 }
 
 // ── Toast + Undo ──────────────────────────────────────────────────────────
-let _undoFn = null;
-let _toastTimer = null;
-
-function toast(msg, type="", undoFn=null) {
+function toast(msg, type="") {
   const el = document.getElementById("toast");
   if (!el) return;
-  clearTimeout(_toastTimer);
-  _undoFn = undoFn;
-
-  el.innerHTML = undoFn
-    ? `<span>${msg}</span><button class="toast-undo-btn" onclick="event.stopPropagation();triggerUndo()">Undo</button>`
-    : `<span>${msg}</span>`;
-  el.className = "toast " + type + (undoFn ? " has-undo" : "");
+  clearTimeout(toast._timer);
+  el.innerHTML = `<span>${msg}</span>`;
+  el.className = "toast " + type;
   el.classList.remove("hidden");
-
-  const duration = undoFn ? 3500 : 1800;
-  _toastTimer = setTimeout(dismissToast, duration);
+  toast._timer = setTimeout(dismissToast, 1800);
 }
 
 function dismissToast() {
-  clearTimeout(_toastTimer);
-  _toastTimer = null;
+  clearTimeout(toast._timer);
   const el = document.getElementById("toast");
   if (el) el.classList.add("hidden");
-  _undoFn = null;
+}
+
+document.getElementById("toast")?.addEventListener("click", dismissToast);
+
+// ── Undo stack ────────────────────────────────────────────────────────────
+// Fixed-depth stack of compensating actions. Each record: {label, fn}
+// fn is an async function that reverses the action when popped.
+const UNDO_STACK_MAX = 25;
+let undoStack = [];
+
+function pushUndo(label, fn) {
+  undoStack.push({ label, fn });
+  if (undoStack.length > UNDO_STACK_MAX) undoStack.shift();
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById('btn-undo');
+  if (!btn) return;
+  const hasUndo = undoStack.length > 0;
+  btn.classList.toggle('live', hasUndo);
+  btn.disabled = !hasUndo;
+  btn.title = hasUndo ? `Undo: ${undoStack[undoStack.length-1].label}` : 'Nothing to undo';
 }
 
 async function triggerUndo() {
-  clearTimeout(_toastTimer);
-  const fn = _undoFn;
-  _undoFn = null;
-  const el = document.getElementById("toast");
-  if (el) el.classList.add("hidden");
-  if (!fn) return;
+  const action = undoStack.pop();
+  updateUndoButton();
+  if (!action) return;
   try {
-    await fn();
-    toast("Undone", "success");
+    await action.fn();
+    toast('Undone: ' + action.label, 'success');
   } catch(e) {
-    toast("Could not undo: " + e.message, "error");
+    toast('Could not undo: ' + e.message, 'error');
   }
 }
 
-// Tap anywhere on the toast to dismiss it immediately
-document.getElementById("toast")?.addEventListener("click", (e) => {
-  if (e.target.closest(".toast-undo-btn")) return; // don't dismiss when tapping Undo itself
-  dismissToast();
-});
+document.getElementById('btn-undo')?.addEventListener('click', triggerUndo);
 // ── Modal ─────────────────────────────────────────────────────────────────
 function openModal(html) {
   document.getElementById('modal-content').innerHTML=html;
@@ -1148,7 +1153,8 @@ async function submitActionNew() {
       };
     }
 
-    toast(`Done — ${label.toLowerCase()}`, 'success', undoFn);
+    toast(`Done — ${label.toLowerCase()}`, 'success');
+    if (undoFn) pushUndo(label.toLowerCase(), undoFn);
 
     if (state.shopMode) {
       const completedBikes = [...bikes];
@@ -1362,7 +1368,8 @@ async function setComplexity(ticketId, complexity) {
     await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ complexity } });
     const [tickets, stats] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
     renderTicketTab(tickets, stats);
-    toast('Complexity updated', 'success', async () => {
+    toast('Complexity updated', 'success');
+    pushUndo('complexity change', async () => {
       await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ complexity: prev } });
       const [t2, s2] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
       renderTicketTab(t2, s2);
@@ -1376,7 +1383,8 @@ async function toggleCanRent(ticketId, canRent) {
     const [tickets, stats] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
     renderTicketTab(tickets, stats);
     const prev = canRent ? 0 : 1;
-    toast(canRent ? 'Marked: can rent' : 'Marked: off fleet', 'success', async () => {
+    toast(canRent ? 'Marked: can rent' : 'Marked: off fleet', 'success');
+    pushUndo(canRent ? 'can-rent toggle' : 'off-fleet toggle', async () => {
       await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ can_rent: prev } });
       const [t2, s2] = await Promise.all([api('/api/repairs?status=open'), api('/api/repairs/stats')]);
       renderTicketTab(t2, s2);
@@ -1423,7 +1431,8 @@ async function submitResolve(ticketId, bikeId) {
     await api(`/api/repairs/${ticketId}/resolve`, { method:'POST', body:{ resolution_note:note, new_bike_status:status, actual_hours }});
     closeModal();
     await renderTab('tickets');
-    toast('Ticket resolved ✓', 'success', async () => {
+    toast('Ticket resolved', 'success');
+    pushUndo('ticket resolved', async () => {
       await api(`/api/repairs/${ticketId}`, { method:'PATCH', body:{ status:'open' }});
       if (bikeId) await api(`/api/bikes/${bikeId}/return`, {method:'POST', body:{new_status:'repair', note:'Undo resolve'}});
       await renderTab('tickets');
@@ -1715,7 +1724,8 @@ async function submitAddBike() {
       notes: document.getElementById('ab-notes')?.value?.trim()||null,
     }});
     closeModal();
-    toast(`${id} added`, 'success', async () => {
+    toast(`${id} added`, 'success');
+    pushUndo(`${id} added`, async () => {
       await api(`/api/fleet/bikes/${id}`, {method:'PATCH', body:{active:false}});
       renderAdminTab(document.getElementById('content'));
     });
@@ -1778,7 +1788,8 @@ async function submitEditBike(id) {
     // Snapshot previous values for undo
     const _prevBike = await api(`/api/bikes/${id}`);
     closeModal();
-    toast(`${id} updated`, 'success', async () => {
+    toast(`${id} updated`, 'success');
+    pushUndo(`${id} edit`, async () => {
       await api(`/api/fleet/bikes/${id}`, {method:'PATCH', body:{
         type_id:_prevBike.type_id, name:_prevBike.name, frame_size:_prevBike.frame_size,
         key_number:_prevBike.key_number, frame_number:_prevBike.frame_number,
@@ -1795,7 +1806,8 @@ async function retireBike(id, reactivate) {
   try {
     await api(`/api/fleet/bikes/${id}`, { method:'PATCH', body:{ active: reactivate }});
     closeModal();
-    toast(`${id} ${reactivate?'reactivated':'retired'}`, 'success', async () => {
+    toast(`${id} ${reactivate?'reactivated':'retired'}`, 'success');
+    pushUndo(`${id} ${reactivate?'reactivate':'retire'}`, async () => {
       await api(`/api/fleet/bikes/${id}`, {method:'PATCH', body:{active: reactivate ? false : true}});
       renderAdminTab(document.getElementById('content'));
     });

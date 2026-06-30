@@ -1448,3 +1448,16 @@ details summary::-webkit-details-marker { display: none; }
   color: var(--red);
   transform: scale(0.95);
 }
+
+/* ── Undo button (topbar) ── */
+#btn-undo {
+  opacity: 0.3;
+  cursor: default;
+  transition: all 0.15s;
+}
+#btn-undo.live {
+  opacity: 1;
+  color: var(--red);
+  cursor: pointer;
+}
+#btn-undo.live:active { background: var(--red-light); transform: scale(0.92); }
