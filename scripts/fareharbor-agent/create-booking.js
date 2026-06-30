@@ -33,39 +33,38 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
   const page = await context.newPage();
 
   try {
-    const url = `https://fareharbor.com/embeds/book/${COMPANY_SLUG}/items/${itemId}/`;
+    const [year, month, dayNum] = date.split('-').map(s => parseInt(s, 10));
+
+    // Navigate directly to the correct month's calendar view via URL —
+    // more reliable than clicking "Next Month" repeatedly.
+    const url = `https://fareharbor.com/embeds/book/${COMPANY_SLUG}/items/${itemId}/calendar/${year}/${String(month).padStart(2,'0')}/`;
     await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 });
-    await page.screenshot({ path: '/tmp/fh-debug-1-initial.png', fullPage: true });
-    console.log('Saved debug screenshot: /tmp/fh-debug-1-initial.png');
     console.log('Page title:', await page.title());
     console.log('Page URL:', page.url());
 
-    // The widget shows a calendar; we need to navigate to the right date
-    // and click the matching time slot. FareHarbor's embed renders dates
-    // as clickable day cells, then time slots appear for the selected day.
-    // We look for a link/button whose text or data attributes match the date.
-
-    // Try direct calendar date click (FareHarbor uses YYYY-MM-DD in various places)
-    const dateSelector = `[data-date="${date}"], [aria-label*="${date}"]`;
-    const dateEl = await page.locator(dateSelector).first();
-    const dateCount = await dateEl.count();
-    console.log('Date selector matches found:', dateCount);
-    if (dateCount > 0) {
-      await dateEl.click();
-      await page.waitForTimeout(1500);
-      await page.screenshot({ path: '/tmp/fh-debug-2-after-date-click.png', fullPage: true });
-      console.log('Saved debug screenshot: /tmp/fh-debug-2-after-date-click.png');
-    } else {
-      console.log('WARNING: no date element matched, calendar may need manual navigation');
+    // Day cells render as plain numbers (e.g. "2") inside the calendar grid.
+    // We match by exact text and pick the one inside a clickable day cell
+    // (FareHarbor wraps each day in a link/button with the item name below it,
+    // e.g. "2\n1-Day Rentals" as seen in the page text dump).
+    const dayLocator = page.locator(`text="${dayNum}"`).first();
+    const dayCount = await dayLocator.count();
+    console.log(`Day cell matches for "${dayNum}":`, dayCount);
+    if (dayCount === 0) {
+      await page.screenshot({ path: '/tmp/fh-debug-2-no-day-found.png', fullPage: true });
+      throw new Error(`Could not find day cell "${dayNum}" on the calendar page.`);
     }
+    await dayLocator.click();
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: '/tmp/fh-debug-3-after-day-click.png', fullPage: true });
+    console.log('Saved debug screenshot: /tmp/fh-debug-3-after-day-click.png');
 
     // Now look for the time slot matching `time` (e.g. "10:00")
     const timeLocator = page.locator(`text="${time}"`).first();
     const timeCount = await timeLocator.count();
     console.log('Time text matches found on page:', timeCount);
     if (timeCount === 0) {
-      await page.screenshot({ path: '/tmp/fh-debug-3-no-time-found.png', fullPage: true });
-      console.log('Saved debug screenshot: /tmp/fh-debug-3-no-time-found.png');
+      await page.screenshot({ path: '/tmp/fh-debug-4-no-time-found.png', fullPage: true });
+      console.log('Saved debug screenshot: /tmp/fh-debug-4-no-time-found.png');
       const bodyText = await page.locator('body').innerText();
       console.log('--- Page text (first 1500 chars) ---');
       console.log(bodyText.substring(0, 1500));
