@@ -2140,10 +2140,21 @@ async function showShopWhoDidThis(bikeIds) {
   const n = team.length;
   const cols = (n % 4 === 0) ? 4 : 3;
 
-  openModal(`
-    <div class="modal-title">Who did this?</div>
-    <div class="identity-grid" id="shop-attribution-grid" style="--id-cols:${cols};max-width:none;margin-top:0.5rem"></div>
-  `);
+  // Full-screen takeover — not a modal, can't be dismissed without picking someone
+  document.getElementById('screen-main').classList.remove('active');
+  document.getElementById('screen-main').style.display = 'none';
+  document.getElementById('screen-identity').classList.add('active');
+  document.getElementById('screen-identity').style.display = 'flex';
+
+  document.getElementById('screen-identity').innerHTML = `
+    <div class="identity-wrap">
+      <div class="bc-logo-wrap">
+        <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
+        <div class="bc-wordmark">Be<span>Copenhagen</span></div>
+      </div>
+      <p class="identity-prompt" style="font-size:0.85rem;font-weight:700;color:var(--text)">Who did this?</p>
+      <div class="identity-grid" id="shop-attribution-grid" style="--id-cols:${cols}"></div>
+    </div>`;
 
   const grid = document.getElementById('shop-attribution-grid');
   grid.innerHTML = team.map(m=>`
@@ -2157,7 +2168,10 @@ async function showShopWhoDidThis(bikeIds) {
       try {
         await api('/api/log/attribute', { method:'POST', body:{ bike_ids: bikeIds, actor_name: btn.querySelector('.iname').textContent }});
       } catch(e) { console.error('Attribution failed:', e); }
-      closeModal();
+      document.getElementById('screen-identity').classList.remove('active');
+      document.getElementById('screen-identity').style.display = 'none';
+      document.getElementById('screen-main').classList.add('active');
+      document.getElementById('screen-main').style.display = 'flex';
       renderAction(document.getElementById('content'));
     });
   });
