@@ -507,7 +507,15 @@ async function renderTab(id) {
 
 // ── TODAY ─────────────────────────────────────────────────────────────────
 async function renderToday(c) {
-  const [avail,today]=await Promise.all([api('/api/availability'),api('/api/today')]);
+  c.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  let avail, today;
+  try {
+    [avail, today] = await Promise.all([api('/api/availability'), api('/api/today')]);
+  } catch(e) {
+    c.innerHTML = '<div class="empty-state"><p>Could not load: ' + e.message + '</p></div>';
+    console.error('renderToday failed:', e);
+    return;
+  }
   const {types}=avail;
   const scarce=new Set(['CC','E','SA','AC','AT']);
 
