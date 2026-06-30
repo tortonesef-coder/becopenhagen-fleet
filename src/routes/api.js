@@ -101,6 +101,10 @@ router.post('/bikes/:id/return', (req, res) => {
   const { note, new_status } = req.body;
   const actor = req.session?.actor || 'unknown';
   const finalStatus = new_status || 'available';
+
+  const bike = db().prepare('SELECT * FROM bikes WHERE id=? AND active=1').get(req.params.id);
+  if (!bike) return res.status(404).json({ error: `Bike ${req.params.id} does not exist` });
+
   const prev = db().prepare('SELECT * FROM bike_status WHERE bike_id=?').get(req.params.id);
 
   db().prepare(`UPDATE bike_status SET status=?, assigned_to=NULL, assignment_type=NULL,

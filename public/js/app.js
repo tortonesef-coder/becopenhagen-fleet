@@ -964,10 +964,20 @@ function toggleBike(id, name, currentStatus) {
   updateSubmitBtn();
 }
 
-function addBikeById() {
+async function addBikeById() {
   const input = document.getElementById('bike-adder-input');
   const raw = input.value.trim().toUpperCase().replace(/,/g,'');
   if(!raw) return;
+
+  try {
+    await api(`/api/bikes/${raw}`);
+  } catch(e) {
+    toast(`${raw} is not a real bike`, 'error');
+    input.value = '';
+    input.focus();
+    return;
+  }
+
   toggleBike(raw, '', '');
   input.value = '';
   input.focus();
@@ -1020,7 +1030,7 @@ function useMyLocation() {
 async function submitActionNew() {
   // Auto-add whatever is typed in the input field before submitting
   const input = document.getElementById('bike-adder-input');
-  if (input?.value?.trim()) addBikeById();
+  if (input?.value?.trim()) await addBikeById();
 
   const {type, bikes} = state.action;
   if(!type){toast('Select an action type first','error');return;}
