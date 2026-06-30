@@ -1288,3 +1288,10 @@ details summary::-webkit-details-marker { display: none; }
   cursor: pointer;
 }
 .view-as-banner button:active { background: rgba(255,255,255,0.3); }
+
+.identity-btn .iemoji {
+  font-size: 1.6rem;
+  line-height: 1;
+  margin-bottom: 4px;
+  display: block;
+}

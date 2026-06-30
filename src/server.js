@@ -28,10 +28,10 @@ app.use(session({
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.use((req, res, next) => {
-  // Shop mode: actor is whoever last tapped their name on the shared iPad
-  if (req.session?.shop_mode && req.session?.shop_actor) {
-    req.session.actor = req.session.shop_actor;
-    req.session.actor_name = req.session.shop_actor_name;
+  // Shop mode: every action is initially logged as 'shop' and attributed retroactively
+  if (req.session?.shop_mode) {
+    req.session.actor = 'shop';
+    req.session.actor_name = 'Shop';
   }
   req.actor = req.session?.actor || null;
   next();

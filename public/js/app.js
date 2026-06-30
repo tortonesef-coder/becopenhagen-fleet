@@ -116,14 +116,29 @@ document.getElementById('modal-overlay').addEventListener('click',e=>{
 
 // ── Identity & Auth ──────────────────────────────────────────────────────
 state.pendingMemberId = null;
+const GUIDE_EMOJIS = ['🧑\u200d🦱','👩\u200d🦰','🧑\u200d🦳','👨\u200d🦲','👩\u200d🦱','🧑\u200d🦰','👨\u200d🦳','👩\u200d🦲','🧑','👩','👨','🧑\u200d🎓'];
+
+function roleEmoji(role) {
+  const map = { admin: '⭐', mechanic: '🔧', guide: '🧑' };
+  return map[role] || '👤';
+}
+
+function guideEmoji(memberId) {
+  // Deterministic "random" based on ID so it stays consistent across renders
+  let hash = 0;
+  for (let i = 0; i < memberId.length; i++) hash = (hash * 31 + memberId.charCodeAt(i)) >>> 0;
+  return GUIDE_EMOJIS[hash % GUIDE_EMOJIS.length];
+}
+
+
 
 async function initIdentity() {
   // Resume an active shop_mode session if one exists
   const sessionCheck = await api('/session/me').catch(() => ({}));
   if (sessionCheck.shop_mode) {
     state.shopMode = true;
-    if (sessionCheck.actor) { state.actor = sessionCheck.actor; showMain(); }
-    else await showShopWhoAreYou();
+    state.actor = { id: 'shop', name: 'Shop', role: 'shop' };
+    showMain();
     return;
   }
 
@@ -136,6 +151,7 @@ async function initIdentity() {
   grid.style.setProperty('--id-cols', cols);
   grid.innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
+      <span class="iemoji">${m.role==='guide'?guideEmoji(m.id):roleEmoji(m.role)}</span>
       <span class="iname">${m.name}</span>
       <span class="irole">${m.role}</span>
     </button>`).join('');
@@ -328,7 +344,18 @@ async function checkSession() {
 }
 
 function switchUser() {
-  if (state.shopMode) { showShopWhoAreYou(); return; }
+  if (state.shopMode) {
+    api('/session/logout', { method:'POST' }).then(() => {
+      state.shopMode = false;
+      state.actor = null;
+      document.getElementById('screen-main').classList.remove('active');
+      document.getElementById('screen-main').style.display = 'none';
+      document.getElementById('screen-identity').classList.add('active');
+      document.getElementById('screen-identity').style.display = 'flex';
+      showShopPinEntry();
+    });
+    return;
+  }
   api('/session/logout', { method:'POST' }).then(() => {
     state.actor = null;
     document.getElementById('screen-main').classList.remove('active');
@@ -396,7 +423,8 @@ async function submitShopPin() {
   try {
     await api('/auth/shop-login', { method:'POST', body:{ pin }});
     state.shopMode = true;
-    await showShopWhoAreYou();
+    state.actor = { id: 'shop', name: 'Shop', role: 'shop' };
+    showMain();
   } catch(e) {
     const err = document.getElementById('shop-pin-error');
     if (err) err.textContent = e.message || 'Something went wrong';
@@ -436,6 +464,7 @@ async function showShopWhoAreYou() {
   const grid = document.getElementById('shop-who-grid');
   grid.innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
+      <span class="iemoji">${m.role==='guide'?guideEmoji(m.id):roleEmoji(m.role)}</span>
       <span class="iname">${m.name}</span>
       <span class="irole">${m.role}</span>
     </button>`).join('');
@@ -1125,10 +1154,9 @@ async function submitActionNew() {
     toast(`Done — ${label.toLowerCase()}`, 'success', undoFn);
 
     if (state.shopMode) {
-      // Shop mode: clear actor and go straight back to "who are you" after every action
+      const completedBikes = [...bikes];
       state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
-      await api('/session/shop-logout-actor', { method:'POST' });
-      setTimeout(() => showShopWhoAreYou(), 900); // small delay so the success toast is visible
+      setTimeout(() => showShopWhoDidThis(completedBikes), 600);
       return;
     }
 
@@ -2131,4 +2159,35 @@ function exitViewAs() {
   buildTabbar();
   renderTab('admin');
   window._adminTab = 'viewas';
+}
+
+// ── Shop mode: ask who did this AFTER the action completes ──────────────
+async function showShopWhoDidThis(bikeIds) {
+  const team = await api('/auth/team').catch(() => []);
+  team.sort((a,b)=>a.name.localeCompare(b.name));
+  const n = team.length;
+  const cols = (n % 4 === 0) ? 4 : 3;
+
+  openModal(`
+    <div class="modal-title">Who did this?</div>
+    <div class="identity-grid" id="shop-attribution-grid" style="--id-cols:${cols};max-width:none;margin-top:0.5rem"></div>
+  `);
+
+  const grid = document.getElementById('shop-attribution-grid');
+  grid.innerHTML = team.map(m=>`
+    <button class="identity-btn role-${m.role}" data-id="${m.id}">
+      <span class="iemoji">${m.role==='guide'?guideEmoji(m.id):roleEmoji(m.role)}</span>
+      <span class="iname">${m.name}</span>
+      <span class="irole">${m.role}</span>
+    </button>`).join('');
+
+  grid.querySelectorAll('.identity-btn').forEach(btn=>{
+    btn.addEventListener('click', async () => {
+      try {
+        await api('/api/log/attribute', { method:'POST', body:{ bike_ids: bikeIds, actor_name: btn.querySelector('.iname').textContent }});
+      } catch(e) { console.error('Attribution failed:', e); }
+      closeModal();
+      renderAction(document.getElementById('content'));
+    });
+  });
 }

@@ -224,4 +224,19 @@ router.post('/log/undo', (req, res) => {
   res.json({ ok: true, deleted: rows.length });
 });
 
+// POST /api/log/attribute — retroactively assign the real actor name to recent shop-mode actions
+router.post('/log/attribute', (req, res) => {
+  const { bike_ids, actor_name } = req.body;
+  if (!Array.isArray(bike_ids) || !actor_name) return res.status(400).json({ error: 'bike_ids and actor_name required' });
+
+  const upd = db().prepare(`
+    UPDATE action_log SET actor=?
+    WHERE bike_id=? AND actor='shop'
+    AND id = (SELECT MAX(id) FROM action_log WHERE bike_id=? AND actor='shop')
+  `);
+  bike_ids.forEach(id => upd.run(actor_name, id, id));
+
+  res.json({ ok: true });
+});
+
 module.exports = router;
