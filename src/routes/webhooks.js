@@ -73,6 +73,14 @@ router.post('/fareharbor', express.json({ type: '*/*' }), (req, res) => {
   try {
     const payload = req.body;
     console.log('FareHarbor webhook received:', JSON.stringify(payload).substring(0, 200));
+    // Temporary: write full payload to disk for inspection
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dir = path.join(__dirname, '../../data');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'last-webhook.json'), JSON.stringify(payload, null, 2));
+    } catch(e) { console.error('Could not write debug payload:', e.message); }
 
     const action = payload.action || payload.type || 'unknown';
     const booking = payload.booking || payload.data?.booking || payload;
