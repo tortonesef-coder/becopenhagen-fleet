@@ -167,7 +167,7 @@ function switchUser() {
         state.actor=data.actor;
         closeModal();
         document.getElementById('actor-badge').textContent=state.actor.name;
-        buildTabbar(); renderTab('today'); checkBorrowedReminder();
+        buildTabbar(); renderTab(landingTab()); checkBorrowedReminder();
       });
     });
   });
@@ -230,13 +230,17 @@ async function returnBorrowedBikes() {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
+function landingTab() {
+  return state.actor?.role === 'guide' ? 'tours' : 'today';
+}
+
 function showMain() {
   document.getElementById('screen-identity').classList.remove('active');
   document.getElementById('screen-identity').style.display='none';
   document.getElementById('screen-main').classList.add('active');
   document.getElementById('screen-main').style.display='flex';
   document.getElementById('actor-badge').textContent=state.actor.name;
-  buildTabbar(); renderTab('today'); checkBorrowedReminder();
+  buildTabbar(); renderTab(landingTab()); checkBorrowedReminder();
 }
 
 function buildTabbar() {
@@ -245,7 +249,7 @@ function buildTabbar() {
     ? [{id:'today',label:'Today',icon:iconHome()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
     : role==='admin'
     ? [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
-    : [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
+    : [{id:'tours',label:'Tours',icon:iconTours()},{id:'today',label:'Today',icon:iconHome()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
