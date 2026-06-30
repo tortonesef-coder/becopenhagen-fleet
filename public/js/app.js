@@ -130,6 +130,14 @@ function guideEmoji(memberId) {
   return GUIDE_EMOJIS[hash % GUIDE_EMOJIS.length];
 }
 
+function guideEmojiByName(name) {
+  // Same deterministic approach but keyed by the display name string (used on Tours cards)
+  let hash = 0;
+  const s = (name || '').toLowerCase();
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  return GUIDE_EMOJIS[hash % GUIDE_EMOJIS.length];
+}
+
 
 
 async function initIdentity() {
@@ -151,7 +159,6 @@ async function initIdentity() {
   grid.style.setProperty('--id-cols', cols);
   grid.innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
-      <span class="iemoji">${m.role==='guide'?guideEmoji(m.id):roleEmoji(m.role)}</span>
       <span class="iname">${m.name}</span>
       <span class="irole">${m.role}</span>
     </button>`).join('');
@@ -464,7 +471,6 @@ async function showShopWhoAreYou() {
   const grid = document.getElementById('shop-who-grid');
   grid.innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
-      <span class="iemoji">${m.role==='guide'?guideEmoji(m.id):roleEmoji(m.role)}</span>
       <span class="iname">${m.name}</span>
       <span class="irole">${m.role}</span>
     </button>`).join('');
@@ -1974,7 +1980,7 @@ function renderToursList(el, tours, isGuideView) {
           </div>
           <div class="tour-pax">${a.booking_count} booking${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
         </div>
-        ${a.guide ? `<div class="tour-guide">👤 ${a.guide}</div>` : '<div class="tour-no-guide">⚠️ No guide assigned yet</div>'}
+        ${a.guide ? `<div class="tour-guide">${guideEmojiByName(a.guide)} ${a.guide}</div>` : '<div class="tour-no-guide">⚠️ No guide assigned yet</div>'}
         ${needsBikes ? `<div class="tour-bikes">${bikeStr}</div>` : ''}
       </div>`;
     }).join('')}
@@ -2176,7 +2182,6 @@ async function showShopWhoDidThis(bikeIds) {
   const grid = document.getElementById('shop-attribution-grid');
   grid.innerHTML = team.map(m=>`
     <button class="identity-btn role-${m.role}" data-id="${m.id}">
-      <span class="iemoji">${m.role==='guide'?guideEmoji(m.id):roleEmoji(m.role)}</span>
       <span class="iname">${m.name}</span>
       <span class="irole">${m.role}</span>
     </button>`).join('');
