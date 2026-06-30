@@ -44,6 +44,7 @@ app.use('/api/ical', icalRouter);
 app.use('/api/repairs', require('./routes/repairs'));
 app.use('/api/fleet', require('./routes/fleet'));
 app.use('/auth', require('./routes/auth'));
+app.use('/api/fareharbor-agent', require('./routes/fareharbor-agent'));
 app.use('/api', require('./routes/api'));
 
 app.post('/session/logout', (req, res) => {

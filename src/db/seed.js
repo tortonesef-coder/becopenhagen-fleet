@@ -17,16 +17,16 @@ db.exec(`
 
 // Bike types
 const types = [
-  ['A',  'Adult bike',           'City Bike - Regular',     80, 5, 1],
-  ['SA', 'Small adult bike',     'City Bike - Small',       80, 4, 2],
-  ['AC', 'Adult + child seat',   'Child Seat',              80, 3, 3],
-  ['AT', 'Adult + toddler seat', 'Toddler Seat',            80, 3, 4],
-  ['B',  'Kids bike (small)',    'Child Bike',              80, 3, 5],
-  ['BM', 'Kids bike (medium)',   'Child Bike',              80, 3, 6],
-  ['TB', 'Touring bike',         'Touring Bike',           120, 4, 7],
-  ['MB', 'Mountain bike',        'Mountain Bike',           80, 3, 8],
-  ['CC', 'Cargo bike',           'Christiania Cargo Bike', 480, 4, 9],
-  ['E',  'Electric bike',        'Electric Bike',          240, 4, 10],
+  ['A',  'Adult bike',           'Adult\'s Bikes',            80, 5, 1],
+  ['SA', 'Small adult bike',     'Adult City Bikes (Small)',  80, 4, 2],
+  ['AC', 'Adult + child seat',   'Bikes with Child Seat',     80, 3, 3],
+  ['AT', 'Adult + toddler seat', 'Bikes with toddler seat',   80, 3, 4],
+  ['B',  'Kids bike (small)',    'Child Bikes',               80, 3, 5],
+  ['BM', 'Kids bike (medium)',   'Child Bikes',               80, 3, 6],
+  ['TB', 'Touring bike',         'Touring bikes',            120, 4, 7],
+  ['MB', 'Mountain bike',        'Mountain Bikes',            80, 3, 8],
+  ['CC', 'Cargo bike',           'Christiania Cargo Bikes',  480, 4, 9],
+  ['E',  'Electric bike',        'Electric Bikes',           240, 4, 10],
 ];
 const insertType = db.prepare(`INSERT OR REPLACE INTO bike_types VALUES (?,?,?,?,?,?)`);
 types.forEach(t => insertType.run(...t));
