@@ -146,11 +146,15 @@ async function initIdentity() {
 
 async function selectMember(memberId) {
   state.pendingMemberId = memberId;
-  const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId } });
-
-  if (data.needs_setup) {
-    showConfirmEmailScreen(memberId, data.email_on_file);
-  } else {
+  try {
+    const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId } });
+    if (data.needs_setup) {
+      showConfirmEmailScreen(memberId, data.email_on_file);
+    } else {
+      showPasswordScreen(memberId);
+    }
+  } catch(e) {
+    // "Password required" error means the account exists and has a password — just show the password screen
     showPasswordScreen(memberId);
   }
 }

@@ -22,7 +22,10 @@ router.post('/login', (req, res) => {
     return res.json({ needs_setup: true, email_on_file: member.email || null });
   }
 
-  if (!password) return res.status(400).json({ error: 'Password required' });
+  // Probe call with no password — just confirm the account exists and has a password set
+  if (!password) {
+    return res.json({ needs_setup: false, has_password: true });
+  }
 
   if (!member.password_hash || !verifyPassword(password, member.password_hash, member.password_salt)) {
     return res.status(401).json({ error: 'Incorrect password' });
