@@ -1546,6 +1546,7 @@ async function renderAdmin(c) {
     <div class="subtab-row">
       <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
       <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
+      <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
     </div>
     <div id="admin-tab-content"></div>`;
   renderAdminTab(c);
@@ -1554,7 +1555,7 @@ async function renderAdmin(c) {
 async function switchAdminTab(tab) {
   window._adminTab = tab;
   document.querySelectorAll('.subtab').forEach(b =>
-    b.classList.toggle('active', b.textContent === (tab==='bikes'?'Fleet':'Log')));
+    b.classList.toggle('active', b.textContent === (tab==='bikes'?'Fleet':tab==='log'?'Log':'View as')));
   renderAdminTab(document.getElementById('content'));
 }
 
@@ -1562,6 +1563,7 @@ async function renderAdminTab(c) {
   const el = document.getElementById('admin-tab-content');
   if (!el) return;
   if (window._adminTab === 'bikes') await renderAdminBikes(el);
+  else if (window._adminTab === 'viewas') await renderViewAs(el);
   else await renderAdminLog(el);
 }
 
@@ -2075,4 +2077,58 @@ function fmtDateFull(d) {
   try {
     return new Date(d+'T12:00:00Z').toLocaleDateString('en-DK', {weekday:'short',day:'numeric',month:'short'});
   } catch { return d; }
+}
+
+// ── View As (admin preview of another role's view) ───────────────────────
+async function renderViewAs(el) {
+  const team = await api('/auth/team');
+  team.sort((a,b)=>a.name.localeCompare(b.name));
+
+  el.innerHTML = `
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">
+      Preview the app exactly as another team member would see it. Read-only context — any action you take while previewing is still logged under your real account.
+    </p>
+    <div class="bike-list">
+      ${team.filter(m => m.id !== state.realActor?.id && m.id !== state.actor?.id).map(m => `
+        <div class="bike-row" onclick="startViewAs('${m.id}','${m.name}','${m.role}')">
+          <div class="br-info">
+            <div class="br-name" style="font-weight:600;font-size:0.92rem">${m.name}</div>
+            <div class="br-detail">${m.role}</div>
+          </div>
+          <span class="badge" style="background:var(--bg3);color:var(--text2)">Preview →</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+function startViewAs(memberId, memberName, memberRole) {
+  // Save the real admin identity so we can return to it
+  if (!state.realActor) state.realActor = { ...state.actor };
+  state.actor = { id: memberId, name: memberName, role: memberRole };
+  state.viewingAs = true;
+  buildTabbar();
+  renderTab(landingTab());
+  showViewAsBanner();
+}
+
+function showViewAsBanner() {
+  let banner = document.getElementById('view-as-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'view-as-banner';
+    document.getElementById('screen-main').insertBefore(banner, document.getElementById('tabbar'));
+  }
+  banner.className = 'view-as-banner';
+  banner.innerHTML = `👁 Viewing as <strong>${state.actor.name}</strong> (${state.actor.role}) <button onclick="exitViewAs()">Exit preview</button>`;
+}
+
+function exitViewAs() {
+  if (!state.realActor) return;
+  state.actor = state.realActor;
+  state.realActor = null;
+  state.viewingAs = false;
+  const banner = document.getElementById('view-as-banner');
+  if (banner) banner.remove();
+  buildTabbar();
+  renderTab('admin');
+  window._adminTab = 'viewas';
 }

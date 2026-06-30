@@ -1263,3 +1263,28 @@ details summary::-webkit-details-marker { display: none; }
   max-width: 340px;
 }
 .shop-mode-entry:active { background: var(--red-light); border-color: var(--red); color: var(--red); }
+
+.view-as-banner {
+  background: #2a2a2a;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+.view-as-banner strong { color: var(--accent, #e8a825); }
+.view-as-banner button {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.view-as-banner button:active { background: rgba(255,255,255,0.3); }
