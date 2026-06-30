@@ -741,11 +741,14 @@ function renderAction(c) {
     : ACTION_TYPES;
 
   c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.85rem">
+      <div class="section-title" style="margin:0">What are you doing?</div>
+      ${state.shopMode ? '' : `<button class="btn btn-sm btn-secondary" onclick="openStandaloneBookingModal()">+ Booking</button>`}
+    </div>
     ${state.action.bikes.length>0?`<div class="selected-bikes-bar">
       <span class="sbb-label">Selected:</span>
       ${state.action.bikes.map(id=>`<span class="return-tag">${id}<span class="return-tag-remove" onclick="toggleBike('${id}','','');renderAction(document.getElementById('content'))">&times;</span></span>`).join('')}
     </div>`:''}
-  <div class="section-title" style="margin-top:0">What are you doing?</div>
     <div class="action-type-list" id="action-type-list">
       ${visibleActions.map(a=>`
         <button class="action-type-btn" data-action="${a.id}" onclick="selectActionType('${a.id}')">
@@ -1170,7 +1173,18 @@ async function submitActionNew() {
             toast(`FareHarbor booking #${fhResult.booking_ref} created`, 'success');
           }
         } catch(e) {
-          toast('FareHarbor booking failed: ' + e.message, 'error');
+          // This is important and easy to miss as a quick toast — show a
+          // non-dismissible modal instead so it can't be scrolled past unseen.
+          openModal(`
+            <div class="modal-title" style="color:var(--red)">⚠️ FareHarbor booking failed</div>
+            <p style="font-size:0.9rem;color:var(--text2);margin-bottom:1rem">
+              The bike${bikes.length>1?'s are':' is'} still checked out in the app, but <strong>no booking was created on FareHarbor</strong>. You may need to create it manually.
+            </p>
+            <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:0.75rem;font-size:0.82rem;color:var(--text2);margin-bottom:1rem;font-family:monospace">
+              ${e.message}
+            </div>
+            <button class="btn btn-primary btn-full" onclick="closeModal()">Got it</button>
+          `);
         }
       }
     }
@@ -2271,4 +2285,97 @@ async function showShopWhoDidThis(bikeIds) {
       renderAction(document.getElementById('content'));
     });
   });
+}
+
+// ── Standalone "+ Booking" — create a FareHarbor booking without checking out a bike in the app ──
+function openStandaloneBookingModal() {
+  openModal(`
+    <div class="modal-title">New FareHarbor booking</div>
+    <p style="font-size:0.82rem;color:var(--text2);margin-bottom:1rem">Creates a real booking on FareHarbor. Does not check out any bike in this app — use the Action tab for that.</p>
+    <div class="form-group">
+      <label class="form-label">Customer name</label>
+      <input class="form-input" id="sb-name" placeholder="Name"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Phone (optional)</label>
+      <input class="form-input" id="sb-phone" placeholder="+45..."/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email (optional)</label>
+      <input class="form-input" id="sb-email" placeholder="customer@email.com"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">When</label>
+      <select class="form-select" id="sb-when" onchange="document.getElementById('sb-future-datetime').style.display = this.value==='future' ? 'block' : 'none'">
+        <option value="now">Now</option>
+        <option value="future">Future — pick date/time</option>
+      </select>
+    </div>
+    <div class="form-group" id="sb-future-datetime" style="display:none">
+      <label class="form-label">Start date &amp; time</label>
+      <input class="form-input" id="sb-start-datetime" type="datetime-local"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Number of days</label>
+      <select class="form-select" id="sb-days">
+        ${[1,2,3,4,5,6,7,8,9,10,11,12,13,14].map(n=>`<option value="${n}">${n} day${n>1?'s':''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Bikes</label>
+      <input class="form-input" id="sb-bike-ids" placeholder="e.g. A29, CC4" autocapitalize="characters"/>
+      <div style="font-size:0.72rem;color:var(--text3);margin-top:3px">Comma-separated bike IDs. Types are looked up automatically.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Payment method</label>
+      <select class="form-select" id="sb-payment">
+        <option value="cash">Cash</option>
+        <option value="card">Card terminal / POS</option>
+      </select>
+    </div>
+    <div id="sb-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitStandaloneBooking()">Create booking</button>
+    </div>
+  `);
+}
+
+async function submitStandaloneBooking() {
+  const customerName = document.getElementById('sb-name')?.value?.trim();
+  const phone = document.getElementById('sb-phone')?.value?.trim();
+  const email = document.getElementById('sb-email')?.value?.trim();
+  const when = document.getElementById('sb-when')?.value;
+  const startDatetime = document.getElementById('sb-start-datetime')?.value;
+  const days = parseInt(document.getElementById('sb-days')?.value) || 1;
+  const bikeIdsRaw = document.getElementById('sb-bike-ids')?.value?.trim();
+  const payment = document.getElementById('sb-payment')?.value || 'cash';
+  const err = document.getElementById('sb-error');
+
+  if (!customerName) { err.textContent = 'Customer name required'; return; }
+  if (!bikeIdsRaw) { err.textContent = 'At least one bike ID required'; return; }
+  if (when === 'future' && !startDatetime) { err.textContent = 'Pick a date and time'; return; }
+
+  const bikeIds = bikeIdsRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+
+  closeModal();
+  toast('Creating FareHarbor booking...', '');
+
+  try {
+    const result = await api('/api/fareharbor-agent/create-booking', { method:'POST', body:{
+      customer_name: customerName, phone, email, days, payment_method: payment,
+      bike_ids: bikeIds, start_datetime: when === 'future' ? startDatetime : null,
+    }});
+    if (result?.booking_ref) {
+      toast(`FareHarbor booking #${result.booking_ref} created`, 'success');
+    }
+  } catch(e) {
+    openModal(`
+      <div class="modal-title" style="color:var(--red)">⚠️ Booking failed</div>
+      <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:0.75rem;font-size:0.82rem;color:var(--text2);margin-bottom:1rem;font-family:monospace">
+        ${e.message}
+      </div>
+      <button class="btn btn-primary btn-full" onclick="closeModal()">Got it</button>
+    `);
+  }
 }
