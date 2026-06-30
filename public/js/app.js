@@ -1972,12 +1972,11 @@ function renderRentalsList(el, rentals) {
           <span class="rental-count">${bookings.length} booking${bookings.length!==1?'s':''}</span>
         </div>
         <div class="rental-customers">
-          ${bookings.slice(0,3).map(b=>`
+          ${bookings.map(b=>`
             <div class="rental-customer-row">
               <span class="rcr-name">${b.name||'Unknown'}</span>
               ${b.what ? `<span class="rcr-what">${b.what}</span>` : ''}
             </div>`).join('')}
-          ${bookings.length > 3 ? `<div class="rental-more">+${bookings.length-3} more booking${bookings.length-3!==1?'s':''}</div>` : ''}
         </div>
       </div>`;
     }).join('')}
