@@ -84,13 +84,15 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
     console.log('Saved debug screenshot: /tmp/fh-debug-3-after-day-click.png');
     console.log('URL after day click:', page.url());
 
-    // Multi-day rental items (2-D, 4-D, 7-D etc.) have no specific start TIME —
-    // clicking the day goes straight to the booking page with the availability
-    // ID already in the URL. Single-day items (1-D) instead show a list of
-    // time slots first, which we then need to click separately.
+    // Some days/items land directly on the booking page after the day click
+    // (e.g. when only one time slot exists for that date). Most days show a
+    // time-slot LIST first (confirmed: even 4-Day Rentals show multiple times
+    // like 09:30, 10:00, 10:30, 11:00 — this is not purely a single-day-vs-
+    // multi-day distinction). So: check for a direct landing first, but don't
+    // assume it based on item type — only based on what's actually on screen.
     let match = page.url().match(/availability\/(\d+)/);
     if (match) {
-      console.log('Day click landed directly on booking page (multi-day item) — skipping time-slot step.');
+      console.log('Day click landed directly on booking page (single available time slot) — skipping time-slot step.');
       return match[1];
     }
 
