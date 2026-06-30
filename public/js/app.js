@@ -448,6 +448,10 @@ async function showShopWhoAreYou() {
   });
 }
 
+function landingTab() {
+  return state.actor?.role === 'guide' ? 'tours' : 'today';
+}
+
 function showMain() {
   document.getElementById('screen-identity').classList.remove('active');
   document.getElementById('screen-identity').style.display='none';
