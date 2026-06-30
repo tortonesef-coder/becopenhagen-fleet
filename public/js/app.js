@@ -484,7 +484,7 @@ async function showShopWhoAreYou() {
 }
 
 function landingTab() {
-  return state.actor?.role === 'guide' ? 'tours' : 'today';
+  return state.actor?.role === 'guide' ? 'tours' : 'bikes';
 }
 
 function showMain() {
@@ -512,10 +512,10 @@ function buildTabbar() {
   }
   const role=state.actor?.role;
   const tabs = role==='mechanic'
-    ? [{id:'today',label:'Today',icon:iconHome()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
+    ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
     : role==='admin'
-    ? [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
-    : [{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'today',label:'Today',icon:iconHome()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
+    ? [{id:'bikes',label:'Bikes',icon:iconBike()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
+    : [{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
@@ -532,90 +532,16 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours',rentals:'Rentals'};
+  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours',rentals:'Rentals'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
-  if(id==='today') await renderToday(c);
-  else if(id==='bikes') await renderBikes(c);
+  if(id==='bikes') await renderBikes(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
   else if(id==='tickets') await renderTickets(c);
   else if(id==='admin') await renderAdmin(c);
   else if(id==='tours') await renderTours(c);
   else if(id==='rentals') await renderRentals(c);
-}
-
-// ── TODAY ─────────────────────────────────────────────────────────────────
-async function renderToday(c) {
-  c.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
-  let avail, today;
-  try {
-    [avail, today] = await Promise.all([api('/api/availability'), api('/api/today')]);
-  } catch(e) {
-    c.innerHTML = '<div class="empty-state"><p>Could not load: ' + e.message + '</p></div>';
-    console.error('renderToday failed:', e);
-    return;
-  }
-  const {types}=avail;
-  const scarce=new Set(['CC','E','SA','AC','AT']);
-
-  const cards=types.map(t=>{
-    const avl=t.available||0,total=t.total||0,pct=total?avl/total:0;
-    const cls=pct===0?'red':pct<=0.4?'amber':'green';
-    const onclick = 'drillType(\''+t.type_id+'\')'
-    return '<div class="type-card'+(scarce.has(t.type_id)&&pct<=0.5?' scarce':'')+(pct===0?' empty':'')+'" onclick="'+onclick+'">'
-      +'<div class="tc-label">'+t.label+'</div>'
-      +'<div class="tc-nums"><span class="tc-avail '+cls+'">'+avl+'</span><span class="tc-total">/ '+total+'</span></div>'
-      +'<div class="tc-pips">'
-      +(t.out>0?'<span class="tc-pip out">'+t.out+' out</span>':'')
-      +(t.repair>0?'<span class="tc-pip repair">'+t.repair+' repair</span>':'')
-      +((t.missing||0)>0?'<span class="tc-pip repair">'+t.missing+' missing</span>':'')
-      +'</div></div>';
-  }).join('');
-
-  const pending=today.pending||[];
-  const activity=today.checkouts||[];
-
-  let pendingHtml = '';
-  if (pending.length > 0) {
-    pendingHtml = '<div class="section-title">Incoming bookings — assign bikes</div>'
-      + pending.map(p => {
-          const emailBtn = p.customer_email ? '<a href="mailto:'+p.customer_email+'" class="btn btn-sm btn-secondary">Email</a>' : '';
-          return '<div class="pending-card">'
-            +'<div class="pc-ref">#'+(p.fareharbor_booking_ref||'No ref')+'</div>'
-            +'<div class="pc-name">'+(p.customer_name||'Unknown')+'</div>'
-            +'<div class="pc-time">'+(p.booking_date||'')+(p.start_time?' · '+p.start_time:'')+(p.end_time?'–'+p.end_time:'')+'</div>'
-            +'<div class="pc-bikes">'+(p.bikes_needed||'Bikes TBD')+'</div>'
-            +'<div style="display:flex;gap:0.5rem;margin-top:0.6rem;flex-wrap:wrap">'
-            +emailBtn
-            +'<button class="btn btn-sm btn-primary" onclick="openAssignModal('+p.id+')">Assign bikes</button>'
-            +'<button class="btn btn-sm btn-secondary" onclick="dismissAssignment('+p.id+')">Dismiss</button>'
-            +'</div></div>';
-        }).join('');
-  }
-
-  let activityHtml = '';
-  if (activity.length === 0) {
-    activityHtml = '<div style="text-align:center;padding:1.5rem 0;color:var(--text3);font-size:0.88rem">No activity yet today</div>';
-  } else {
-    activityHtml = activity.slice(0,25).map(a => {
-      const d = JSON.parse(a.details||'{}');
-      const who = d.customer_name||d.assigned_to||'';
-      const ic = a.action==='checkout'?'out':a.action==='repair_ticket'?'issue':a.action==='city'?'city':'ret';
-      const lb = a.action==='checkout'?'OUT':a.action==='repair_ticket'?'FIX':a.action==='city'?'PIN':'RTN';
-      return '<div class="activity-row">'
-        +'<div class="ar-icon '+ic+'">'+lb+'</div>'
-        +'<div class="ar-body">'
-        +'<div class="ar-main">'+(a.bike_id||'')+' '+(who?'· '+who:'')+'</div>'
-        +'<div class="ar-sub">'+a.actor+' · '+fmtTime(a.created_at)+'</div>'
-        +'</div></div>';
-    }).join('');
-  }
-
-  c.innerHTML = '<div class="type-grid">'+cards+'</div>'
-    + pendingHtml
-    + '<div class="section-title">Today\'s activity</div>'
-    + activityHtml;
 }
 
 async function drillType(typeId) {
@@ -637,8 +563,28 @@ async function drillType(typeId) {
 
 // ── BIKES ─────────────────────────────────────────────────────────────────
 async function renderBikes(c) {
-  const types=await api('/api/availability').then(d=>d.types);
+  const avail = await api('/api/availability');
+  const types = avail.types;
+  const scarce = new Set(['CC','E','SA','AC','AT']);
+
+  const gridCards = types.map(t=>{
+    const avl=t.available||0,total=t.total||0,pct=total?avl/total:0;
+    const cls=pct===0?'red':pct<=0.4?'amber':'green';
+    return '<div class="type-card'+(scarce.has(t.type_id)&&pct<=0.5?' scarce':'')+(pct===0?' empty':'')+'" onclick="drillType(\''+t.type_id+'\')">'
+      +'<div class="tc-label">'+t.label+'</div>'
+      +'<div class="tc-nums"><span class="tc-avail '+cls+'">'+avl+'</span><span class="tc-total">/ '+total+'</span></div>'
+      +'<div class="tc-pips">'
+      +(t.out>0?'<span class="tc-pip out">'+t.out+' out</span>':'')
+      +(t.repair>0?'<span class="tc-pip repair">'+t.repair+' repair</span>':'')
+      +((t.missing||0)>0?'<span class="tc-pip repair">'+t.missing+' missing</span>':'')
+      +'</div></div>';
+  }).join('');
+
   c.innerHTML=`
+    <details class="availability-summary" ${window._bikesGridOpen!==false?'open':''} ontoggle="window._bikesGridOpen=this.open">
+      <summary>📊 Fleet availability</summary>
+      <div class="type-grid" style="margin-top:0.75rem">${gridCards}</div>
+    </details>
     <div class="search-bar">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input type="text" id="bike-search" placeholder="Search ID, name, customer..." value="${state.bikeFilter.search}"/>

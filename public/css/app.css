@@ -1372,3 +1372,29 @@ details summary::-webkit-details-marker { display: none; }
   font-weight: 500;
   margin-top: 2px;
 }
+
+/* ── Availability summary (collapsible, top of Bikes tab) ── */
+.availability-summary {
+  background: var(--bg2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow);
+}
+.availability-summary summary {
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.availability-summary summary::-webkit-details-marker { display: none; }
+.availability-summary summary::after {
+  content: '▾';
+  color: var(--text3);
+  transition: transform 0.15s;
+}
+.availability-summary[open] summary::after { transform: rotate(180deg); }
