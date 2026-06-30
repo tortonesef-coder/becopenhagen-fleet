@@ -309,6 +309,12 @@ function startPolling() {
 
 // ── API endpoints ────────────────────────────────────────────────────────
 
+// Known aliases — calendar/crew names that don't textually match the team member's app name
+const GUIDE_ALIASES = {
+  'hassan': ['hasse', 'hassesorensen', 'hassesoerensen'],
+  'pam': ['paloma'],
+};
+
 // Normalize a name for fuzzy comparison: lowercase, strip accents, remove non-letters
 function normalizeName(s) {
   if (!s) return '';
@@ -347,6 +353,15 @@ function guideMatches(availGuide, personName) {
 
   // Exact normalized match or substring either direction
   if (a === p || a.includes(p) || p.includes(a)) return true;
+
+  // Check known aliases (e.g. Hasse = Hassan, Paloma = Pam)
+  const personAliases = GUIDE_ALIASES[p] || [];
+  if (personAliases.some(alias => a === alias || a.includes(alias) || alias.includes(a))) return true;
+  // Also check reverse: maybe availGuide is the "canonical" name and personName is the alias
+  for (const [canonical, aliases] of Object.entries(GUIDE_ALIASES)) {
+    if (aliases.includes(p) && (a === canonical || a.includes(canonical))) return true;
+    if (aliases.some(al => a.includes(al)) && p === canonical) return true;
+  }
 
   // Fuzzy match: allow up to 2 character edits per ~6 chars (handles typos)
   const maxDist = Math.max(1, Math.floor(Math.min(a.length, p.length) / 3));
