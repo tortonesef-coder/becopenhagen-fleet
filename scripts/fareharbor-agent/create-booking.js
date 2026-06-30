@@ -134,14 +134,25 @@ async function loginToDashboard(browser) {
 
   // Step 1 of 2: FareHarbor first asks for the company "Shortname" before
   // showing the actual email/password form for that company.
-  const shortnameField = page.locator('input').first();
   const hasShortnameStep = await page.locator('text="Shortname"').count() > 0;
   if (hasShortnameStep) {
     console.log('Shortname step detected, filling:', COMPANY_SLUG);
+    // Target the input specifically associated with the Shortname label,
+    // not just "the first input on the page" which can grab the wrong field.
+    const shortnameField = page.locator('text="Shortname"').locator('xpath=following::input[1]').first();
+    const fieldCount = await shortnameField.count();
+    console.log('Shortname input field found:', fieldCount > 0);
+    if (fieldCount === 0) throw new Error('Shortname label found but no associated input field.');
+
+    await shortnameField.click();
     await shortnameField.fill(COMPANY_SLUG);
+    const typedValue = await shortnameField.inputValue();
+    console.log('Shortname field now contains:', JSON.stringify(typedValue));
+
     const nextBtn = page.locator('button:has-text("Next")').first();
     await nextBtn.click();
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
+    console.log('URL after Next click:', page.url());
   }
 
   await page.screenshot({ path: '/tmp/fh-debug-5-login-page.png', fullPage: true });
