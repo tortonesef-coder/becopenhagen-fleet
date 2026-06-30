@@ -42,21 +42,47 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
     console.log('Page title:', await page.title());
     console.log('Page URL:', page.url());
 
-    // Day cells render as plain numbers (e.g. "2") inside the calendar grid.
-    // We match by exact text and pick the one inside a clickable day cell
-    // (FareHarbor wraps each day in a link/button with the item name below it,
-    // e.g. "2\n1-Day Rentals" as seen in the page text dump).
-    const dayLocator = page.locator(`text="${dayNum}"`).first();
-    const dayCount = await dayLocator.count();
-    console.log(`Day cell matches for "${dayNum}":`, dayCount);
+    // Each day cell shows the day number, then a button labeled with the
+    // item name (e.g. "1-Day Rentals") underneath it — THAT button is what
+    // actually opens the time slot list, not the bare day number.
+    // We find the day-number text, then look for the nearest following
+    // button/link containing the item's display name.
+    const dayNumberLocator = page.locator(`text="${dayNum}"`).first();
+    const dayCount = await dayNumberLocator.count();
+    console.log(`Day number matches for "${dayNum}":`, dayCount);
     if (dayCount === 0) {
       await page.screenshot({ path: '/tmp/fh-debug-2-no-day-found.png', fullPage: true });
       throw new Error(`Could not find day cell "${dayNum}" on the calendar page.`);
     }
-    await dayLocator.click();
+
+    // The item button sits in the same calendar cell, just below the day number.
+    // Use XPath to go to the day number's container, then find a button within it.
+    const dayCellButton = dayNumberLocator.locator(
+      'xpath=ancestor::*[self::div or self::td][1]//button | ancestor::*[self::div or self::td][1]//a[contains(@class,"item") or self::a]'
+    ).first();
+
+    let clicked = false;
+    if (await dayCellButton.count() > 0) {
+      await dayCellButton.click();
+      clicked = true;
+    } else {
+      // Fallback: click whatever button/link is immediately after the day number in DOM order
+      const fallbackBtn = dayNumberLocator.locator('xpath=following::button[1] | following::a[1]').first();
+      if (await fallbackBtn.count() > 0) {
+        await fallbackBtn.click();
+        clicked = true;
+      }
+    }
+
+    if (!clicked) {
+      await page.screenshot({ path: '/tmp/fh-debug-2b-no-button-found.png', fullPage: true });
+      throw new Error(`Found day "${dayNum}" but no clickable item button near it.`);
+    }
+
     await page.waitForTimeout(1500);
     await page.screenshot({ path: '/tmp/fh-debug-3-after-day-click.png', fullPage: true });
     console.log('Saved debug screenshot: /tmp/fh-debug-3-after-day-click.png');
+    console.log('URL after day click:', page.url());
 
     // Now look for the time slot matching `time` (e.g. "10:00")
     const timeLocator = page.locator(`text="${time}"`).first();
