@@ -132,9 +132,18 @@ async function loginToDashboard(browser) {
   console.log('Login page title:', await page.title());
   console.log('Login page URL:', page.url());
 
+  // The login page is a JS app — give it a moment to actually render
+  // past any "Loading..." state before we check what's on screen.
+  await page.waitForTimeout(2000);
+  const earlyText = await page.locator('body').innerText();
+  console.log('--- Initial login page text ---');
+  console.log(earlyText.substring(0, 300));
+  console.log('--- end ---');
+
   // Step 1 of 2: FareHarbor first asks for the company "Shortname" before
   // showing the actual email/password form for that company.
   const hasShortnameStep = await page.locator('text="Shortname"').count() > 0;
+  console.log('Shortname text present on page:', hasShortnameStep);
   if (hasShortnameStep) {
     console.log('Shortname step detected, filling:', COMPANY_SLUG);
     // Target the input specifically associated with the Shortname label,
