@@ -136,7 +136,25 @@ function initSchema() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       role TEXT NOT NULL,
-      active INTEGER DEFAULT 1
+      active INTEGER DEFAULT 1,
+      email TEXT,
+      password_hash TEXT,
+      password_salt TEXT,
+      needs_password_setup INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES team_members(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT,
+      used INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS shop_pin (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      pin_hash TEXT,
+      pin_salt TEXT
     );
 
     CREATE TABLE IF NOT EXISTS repair_priority_weights (
@@ -183,6 +201,13 @@ function initSchema() {
 
   const ticketCols = db.prepare("PRAGMA table_info(repair_tickets)").all().map(c => c.name);
   if (!ticketCols.includes('problem_categories')) db.exec("ALTER TABLE repair_tickets ADD COLUMN problem_categories TEXT");
+
+  // Migration: add auth columns to team_members if missing
+  const teamCols = db.prepare("PRAGMA table_info(team_members)").all().map(c => c.name);
+  if (!teamCols.includes('email')) db.exec("ALTER TABLE team_members ADD COLUMN email TEXT");
+  if (!teamCols.includes('password_hash')) db.exec("ALTER TABLE team_members ADD COLUMN password_hash TEXT");
+  if (!teamCols.includes('password_salt')) db.exec("ALTER TABLE team_members ADD COLUMN password_salt TEXT");
+  if (!teamCols.includes('needs_password_setup')) db.exec("ALTER TABLE team_members ADD COLUMN needs_password_setup INTEGER DEFAULT 1");
 }
 
 module.exports = { getDb };

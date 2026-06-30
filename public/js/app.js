@@ -114,17 +114,23 @@ document.getElementById('modal-overlay').addEventListener('click',e=>{
   if(e.target===document.getElementById('modal-overlay')) closeModal();
 });
 
-// ── Identity ──────────────────────────────────────────────────────────────
+// ── Identity & Auth ──────────────────────────────────────────────────────
+state.pendingMemberId = null;
+
 async function initIdentity() {
-  const team = await api('/api/team');
+  // Check if this is the shop iPad (URL has ?shop) or shop_mode session already active
+  const isShopParam = new URLSearchParams(window.location.search).has('shop');
+  const sessionCheck = await api('/session/me').catch(() => ({}));
+
+  if (isShopParam || sessionCheck.shop_mode) {
+    await initShopMode();
+    return;
+  }
+
+  const team = await api('/auth/team');
   team.sort((a,b)=>a.name.localeCompare(b.name));
-  // Pick columns: min 3, prefer fewest cols with even distribution
   const n = team.length;
-  let cols = 3;
-  if (n % 4 === 0) cols = 4;
-  else if (n % 3 === 0) cols = 3;
-  else if (n % 4 === 1) cols = 3; // e.g. 10 → 3+3+4 is fine
-  else cols = 3;
+  let cols = (n % 4 === 0) ? 4 : 3;
 
   const grid = document.getElementById('identity-grid');
   grid.style.setProperty('--id-cols', cols);
@@ -134,104 +140,257 @@ async function initIdentity() {
       <span class="irole">${m.role}</span>
     </button>`).join('');
   grid.querySelectorAll('.identity-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>login(btn.dataset.id));
+    btn.addEventListener('click',()=>selectMember(btn.dataset.id));
   });
 }
 
-async function login(actorId) {
-  const data=await api('/session/login',{method:'POST',body:{actor_id:actorId}});
-  state.actor=data.actor; showMain();
+async function selectMember(memberId) {
+  state.pendingMemberId = memberId;
+  const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId } });
+
+  if (data.needs_setup) {
+    showSetPasswordScreen(memberId, true);
+  } else {
+    showPasswordScreen(memberId);
+  }
+}
+
+function showPasswordScreen(memberId) {
+  openModal(`
+    <div class="modal-title">Enter your password</div>
+    <div class="form-group">
+      <input class="form-input" type="password" id="login-password" placeholder="Password" autofocus/>
+    </div>
+    <div id="login-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Back</button>
+      <button class="btn btn-primary" onclick="submitLogin('${memberId}')">Log in</button>
+    </div>
+    <button onclick="closeModal();showForgotPassword('${memberId}')" style="background:none;border:none;color:var(--text3);font-size:0.78rem;margin-top:0.85rem;width:100%;cursor:pointer">Forgot password?</button>
+  `);
+  document.getElementById('login-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitLogin(memberId);
+  });
+}
+
+async function submitLogin(memberId) {
+  const password = document.getElementById('login-password')?.value;
+  try {
+    const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId, password } });
+    state.actor = data.actor;
+    closeModal();
+    showMain();
+  } catch(e) {
+    const err = document.getElementById('login-error');
+    if (err) err.textContent = e.message;
+  }
+}
+
+function showSetPasswordScreen(memberId, isFirstTime) {
+  openModal(`
+    <div class="modal-title">${isFirstTime ? 'Set your password' : 'Choose a new password'}</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">${isFirstTime ? "First time logging in — set a password to protect your account." : ''}</p>
+    <div class="form-group">
+      <input class="form-input" type="password" id="setup-password" placeholder="New password (min 6 characters)" autofocus/>
+    </div>
+    <div class="form-group">
+      <input class="form-input" type="password" id="setup-password-confirm" placeholder="Confirm password"/>
+    </div>
+    <div id="setup-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitSetPassword('${memberId}')">Set password</button>
+    </div>
+  `);
+}
+
+async function submitSetPassword(memberId) {
+  const pw = document.getElementById('setup-password')?.value;
+  const pwConfirm = document.getElementById('setup-password-confirm')?.value;
+  const err = document.getElementById('setup-error');
+  if (pw !== pwConfirm) { err.textContent = 'Passwords do not match'; return; }
+  if (!pw || pw.length < 6) { err.textContent = 'Password must be at least 6 characters'; return; }
+
+  try {
+    const data = await api('/auth/set-password', { method:'POST', body:{ member_id: memberId, password: pw }});
+    state.actor = data.actor;
+    closeModal();
+    showSetEmailScreen(memberId);
+  } catch(e) {
+    if (err) err.textContent = e.message;
+  }
+}
+
+function showSetEmailScreen(memberId) {
+  openModal(`
+    <div class="modal-title">Add your email</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">Needed in case you forget your password later.</p>
+    <div class="form-group">
+      <input class="form-input" type="email" id="setup-email" placeholder="you@example.com" autofocus/>
+    </div>
+    <div id="setup-email-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal();showMain()">Skip for now</button>
+      <button class="btn btn-primary" onclick="submitSetEmail('${memberId}')">Save</button>
+    </div>
+  `);
+}
+
+async function submitSetEmail(memberId) {
+  const email = document.getElementById('setup-email')?.value?.trim();
+  const err = document.getElementById('setup-email-error');
+  if (!email || !email.includes('@')) { if(err) err.textContent = 'Enter a valid email'; return; }
+  try {
+    await api('/auth/set-email', { method:'POST', body:{ member_id: memberId, email }});
+    closeModal();
+    showMain();
+  } catch(e) {
+    if (err) err.textContent = e.message;
+  }
+}
+
+function showForgotPassword(memberId) {
+  openModal(`
+    <div class="modal-title">Reset password</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">We'll send a reset link to your email on file.</p>
+    <div id="forgot-status" style="font-size:0.85rem;margin-bottom:0.75rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitForgotPassword('${memberId}')">Send reset link</button>
+    </div>
+  `);
+}
+
+async function submitForgotPassword(memberId) {
+  const status = document.getElementById('forgot-status');
+  try {
+    const data = await api('/auth/forgot-password', { method:'POST', body:{ member_id: memberId }});
+    if (status) { status.style.color = 'var(--green)'; status.textContent = data.message; }
+  } catch(e) {
+    if (status) { status.style.color = '#e04040'; status.textContent = e.message; }
+  }
 }
 
 async function checkSession() {
-  const data=await api('/session/me');
-  if(data.actor){state.actor=data.actor;showMain();}
+  const data = await api('/session/me');
+  if (data.shop_mode) {
+    if (data.actor) { state.actor = data.actor; showMain(); }
+    else await initShopMode();
+    return;
+  }
+  if (data.actor) { state.actor = data.actor; showMain(); }
   else initIdentity();
 }
 
 function switchUser() {
-  openModal(`<div class="modal-title">Switch user</div><div id="switch-grid" class="identity-grid" style="max-width:none;margin-top:0.5rem"></div>`);
-  api('/api/team').then(team=>{
-    team.sort((a,b)=>a.name.localeCompare(b.name));
-    const sg = document.getElementById('switch-grid');
-    const sn = team.length;
-    sg.style.setProperty('--id-cols', sn % 4 === 0 ? 4 : 3);
-    sg.innerHTML=team.map(m=>`
-      <button class="identity-btn role-${m.role}${state.actor?.id===m.id?' active-user':''}" data-id="${m.id}">
-        <span class="iname">${m.name}</span>
-        <span class="irole">${m.role}</span>
-      </button>`).join('');
-    document.getElementById('switch-grid').querySelectorAll('.identity-btn').forEach(btn=>{
-      btn.addEventListener('click',async()=>{
-        const data=await api('/session/login',{method:'POST',body:{actor_id:btn.dataset.id}});
-        state.actor=data.actor;
-        closeModal();
-        document.getElementById('actor-badge').textContent=state.actor.name;
-        buildTabbar(); renderTab(landingTab()); checkBorrowedReminder();
-      });
-    });
+  if (state.shopMode) { showShopWhoAreYou(); return; }
+  api('/session/logout', { method:'POST' }).then(() => {
+    state.actor = null;
+    document.getElementById('screen-main').classList.remove('active');
+    document.getElementById('screen-main').style.display = 'none';
+    document.getElementById('screen-identity').classList.add('active');
+    document.getElementById('screen-identity').style.display = 'flex';
+    initIdentity();
   });
 }
 
-document.getElementById('btn-switch-user').addEventListener('click',switchUser);
+// ── Shop Mode (shared iPad) ──────────────────────────────────────────────
+state.shopMode = false;
+const SHOP_ACTIONS = ['return', 'rental', 'tour', 'ticket'];
 
-// ── Borrowed reminder ─────────────────────────────────────────────────────
-async function checkBorrowedReminder() {
-  if(!state.actor) return;
-  const todayKey=`bc_borrowed_${state.actor.id}_${new Date().toISOString().substring(0,10)}`;
-  if(localStorage.getItem(todayKey)) return;
-
-  // Always check live status — bike may have been returned or re-assigned by someone else
-  const allOut = await api('/api/bikes?status=out');
-  const borrowed = allOut.filter(b =>
-    b.assignment_type === 'borrowed' &&
-    (b.assigned_to === state.actor.id || b.assigned_to === state.actor.name)
-  );
-
-  // If nothing is borrowed by this person, mark today as shown and stop
-  if(borrowed.length === 0) { localStorage.setItem(todayKey,'1'); return; }
-
-  localStorage.setItem(todayKey,'1');
-
-  // Store borrowed IDs in module scope so the button can access them safely
-  window._borrowedReminderIds = borrowed.map(b => b.id);
-
-  const list = borrowed.map(b=>`<strong>${b.id}</strong>${b.name?' ('+b.name+')':''}`).join(', ');
-  openModal(`
-    <div style="text-align:center;padding:0.5rem 0 0">
-      <div style="font-size:2.5rem;margin-bottom:0.5rem">🚲</div>
-      <div class="modal-title" style="text-align:center">Did you return ${borrowed.length>1?'these bikes':'this bike'}?</div>
-      <p style="font-size:0.88rem;color:var(--text2);margin-bottom:1.25rem">You have ${list} marked as borrowed.</p>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal()">Not yet</button>
-      <button class="btn btn-success" onclick="returnBorrowedBikes()">Yes, returned</button>
-    </div>`);
-}
-
-async function returnBorrowedBikes() {
-  const ids = window._borrowedReminderIds || [];
-  if(ids.length === 0) { closeModal(); return; }
-  closeModal();
-  try {
-    for(const id of ids) {
-      await api(`/api/bikes/${id}/return`, {method:'POST', body:{new_status:'available', note:'Returned by borrower'}});
-    }
-    window._borrowedReminderIds = [];
-    const returnedIds = [...ids];
-    toast(`${ids.length} bike${ids.length>1?'s':''} returned`, 'success', async () => {
-      for(const id of returnedIds) await api(`/api/bikes/${id}/checkout`,{method:'POST',body:{assignment_type:'borrowed',assigned_to:state.actor?.name||'',force:true}});
-      renderTab(state.currentTab);
-    });
-    renderTab(state.currentTab);
-  } catch(e) {
-    toast('Error: ' + e.message, 'error');
+async function initShopMode() {
+  state.shopMode = true;
+  const status = await api('/auth/shop-pin-status');
+  if (!status.configured) {
+    showShopPinSetup();
+  } else {
+    showShopPinEntry();
   }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────
-function landingTab() {
-  return state.actor?.role === 'guide' ? 'tours' : 'today';
+function showShopPinSetup() {
+  document.getElementById('screen-identity').innerHTML = `
+    <div class="identity-wrap">
+      <div class="bc-logo-wrap">
+        <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
+        <div class="bc-wordmark">Be<span>Copenhagen</span></div>
+        <div class="bc-sub-label">Shop Mode Setup</div>
+      </div>
+      <p style="font-size:0.85rem;color:var(--text2);text-align:center;margin-bottom:1rem">Set a 4-digit PIN for this shop device.</p>
+      <input class="form-input" type="tel" maxlength="4" id="shop-pin-setup" placeholder="••••" style="text-align:center;font-size:1.5rem;letter-spacing:0.5rem;max-width:160px" autofocus/>
+      <button class="btn btn-primary" style="margin-top:1rem;max-width:160px" onclick="submitShopPinSetup()">Set PIN</button>
+    </div>`;
+}
+
+async function submitShopPinSetup() {
+  const pin = document.getElementById('shop-pin-setup')?.value;
+  if (!/^\d{4}$/.test(pin)) { toast('PIN must be 4 digits', 'error'); return; }
+  await api('/auth/set-shop-pin', { method:'POST', body:{ pin }});
+  showShopPinEntry();
+}
+
+function showShopPinEntry() {
+  document.getElementById('screen-identity').innerHTML = `
+    <div class="identity-wrap">
+      <div class="bc-logo-wrap">
+        <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
+        <div class="bc-wordmark">Be<span>Copenhagen</span></div>
+        <div class="bc-sub-label">Shop Mode</div>
+      </div>
+      <input class="form-input" type="tel" maxlength="4" id="shop-pin-entry" placeholder="Enter PIN" style="text-align:center;font-size:1.5rem;letter-spacing:0.5rem;max-width:160px" autofocus/>
+      <div id="shop-pin-error" style="color:#e04040;font-size:0.85rem;margin-top:0.5rem"></div>
+      <button class="btn btn-primary" style="margin-top:1rem;max-width:160px" onclick="submitShopPin()">Unlock</button>
+    </div>`;
+  document.getElementById('shop-pin-entry').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitShopPin();
+  });
+}
+
+async function submitShopPin() {
+  const pin = document.getElementById('shop-pin-entry')?.value;
+  try {
+    await api('/auth/shop-login', { method:'POST', body:{ pin }});
+    showShopWhoAreYou();
+  } catch(e) {
+    const err = document.getElementById('shop-pin-error');
+    if (err) err.textContent = e.message;
+  }
+}
+
+async function showShopWhoAreYou() {
+  const team = await api('/auth/team');
+  team.sort((a,b)=>a.name.localeCompare(b.name));
+  document.getElementById('screen-main').classList.remove('active');
+  document.getElementById('screen-main').style.display = 'none';
+  document.getElementById('screen-identity').classList.add('active');
+  document.getElementById('screen-identity').style.display = 'flex';
+
+  const n = team.length;
+  const cols = (n % 4 === 0) ? 4 : 3;
+
+  document.getElementById('screen-identity').innerHTML = `
+    <div class="identity-wrap">
+      <div class="bc-logo-wrap">
+        <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
+        <div class="bc-wordmark">Be<span>Copenhagen</span></div>
+      </div>
+      <p class="identity-prompt">Who are you?</p>
+      <div class="identity-grid" id="shop-who-grid" style="--id-cols:${cols}"></div>
+    </div>`;
+
+  const grid = document.getElementById('shop-who-grid');
+  grid.innerHTML = team.map(m=>`
+    <button class="identity-btn role-${m.role}" data-id="${m.id}">
+      <span class="iname">${m.name}</span>
+      <span class="irole">${m.role}</span>
+    </button>`).join('');
+  grid.querySelectorAll('.identity-btn').forEach(btn=>{
+    btn.addEventListener('click', async () => {
+      const data = await api('/auth/shop-set-actor', { method:'POST', body:{ member_id: btn.dataset.id }});
+      state.actor = data.actor;
+      showMain();
+    });
+  });
 }
 
 function showMain() {
@@ -239,11 +398,24 @@ function showMain() {
   document.getElementById('screen-identity').style.display='none';
   document.getElementById('screen-main').classList.add('active');
   document.getElementById('screen-main').style.display='flex';
-  document.getElementById('actor-badge').textContent=state.actor.name;
-  buildTabbar(); renderTab(landingTab()); checkBorrowedReminder();
+  document.getElementById('actor-badge').textContent = state.shopMode ? ('🏪 ' + state.actor.name) : state.actor.name;
+  buildTabbar();
+  renderTab(state.shopMode ? 'action' : landingTab());
+  if (!state.shopMode) checkBorrowedReminder();
 }
 
 function buildTabbar() {
+  if (state.shopMode) {
+    const tabs = [{id:'action',label:'Action',icon:iconAction()},{id:'bikes',label:'Bikes',icon:iconBike()}];
+    document.getElementById('tabbar').innerHTML=tabs.map(t=>`
+      <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
+        ${t.icon}<span>${t.label}</span>
+      </button>`).join('');
+    document.getElementById('tabbar').querySelectorAll('.tab-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>renderTab(btn.dataset.tab));
+    });
+    return;
+  }
   const role=state.actor?.role;
   const tabs = role==='mechanic'
     ? [{id:'today',label:'Today',icon:iconHome()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
@@ -473,6 +645,11 @@ function renderAction(c) {
   const preservedBikes = state.action.bikes || [];
   const preservedPreloaded = state.action.preloaded || null;
   state.action = { type: null, bikes: preservedBikes, searchQ: '', preloaded: preservedPreloaded };
+
+  const visibleActions = state.shopMode
+    ? ACTION_TYPES.filter(a => SHOP_ACTIONS.includes(a.id))
+    : ACTION_TYPES;
+
   c.innerHTML = `
     ${state.action.bikes.length>0?`<div class="selected-bikes-bar">
       <span class="sbb-label">Selected:</span>
@@ -480,7 +657,7 @@ function renderAction(c) {
     </div>`:''}
   <div class="section-title" style="margin-top:0">What are you doing?</div>
     <div class="action-type-list" id="action-type-list">
-      ${ACTION_TYPES.map(a=>`
+      ${visibleActions.map(a=>`
         <button class="action-type-btn" data-action="${a.id}" onclick="selectActionType('${a.id}')">
           <span class="atb-emoji">${a.emoji}</span>
           <div class="atb-text">
@@ -880,6 +1057,14 @@ async function submitActionNew() {
 
     toast(`Done — ${label.toLowerCase()}`, 'success', undoFn);
 
+    if (state.shopMode) {
+      // Shop mode: clear actor and go straight back to "who are you" after every action
+      state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
+      await api('/session/shop-logout-actor', { method:'POST' });
+      setTimeout(() => showShopWhoAreYou(), 900); // small delay so the success toast is visible
+      return;
+    }
+
     // After return actions, clear selection and go to Today
     if (['return', 'missing', 'city'].includes(type)) {
       state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
@@ -1195,6 +1380,8 @@ function iconLog(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 function iconTicket(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;}
 
 // ── Boot ──────────────────────────────────────────────────────────────────
+document.getElementById('btn-switch-user').addEventListener('click', switchUser);
+
 checkSession();
 
 // ── VOICE ─────────────────────────────────────────────────────────────────

@@ -28,6 +28,11 @@ app.use(session({
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.use((req, res, next) => {
+  // Shop mode: actor is whoever last tapped their name on the shared iPad
+  if (req.session?.shop_mode && req.session?.shop_actor) {
+    req.session.actor = req.session.shop_actor;
+    req.session.actor_name = req.session.shop_actor_name;
+  }
   req.actor = req.session?.actor || null;
   next();
 });
@@ -38,25 +43,28 @@ const { router: icalRouter, startPolling } = require('./routes/ical');
 app.use('/api/ical', icalRouter);
 app.use('/api/repairs', require('./routes/repairs'));
 app.use('/api/fleet', require('./routes/fleet'));
+app.use('/auth', require('./routes/auth'));
 app.use('/api', require('./routes/api'));
-
-app.post('/session/login', (req, res) => {
-  const { actor_id } = req.body;
-  const db = getDb();
-  const member = db.prepare('SELECT * FROM team_members WHERE id=? AND active=1').get(actor_id);
-  if (!member) return res.status(400).json({ error: 'Unknown team member' });
-  req.session.actor = member.id;
-  req.session.actor_name = member.name;
-  req.session.actor_role = member.role;
-  res.json({ ok: true, actor: member });
-});
 
 app.post('/session/logout', (req, res) => {
   req.session.destroy();
   res.json({ ok: true });
 });
 
+app.post('/session/shop-logout-actor', (req, res) => {
+  // Clears just the current shop actor, keeps shop_mode active for next person
+  req.session.shop_actor = null;
+  req.session.shop_actor_name = null;
+  res.json({ ok: true });
+});
+
 app.get('/session/me', (req, res) => {
+  if (req.session?.shop_mode) {
+    if (req.session.shop_actor) {
+      return res.json({ actor: { id: req.session.shop_actor, name: req.session.shop_actor_name, role: 'shop' }, shop_mode: true });
+    }
+    return res.json({ actor: null, shop_mode: true });
+  }
   if (!req.session.actor) return res.json({ actor: null });
   res.json({ actor: { id: req.session.actor, name: req.session.actor_name, role: req.session.actor_role }});
 });
