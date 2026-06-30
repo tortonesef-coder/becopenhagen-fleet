@@ -408,11 +408,17 @@ async function main() {
 
   console.log('Creating booking...');
 
-  // Support two CLI shapes:
+  // Support three CLI shapes:
   // 1. Simple single-type: --bikeType=... --qty=... --bikeIds=A,B,C
-  // 2. Multi-type: --items='[{"bikeTypeLabel":"Adult'\''s Bikes","qty":1,"bikeIds":["A22"]},...]'
+  // 2. Multi-type inline JSON: --items='[...]' (fragile with shell quoting)
+  // 3. Multi-type from file: --itemsFile=/tmp/items.json (avoids quoting entirely — preferred)
   let items;
-  if (args.items) {
+  if (args.itemsFile) {
+    const fs = require('fs');
+    const raw = fs.readFileSync(args.itemsFile, 'utf8');
+    items = JSON.parse(raw);
+    console.log('Loaded items from file:', args.itemsFile, '->', JSON.stringify(items));
+  } else if (args.items) {
     items = JSON.parse(args.items);
   } else {
     items = [{
