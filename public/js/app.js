@@ -57,21 +57,25 @@ let _toastTimer = null;
 
 function toast(msg, type="", undoFn=null) {
   const el = document.getElementById("toast");
+  if (!el) return;
   clearTimeout(_toastTimer);
   _undoFn = undoFn;
-  if (undoFn) {
-    el.innerHTML = `<span>${msg}</span><button class="toast-undo-btn" onclick="triggerUndo()">Undo</button>`;
-  } else {
-    el.textContent = msg;
-  }
+
+  el.innerHTML = undoFn
+    ? `<span>${msg}</span><button class="toast-undo-btn" onclick="event.stopPropagation();triggerUndo()">Undo</button>`
+    : `<span>${msg}</span>`;
   el.className = "toast " + type + (undoFn ? " has-undo" : "");
   el.classList.remove("hidden");
-  _toastTimer = setTimeout(() => dismissToast(), undoFn ? 5000 : 2800);
+
+  const duration = undoFn ? 3500 : 1800;
+  _toastTimer = setTimeout(dismissToast, duration);
 }
 
 function dismissToast() {
   clearTimeout(_toastTimer);
-  document.getElementById("toast").classList.add("hidden");
+  _toastTimer = null;
+  const el = document.getElementById("toast");
+  if (el) el.classList.add("hidden");
   _undoFn = null;
 }
 
@@ -79,27 +83,22 @@ async function triggerUndo() {
   clearTimeout(_toastTimer);
   const fn = _undoFn;
   _undoFn = null;
-  document.getElementById("toast").classList.add("hidden");
+  const el = document.getElementById("toast");
+  if (el) el.classList.add("hidden");
+  if (!fn) return;
   try {
     await fn();
-    toast("Undone ✓", "success");
+    toast("Undone", "success");
   } catch(e) {
     toast("Could not undo: " + e.message, "error");
   }
 }
 
-// Swipe to dismiss toast
-(function() {
-  let startX = 0;
-  document.addEventListener("touchstart", e => {
-    if (!document.getElementById("toast").classList.contains("hidden") && e.target.closest("#toast")) startX = e.touches[0].clientX;
-  }, {passive:true});
-  document.addEventListener("touchend", e => {
-    if (!startX) return;
-    if (Math.abs(e.changedTouches[0].clientX - startX) > 60) dismissToast();
-    startX = 0;
-  }, {passive:true});
-})();
+// Tap anywhere on the toast to dismiss it immediately
+document.getElementById("toast")?.addEventListener("click", (e) => {
+  if (e.target.closest(".toast-undo-btn")) return; // don't dismiss when tapping Undo itself
+  dismissToast();
+});
 // ── Modal ─────────────────────────────────────────────────────────────────
 function openModal(html) {
   document.getElementById('modal-content').innerHTML=html;
