@@ -84,6 +84,16 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
     console.log('Saved debug screenshot: /tmp/fh-debug-3-after-day-click.png');
     console.log('URL after day click:', page.url());
 
+    // Multi-day rental items (2-D, 4-D, 7-D etc.) have no specific start TIME —
+    // clicking the day goes straight to the booking page with the availability
+    // ID already in the URL. Single-day items (1-D) instead show a list of
+    // time slots first, which we then need to click separately.
+    let match = page.url().match(/availability\/(\d+)/);
+    if (match) {
+      console.log('Day click landed directly on booking page (multi-day item) — skipping time-slot step.');
+      return match[1];
+    }
+
     // Now look for the time slot matching `time` (e.g. "10:00")
     const timeLocator = page.locator(`text="${time}"`).first();
     const timeCount = await timeLocator.count();
@@ -102,7 +112,7 @@ async function findAvailabilityId(browser, { itemId, date, time }) {
 
     // After clicking, the URL or an inner link should contain availability/<id>
     const currentUrl = page.url();
-    let match = currentUrl.match(/availability\/(\d+)/);
+    match = currentUrl.match(/availability\/(\d+)/);
 
     if (!match) {
       // Sometimes the click opens a panel with a "Book Now" link containing the ID
