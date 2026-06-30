@@ -224,11 +224,28 @@ async function loginToDashboard(browser) {
 
 // ── Step 3: check the quantity dropdown for the real (non-overbooking) max ─
 async function getMaxAvailable(page, bikeTypeLabel) {
-  // Find the <select> associated with the bike type row by its visible label text
+  // Find the <select> associated with the bike type row by its visible label text.
+  // Search up through several ancestor levels since the label and the
+  // dropdown can be nested a few divs apart depending on the row layout.
   const row = page.locator(`text="${bikeTypeLabel}"`).first();
-  const select = row.locator('xpath=ancestor::*[self::div][1]//select').first();
+  const rowCount = await row.count();
+  console.log(`Bike type label "${bikeTypeLabel}" found:`, rowCount);
+  if (rowCount === 0) {
+    throw new Error(`Could not find bike type "${bikeTypeLabel}" on the booking page at all.`);
+  }
+
+  let select = null;
+  for (let depth = 1; depth <= 6; depth++) {
+    const candidate = row.locator(`xpath=ancestor::*[${depth}]//select`).first();
+    if (await candidate.count() > 0) { select = candidate; console.log(`Select found at ancestor depth ${depth}`); break; }
+  }
+  if (!select) {
+    throw new Error(`Found bike type label "${bikeTypeLabel}" but no <select> nearby in any ancestor up to depth 6.`);
+  }
 
   const options = await select.locator('option').allTextContents();
+  console.log('Raw dropdown options:', JSON.stringify(options));
+
   // Options appear in order: 0,1,2,...N, then "Overbooking:" separator, then more numbers.
   // We only trust options BEFORE any option whose text includes "Overbooking".
   let maxSafe = 0;
@@ -238,6 +255,7 @@ async function getMaxAvailable(page, bikeTypeLabel) {
     const n = parseInt(trimmed, 10);
     if (!isNaN(n)) maxSafe = Math.max(maxSafe, n);
   }
+  console.log('Computed maxSafe (non-overbooking):', maxSafe);
   return { select, maxSafe };
 }
 
