@@ -1248,3 +1248,18 @@ details summary::-webkit-details-marker { display: none; }
   display: inline-block;
   margin-bottom: 0.2rem;
 }
+
+.shop-mode-entry {
+  margin-top: 2rem;
+  background: var(--bg3);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.75rem 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text2);
+  cursor: pointer;
+  width: 100%;
+  max-width: 340px;
+}
+.shop-mode-entry:active { background: var(--red-light); border-color: var(--red); color: var(--red); }

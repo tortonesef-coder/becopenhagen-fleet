@@ -118,12 +118,12 @@ document.getElementById('modal-overlay').addEventListener('click',e=>{
 state.pendingMemberId = null;
 
 async function initIdentity() {
-  // Check if this is the shop iPad (URL has ?shop) or shop_mode session already active
-  const isShopParam = new URLSearchParams(window.location.search).has('shop');
+  // Resume an active shop_mode session if one exists
   const sessionCheck = await api('/session/me').catch(() => ({}));
-
-  if (isShopParam || sessionCheck.shop_mode) {
-    await initShopMode();
+  if (sessionCheck.shop_mode) {
+    state.shopMode = true;
+    if (sessionCheck.actor) { state.actor = sessionCheck.actor; showMain(); }
+    else await showShopWhoAreYou();
     return;
   }
 
@@ -142,6 +142,17 @@ async function initIdentity() {
   grid.querySelectorAll('.identity-btn').forEach(btn=>{
     btn.addEventListener('click',()=>selectMember(btn.dataset.id));
   });
+
+  // Shop mode entry point, visible to everyone on the identity screen
+  const wrap = document.querySelector('.identity-wrap');
+  const existingShopBtn = document.getElementById('shop-mode-entry-btn');
+  if (existingShopBtn) existingShopBtn.remove();
+  const shopBtn = document.createElement('button');
+  shopBtn.id = 'shop-mode-entry-btn';
+  shopBtn.className = 'shop-mode-entry';
+  shopBtn.innerHTML = '🏪 Shop Mode (shared device)';
+  shopBtn.onclick = () => initShopMode();
+  wrap.appendChild(shopBtn);
 }
 
 async function selectMember(memberId) {
@@ -384,15 +395,25 @@ async function submitShopPin() {
   const pin = document.getElementById('shop-pin-entry')?.value;
   try {
     await api('/auth/shop-login', { method:'POST', body:{ pin }});
-    showShopWhoAreYou();
+    state.shopMode = true;
+    await showShopWhoAreYou();
   } catch(e) {
     const err = document.getElementById('shop-pin-error');
-    if (err) err.textContent = e.message;
+    if (err) err.textContent = e.message || 'Something went wrong';
+    console.error('Shop PIN error:', e);
   }
 }
 
 async function showShopWhoAreYou() {
-  const team = await api('/auth/team');
+  state.shopMode = true;
+  let team;
+  try {
+    team = await api('/auth/team');
+  } catch(e) {
+    console.error('Failed to load team for shop mode:', e);
+    toast('Could not load team list', 'error');
+    return;
+  }
   team.sort((a,b)=>a.name.localeCompare(b.name));
   document.getElementById('screen-main').classList.remove('active');
   document.getElementById('screen-main').style.display = 'none';
