@@ -129,16 +129,52 @@ async function loginToDashboard(browser) {
   const page = await context.newPage();
 
   await page.goto(DASHBOARD_LOGIN_URL, { waitUntil: 'networkidle' });
+  console.log('Login page title:', await page.title());
+  console.log('Login page URL:', page.url());
+  await page.screenshot({ path: '/tmp/fh-debug-5-login-page.png', fullPage: true });
+  console.log('Saved debug screenshot: /tmp/fh-debug-5-login-page.png');
 
-  // FareHarbor's login form — field names confirmed via inspection;
-  // adjust selectors here if FareHarbor changes their login page.
-  await page.fill('input[name="email"], input[type="email"]', FAREHARBOR_EMAIL);
-  await page.fill('input[name="password"], input[type="password"]', FAREHARBOR_PASSWORD);
-  await page.click('button[type="submit"]');
+  // Try a broad set of likely selectors for the email/username field
+  const emailSelectors = [
+    'input[name="email"]', 'input[type="email"]', 'input[name="username"]',
+    'input#id_email', 'input#email', 'input[placeholder*="mail" i]',
+    'input[placeholder*="username" i]',
+  ];
+  let emailField = null;
+  for (const sel of emailSelectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.count() > 0) { emailField = loc; console.log('Email field matched selector:', sel); break; }
+  }
+  if (!emailField) {
+    const bodyText = await page.locator('body').innerText();
+    console.log('--- Login page text (first 1000 chars) ---');
+    console.log(bodyText.substring(0, 1000));
+    throw new Error('Could not find email/username field on login page. See /tmp/fh-debug-5-login-page.png');
+  }
+  await emailField.fill(FAREHARBOR_EMAIL);
 
-  await page.waitForURL('**/dashboard/**', { timeout: 15000 }).catch(() => {
-    // Some accounts land elsewhere after login; not fatal, continue.
-  });
+  const passwordSelectors = ['input[name="password"]', 'input[type="password"]', 'input#id_password', 'input#password'];
+  let passwordField = null;
+  for (const sel of passwordSelectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.count() > 0) { passwordField = loc; console.log('Password field matched selector:', sel); break; }
+  }
+  if (!passwordField) throw new Error('Could not find password field on login page.');
+  await passwordField.fill(FAREHARBOR_PASSWORD);
+
+  const submitSelectors = ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Log in")', 'button:has-text("Sign in")'];
+  let submitBtn = null;
+  for (const sel of submitSelectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.count() > 0) { submitBtn = loc; console.log('Submit button matched selector:', sel); break; }
+  }
+  if (!submitBtn) throw new Error('Could not find login submit button.');
+  await submitBtn.click();
+
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: '/tmp/fh-debug-6-after-login.png', fullPage: true });
+  console.log('Saved debug screenshot: /tmp/fh-debug-6-after-login.png');
+  console.log('URL after login attempt:', page.url());
 
   return { context, page };
 }
