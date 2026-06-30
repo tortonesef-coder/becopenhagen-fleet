@@ -1746,9 +1746,18 @@ async function openTourDetail(availId) {
     <div class="detail-section">
       <div class="detail-section-title">Bookings</div>
       ${bookings.map(b=>{
-        const src = b.source && b.source !== "direct"
-          ? "<span style='font-size:0.68rem;background:var(--blue-bg);color:var(--blue);padding:1px 6px;border-radius:10px;margin-left:5px'>"+b.source+"</span>"
-          : "";
+        const sourceColors = {
+          'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
+          'TripAdvisor':  { bg:'#D6F5EC', fg:'#00754A' },
+          'Viator':       { bg:'#D6F5EC', fg:'#00754A' },
+          'Airbnb':       { bg:'#FFE2E3', fg:'#D9363E' },
+        };
+        const sc = sourceColors[b.source];
+        const src = (b.source && b.source !== "direct" && sc)
+          ? "<span style='font-size:0.68rem;font-weight:600;background:"+sc.bg+";color:"+sc.fg+";padding:2px 8px;border-radius:10px;margin-left:5px'>"+b.source+"</span>"
+          : (b.source && b.source !== "direct"
+              ? "<span style='font-size:0.68rem;background:var(--blue-bg);color:var(--blue);padding:1px 6px;border-radius:10px;margin-left:5px'>"+b.source+"</span>"
+              : "");
         const unpaid = b.due && b.due !== "DKK0.00"
           ? "<span style='font-size:0.68rem;background:#fdecea;color:#e04040;padding:1px 6px;border-radius:10px;margin-left:4px'>Due: "+b.due+"</span>"
           : "";
@@ -1758,7 +1767,7 @@ async function openTourDetail(availId) {
           + src + unpaid
           + "</div>"
           + ((!b.created_at || new Date(b.created_at) < new Date('2026-07-01T00:00:00+02:00'))
-              ? '<span style="font-size:0.68rem;background:var(--purple-bg);color:var(--purple);padding:1px 6px;border-radius:10px;margin-left:4px">🏳️ Booked before Jul 1</span>'
+              ? '<span style="font-size:0.7rem;font-weight:700;background:#fff4d6;color:#8a6500;padding:2px 8px;border-radius:10px;margin-left:4px;border:1px solid #e8c468">⚠️ Booked before Jul 1</span>'
               : '')
           + (b.phone ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>📞 "+b.phone+"</div>" : "")
           + (b.email ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")

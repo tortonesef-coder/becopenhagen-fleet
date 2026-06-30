@@ -173,11 +173,13 @@ function parseIcal(text) {
       const langMatch = block.match(/Language Option:\s*\n([^\n#\\]+)/);
       const language = langMatch ? langMatch[1].trim() : null;
 
-      // Source: GYG, TripAdvisor, direct, etc
+      // Source: GYG, TripAdvisor, Viator, Airbnb, direct, etc
+      const blockLower = block.toLowerCase();
       let source = 'direct';
-      if (emailRaw === null && block.includes('getyourguide')) source = 'GetYourGuide';
-      else if (block.includes('tripadvisor')) source = 'TripAdvisor';
-      else if (block.includes('viator')) source = 'Viator';
+      if (blockLower.includes('getyourguide')) source = 'GetYourGuide';
+      else if (blockLower.includes('tripadvisor')) source = 'TripAdvisor';
+      else if (blockLower.includes('viator')) source = 'Viator';
+      else if (blockLower.includes('airbnb')) source = 'Airbnb';
 
       bookings.push({
         ref, name, phone,
