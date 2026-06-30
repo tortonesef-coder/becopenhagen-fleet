@@ -253,11 +253,30 @@ async function createBooking({
 
     const bookUrl = `https://fareharbor.com/${COMPANY_SLUG}/items/${itemId}/availability/${availabilityId}/book/`;
     await page.goto(bookUrl, { waitUntil: 'networkidle', timeout: 20000 });
+    console.log('Booking page URL:', page.url());
+    await page.screenshot({ path: '/tmp/fh-debug-7-booking-page.png', fullPage: true });
+    console.log('Saved debug screenshot: /tmp/fh-debug-7-booking-page.png');
 
-    // Customer details
-    await page.fill('input[placeholder="Full name"], input[name*="name"]', customerName);
-    if (phone) await page.fill('input[placeholder="Phone number"]', phone);
-    if (email) await page.fill('input[placeholder="Email Address"]', email);
+    // Customer details — match ONLY by exact placeholder text, since broader
+    // attribute-substring selectors can accidentally hit hidden form fields
+    // (FareHarbor's booking form has many hidden inputs with "name" in their
+    // own internal field names, e.g. "affiliateCompanyShortname").
+    const nameField = page.locator('input[placeholder="Full name"]').first();
+    const nameFieldCount = await nameField.count();
+    console.log('Full name field found:', nameFieldCount);
+    if (nameFieldCount === 0) {
+      throw new Error('Could not find "Full name" input on booking page. See /tmp/fh-debug-7-booking-page.png');
+    }
+    await nameField.fill(customerName);
+
+    if (phone) {
+      const phoneField = page.locator('input[placeholder="Phone number"]').first();
+      if (await phoneField.count() > 0) await phoneField.fill(phone);
+    }
+    if (email) {
+      const emailField = page.locator('input[placeholder="Email Address"]').first();
+      if (await emailField.count() > 0) await emailField.fill(email);
+    }
 
     // Quantity — respecting the overbooking guard
     const { select, maxSafe } = await getMaxAvailable(page, bikeTypeLabel);
