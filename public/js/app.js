@@ -514,8 +514,8 @@ function buildTabbar() {
   const tabs = role==='mechanic'
     ? [{id:'today',label:'Today',icon:iconHome()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
     : role==='admin'
-    ? [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
-    : [{id:'tours',label:'Tours',icon:iconTours()},{id:'today',label:'Today',icon:iconHome()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
+    ? [{id:'today',label:'Today',icon:iconHome()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
+    : [{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'today',label:'Today',icon:iconHome()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
@@ -532,7 +532,7 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours & Rentals'};
+  const titles={today:'Today',bikes:'All bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours',rentals:'Rentals'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id==='today') await renderToday(c);
@@ -542,6 +542,7 @@ async function renderTab(id) {
   else if(id==='tickets') await renderTickets(c);
   else if(id==='admin') await renderAdmin(c);
   else if(id==='tours') await renderTours(c);
+  else if(id==='rentals') await renderRentals(c);
 }
 
 // ── TODAY ─────────────────────────────────────────────────────────────────
@@ -1812,6 +1813,7 @@ async function retireBike(id, reactivate) {
   } catch(e) { toast(e.message, 'error'); }
 }
 
+function iconRentals(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8h-3V4H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1m17-9-2-3h-9l-2 3m13 0v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8m13 0H7"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>`;}
 function iconTours(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;}
 function iconAdmin(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><path d="M12 12v9"/><path d="m15 15-3 3-3-3"/></svg>`;}
 
@@ -1912,40 +1914,18 @@ function fmtDate(d) {
 
 // ── TOURS TAB ─────────────────────────────────────────────────────────────
 async function renderTours(c) {
-  if (!window._toursTab) window._toursTab = 'tours';
-
-  c.innerHTML = `
-    <div class="subtab-row">
-      <button class="subtab${window._toursTab==='tours'?' active':''}" onclick="switchToursTab('tours')">Tours</button>
-      <button class="subtab${window._toursTab==='rentals'?' active':''}" onclick="switchToursTab('rentals')">Rentals</button>
-    </div>
-    <div id="tours-tab-content"><div class="empty-state"><p>Loading...</p></div></div>`;
-
-  loadToursTab();
+  c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  const role = state.actor?.role;
+  const name = state.actor?.name;
+  const isGuide = role === 'guide';
+  const tours = await api('/api/ical/tours' + (isGuide ? `?guide=${encodeURIComponent(name)}` : ''));
+  renderToursList(c, tours, isGuide);
 }
 
-function switchToursTab(tab) {
-  window._toursTab = tab;
-  document.querySelectorAll('.subtab').forEach(b =>
-    b.classList.toggle('active', b.textContent === (tab==='tours'?'Tours':'Rentals')));
-  loadToursTab();
-}
-
-async function loadToursTab() {
-  const el = document.getElementById('tours-tab-content');
-  if (!el) return;
-
-  if (window._toursTab === 'tours') {
-    // Filter by guide if current user is a guide
-    const role = state.actor?.role;
-    const name = state.actor?.name;
-    const isGuide = role === 'guide';
-    const tours = await api('/api/ical/tours' + (isGuide ? `?guide=${encodeURIComponent(name)}` : ''));
-    renderToursList(el, tours, isGuide);
-  } else {
-    const rentals = await api('/api/ical/rentals');
-    renderRentalsList(el, rentals);
-  }
+async function renderRentals(c) {
+  c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  const rentals = await api('/api/ical/rentals');
+  renderRentalsList(c, rentals);
 }
 
 function renderToursList(el, tours, isGuideView) {
@@ -2004,16 +1984,21 @@ function renderRentalsList(el, rentals) {
     <div class="section-title">${fmtDateFull(date)}</div>
     ${items.map(r => {
       const bookings = r.bookings || [];
-      return `<div class="tour-card" onclick="openRentalDetail('${r.availability_id}')">
-        <div class="tour-card-header">
-          <div>
-            <span class="tour-badge" style="background:var(--blue-bg);color:var(--blue)">${r.feed_id}</span>
-            <span class="tour-time">${r.start_time || ''}${r.end_time?'–'+r.end_time:''}</span>
-          </div>
-          <div class="tour-pax">${bookings.length} booking${bookings.length!==1?'s':''}</div>
+      const dayCount = r.feed_id || '';
+      return `<div class="rental-card" onclick="openRentalDetail('${r.availability_id}')">
+        <div class="rental-card-top">
+          <span class="rental-duration-badge">${dayCount}</span>
+          <span class="rental-time">${r.start_time || ''}${r.end_time?' – '+r.end_time:''}</span>
+          <span class="rental-count">${bookings.length} booking${bookings.length!==1?'s':''}</span>
         </div>
-        ${bookings.slice(0,2).map(b=>`<div style="font-size:0.8rem;color:var(--text2);margin-top:2px">${b.name||''}</div>`).join('')}
-        ${bookings.length > 2 ? `<div style="font-size:0.75rem;color:var(--text3)">+${bookings.length-2} more</div>` : ''}
+        <div class="rental-customers">
+          ${bookings.slice(0,3).map(b=>`
+            <div class="rental-customer-row">
+              <span class="rcr-name">${b.name||'Unknown'}</span>
+              ${b.what ? `<span class="rcr-what">${b.what}</span>` : ''}
+            </div>`).join('')}
+          ${bookings.length > 3 ? `<div class="rental-more">+${bookings.length-3} more booking${bookings.length-3!==1?'s':''}</div>` : ''}
+        </div>
       </div>`;
     }).join('')}
   `).join('');

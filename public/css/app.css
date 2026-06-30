@@ -1295,3 +1295,80 @@ details summary::-webkit-details-marker { display: none; }
   margin-bottom: 4px;
   display: block;
 }
+
+/* ── Rental cards (redesigned for legibility) ── */
+.rental-card {
+  background: var(--bg2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.6rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.rental-card:active { opacity: 0.85; }
+
+.rental-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.rental-duration-badge {
+  background: var(--blue-bg);
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  flex-shrink: 0;
+}
+
+.rental-time {
+  font-size: 0.85rem;
+  color: var(--text2);
+  font-weight: 500;
+}
+
+.rental-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+
+.rental-customers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.rental-customer-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.rcr-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rcr-what {
+  font-size: 0.75rem;
+  color: var(--text3);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.rental-more {
+  font-size: 0.78rem;
+  color: var(--blue);
+  font-weight: 500;
+  margin-top: 2px;
+}
