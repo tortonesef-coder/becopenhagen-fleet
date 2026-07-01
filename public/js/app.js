@@ -2170,7 +2170,7 @@ async function openTourDetail(availId) {
           + src + unpaid
           + "</div>"
           + ((!['L2P','L3P','A3P','CUSTOM'].includes(t.feed_id) && b.source !== 'Airbnb' && (!b.created_at || new Date(b.created_at) < new Date('2026-07-01T00:00:00+02:00')))
-              ? '<span style="font-size:0.7rem;font-weight:700;background:#fff4d6;color:#8a6500;padding:2px 8px;border-radius:10px;margin-left:4px;border:1px solid #e8c468">⚠️ Booked before Jul 1</span>'
+              ? '<span style="font-size:0.7rem;font-weight:700;background:#e6f4ea;color:#1a7d4a;padding:2px 8px;border-radius:10px;margin-left:4px;border:1px solid #a8ddc0">🚲 Can keep bikes after tour</span>'
               : '')
           + (b.phone ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>📞 "+b.phone+"</div>" : "")
           + (b.email ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")
