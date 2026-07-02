@@ -45,7 +45,8 @@ router.post('/send-verification', async (req, res) => {
   const member = db().prepare('SELECT * FROM team_members WHERE id=? AND active=1').get(member_id);
   if (!member) return res.status(404).json({ error: 'Unknown team member' });
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const crypto = require('crypto');
+  const code = String(crypto.randomInt(100000, 1000000));
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
   db().prepare('INSERT INTO email_verifications (member_id, email, code, expires_at) VALUES (?,?,?,?)')
