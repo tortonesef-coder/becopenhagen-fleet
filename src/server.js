@@ -48,8 +48,11 @@ app.use('/api/fareharbor-agent', require('./routes/fareharbor-agent'));
 app.use('/api', require('./routes/api'));
 
 app.post('/session/logout', (req, res) => {
-  req.session.destroy();
-  res.json({ ok: true });
+  req.session.destroy((err) => {
+    if (err) console.error('Session destroy error:', err);
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
+  });
 });
 
 app.post('/session/shop-logout-actor', (req, res) => {

@@ -153,6 +153,22 @@ async function initIdentity() {
     showMain();
     return;
   }
+  await showTeamPicker();
+}
+
+async function showTeamPicker() {
+  // Rebuild the identity screen's markup from scratch, since Shop Mode's
+  // PIN screens replace #screen-identity's innerHTML entirely — the normal
+  // #identity-grid element may no longer exist in the DOM at this point.
+  document.getElementById('screen-identity').innerHTML = `
+    <div class="identity-wrap">
+      <div class="bc-logo-wrap">
+        <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
+        <div class="bc-wordmark">Be<span>Copenhagen</span></div>
+      </div>
+      <p class="identity-prompt">Who are you?</p>
+      <div class="identity-grid" id="identity-grid"></div>
+    </div>`;
 
   const team = await api('/auth/team');
   team.sort((a,b)=>a.name.localeCompare(b.name));
@@ -172,8 +188,6 @@ async function initIdentity() {
 
   // Shop mode entry point, visible to everyone on the identity screen
   const wrap = document.querySelector('.identity-wrap');
-  const existingShopBtn = document.getElementById('shop-mode-entry-btn');
-  if (existingShopBtn) existingShopBtn.remove();
   const shopBtn = document.createElement('button');
   shopBtn.id = 'shop-mode-entry-btn';
   shopBtn.className = 'shop-mode-entry';
@@ -384,7 +398,10 @@ async function exitShopMode() {
   document.getElementById('screen-main').style.display = 'none';
   document.getElementById('screen-identity').classList.add('active');
   document.getElementById('screen-identity').style.display = 'flex';
-  initIdentity();
+  // Force the normal team picker directly rather than re-checking session
+  // state, since immediately re-querying /session/me right after logout
+  // can occasionally race with cookie clearing.
+  await showTeamPicker();
 }
 
 // ── Shop Mode (shared iPad) ──────────────────────────────────────────────
