@@ -356,15 +356,14 @@ async function checkSession() {
 
 function switchUser() {
   if (state.shopMode) {
-    api('/session/logout', { method:'POST' }).then(() => {
-      state.shopMode = false;
-      state.actor = null;
-      document.getElementById('screen-main').classList.remove('active');
-      document.getElementById('screen-main').style.display = 'none';
-      document.getElementById('screen-identity').classList.add('active');
-      document.getElementById('screen-identity').style.display = 'flex';
-      showShopPinEntry();
-    });
+    openModal(`
+      <div class="modal-title">Exit Shop Mode?</div>
+      <p style="font-size:0.9rem;color:var(--text2);margin-bottom:1.25rem">This will log out of the shared shop device and return to normal login. Use this on personal phones, not the shop iPad.</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="closeModal();exitShopMode()">Exit Shop Mode</button>
+      </div>
+    `);
     return;
   }
   api('/session/logout', { method:'POST' }).then(() => {
@@ -375,6 +374,17 @@ function switchUser() {
     document.getElementById('screen-identity').style.display = 'flex';
     initIdentity();
   });
+}
+
+async function exitShopMode() {
+  await api('/session/logout', { method:'POST' });
+  state.shopMode = false;
+  state.actor = null;
+  document.getElementById('screen-main').classList.remove('active');
+  document.getElementById('screen-main').style.display = 'none';
+  document.getElementById('screen-identity').classList.add('active');
+  document.getElementById('screen-identity').style.display = 'flex';
+  initIdentity();
 }
 
 // ── Shop Mode (shared iPad) ──────────────────────────────────────────────
