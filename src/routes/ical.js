@@ -390,7 +390,7 @@ router.get('/tours', (req, res) => {
   const limit = parseInt(days) || 30;
 
   const sql = `SELECT * FROM tour_availabilities
-    WHERE feed_type='tour' AND start_at >= datetime('now', '-1 hour')
+    WHERE feed_type='tour' AND end_at >= datetime('now', '-2 hours')
     AND start_at <= datetime('now', '+${limit} days') ORDER BY start_at`;
 
   let rows = db().prepare(sql).all();
