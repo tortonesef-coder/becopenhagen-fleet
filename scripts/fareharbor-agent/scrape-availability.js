@@ -58,9 +58,19 @@ async function scrapeMonth(browser, itemId, year, month) {
   try {
     const url = `https://fareharbor.com/embeds/book/${COMPANY_SLUG}/items/${itemId}/calendar/${year}/${String(month).padStart(2,'0')}/`;
     await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 });
+    console.log('  Page title:', await page.title());
+    await page.screenshot({ path: '/tmp/scrape-debug-calendar.png', fullPage: true });
+    console.log('  Saved debug screenshot: /tmp/scrape-debug-calendar.png');
 
     // Find every day cell that has a clickable item button (i.e. has availability)
     const dayButtons = await page.locator('button, a').filter({ hasText: /Rentals?$/ }).all();
+    console.log(`  Day buttons matching /Rentals?$/:`, dayButtons.length);
+
+    if (dayButtons.length === 0) {
+      // Dump all button/link text on the page so we can see what's actually there
+      const allButtonTexts = await page.locator('button, a').allTextContents();
+      console.log('  All button/link texts on page (first 40):', JSON.stringify(allButtonTexts.slice(0, 40)));
+    }
 
     for (const btn of dayButtons) {
       try {
