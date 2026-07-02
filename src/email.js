@@ -1,35 +1,48 @@
-// Brevo (formerly Sendinblue) transactional email sender
+// Transactional email via SMTP (Simply.com), using nodemailer.
+// Replaces the earlier Brevo REST API integration -- Simply.com already
+// hosts the team's mailboxes, so this consolidates onto one provider.
 
-async function sendEmail({ to, toName, subject, htmlContent }) {
-  const apiKey = process.env.BREVO_API_KEY;
-  if (!apiKey) {
-    console.error('BREVO_API_KEY not set — cannot send email');
-    return { ok: false, error: 'Email not configured' };
+const nodemailer = require('nodemailer');
+
+let transporter = null;
+
+function getTransporter() {
+  if (transporter) return transporter;
+
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD;
+
+  if (!host || !user || !pass) {
+    console.error('SMTP not configured -- missing SMTP_HOST / SMTP_USER / SMTP_PASSWORD env vars');
+    return null;
   }
 
-  try {
-    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        sender: { name: 'BeCopenhagen Fleet', email: 'noreply@interestingtours.dk' },
-        to: [{ email: to, name: toName || to }],
-        subject,
-        htmlContent,
-      }),
-    });
+  transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465, // true for 465 (SSL), false for 587/25 (STARTTLS)
+    auth: { user, pass },
+  });
 
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('Brevo send failed:', res.status, err);
-      return { ok: false, error: err };
-    }
+  return transporter;
+}
+
+async function sendEmail({ to, toName, subject, htmlContent }) {
+  const t = getTransporter();
+  if (!t) return { ok: false, error: 'Email not configured' };
+
+  try {
+    await t.sendMail({
+      from: '"BeCopenhagen Fleet" <' + process.env.SMTP_USER + '>',
+      to: toName ? '"' + toName + '" <' + to + '>' : to,
+      subject,
+      html: htmlContent,
+    });
     return { ok: true };
   } catch (e) {
-    console.error('Email send error:', e.message);
+    console.error('SMTP send error:', e.message);
     return { ok: false, error: e.message };
   }
 }
@@ -39,15 +52,13 @@ async function sendPasswordResetEmail(toEmail, toName, resetUrl) {
     to: toEmail,
     toName,
     subject: 'Reset your BC Fleet password',
-    htmlContent: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-        <h2 style="color:#C8102E">BC Fleet</h2>
-        <p>Hi ${toName},</p>
-        <p>Click the link below to set a new password. This link expires in 1 hour.</p>
-        <p><a href="${resetUrl}" style="display:inline-block;background:#C8102E;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Reset Password</a></p>
-        <p style="color:#888;font-size:13px">If you didn't request this, you can safely ignore this email.</p>
-      </div>
-    `,
+    htmlContent: '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">' +
+      '<h2 style="color:#C8102E">BC Fleet</h2>' +
+      '<p>Hi ' + toName + ',</p>' +
+      '<p>Click the link below to set a new password. This link expires in 1 hour.</p>' +
+      '<p><a href="' + resetUrl + '" style="display:inline-block;background:#C8102E;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Reset Password</a></p>' +
+      '<p style="color:#888;font-size:13px">If you didn\'t request this, you can safely ignore this email.</p>' +
+      '</div>',
   });
 }
 
@@ -56,15 +67,13 @@ async function sendVerificationCodeEmail(toEmail, toName, code) {
     to: toEmail,
     toName,
     subject: 'Your BC Fleet verification code',
-    htmlContent: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-        <h2 style="color:#C8102E">BC Fleet</h2>
-        <p>Hi ${toName},</p>
-        <p>Your verification code is:</p>
-        <p style="font-size:32px;font-weight:700;letter-spacing:6px;color:#C8102E;text-align:center;padding:16px;background:#fdf0f2;border-radius:8px">${code}</p>
-        <p style="color:#888;font-size:13px">This code expires in 10 minutes. If you didn't request this, you can safely ignore this email.</p>
-      </div>
-    `,
+    htmlContent: '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">' +
+      '<h2 style="color:#C8102E">BC Fleet</h2>' +
+      '<p>Hi ' + toName + ',</p>' +
+      '<p>Your verification code is:</p>' +
+      '<p style="font-size:32px;font-weight:700;letter-spacing:6px;color:#C8102E;text-align:center;padding:16px;background:#fdf0f2;border-radius:8px">' + code + '</p>' +
+      '<p style="color:#888;font-size:13px">This code expires in 10 minutes. If you didn\'t request this, you can safely ignore this email.</p>' +
+      '</div>',
   });
 }
 
