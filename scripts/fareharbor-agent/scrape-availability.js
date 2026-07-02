@@ -62,9 +62,11 @@ async function scrapeMonth(browser, itemId, year, month) {
     await page.screenshot({ path: '/tmp/scrape-debug-calendar.png', fullPage: true });
     console.log('  Saved debug screenshot: /tmp/scrape-debug-calendar.png');
 
-    // Find every day cell that has a clickable item button (i.e. has availability)
-    const dayButtons = await page.locator('button, a').filter({ hasText: /Rentals?$/ }).all();
-    console.log(`  Day buttons matching /Rentals?$/:`, dayButtons.length);
+    // Find every day cell that has a clickable item button (i.e. has availability).
+    // Button text includes trailing whitespace/pickup-window text, so match
+    // "Rentals" anywhere rather than requiring it at the very end.
+    const dayButtons = await page.locator('button, a').filter({ hasText: /Rentals/ }).all();
+    console.log(`  Day buttons matching /Rentals/:`, dayButtons.length);
 
     if (dayButtons.length === 0) {
       // Dump all button/link text on the page so we can see what's actually there
@@ -72,8 +74,20 @@ async function scrapeMonth(browser, itemId, year, month) {
       console.log('  All button/link texts on page (first 40):', JSON.stringify(allButtonTexts.slice(0, 40)));
     }
 
-    for (const btn of dayButtons) {
+    const buttonCount = dayButtons.length;
+
+    for (let i = 0; i < buttonCount; i++) {
       try {
+        // Re-query fresh each iteration rather than reusing the original
+        // locator handles, since a prior goBack() navigation can leave
+        // earlier references pointing at detached/stale DOM elements.
+        const freshButtons = await page.locator('button, a').filter({ hasText: /Rentals/ }).all();
+        if (i >= freshButtons.length) {
+          console.log(`  Button index ${i} no longer exists after navigation, stopping.`);
+          break;
+        }
+        const btn = freshButtons[i];
+
         await btn.click();
         await page.waitForTimeout(800);
 
@@ -95,9 +109,8 @@ async function scrapeMonth(browser, itemId, year, month) {
         if (availId) {
           // Extract the date from the page heading or URL
           const dateMatch = page.url().match(/date\/(\d{4}-\d{2}-\d{2})/);
-          const heading = await page.locator('h1, h2, h3').filter({ hasText: /\d{4}/ }).first().innerText().catch(() => '');
           const date = dateMatch ? dateMatch[1] : null;
-          if (date) results[date] = availId;
+          if (date) { results[date] = availId; console.log(`    ${date} -> ${availId}`); }
         }
 
         // Go back to the calendar to click the next day
