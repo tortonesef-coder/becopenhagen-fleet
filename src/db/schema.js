@@ -167,6 +167,15 @@ function initSchema() {
       pin_salt TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS bug_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reported_by TEXT,
+      description TEXT NOT NULL,
+      page TEXT,
+      status TEXT DEFAULT 'open' CHECK(status IN ('open','resolved')),
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS repair_priority_weights (
       id INTEGER PRIMARY KEY CHECK(id = 1),
       weight_rental_value REAL DEFAULT 0.3,

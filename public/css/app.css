@@ -1461,3 +1461,32 @@ details summary::-webkit-details-marker { display: none; }
   cursor: pointer;
 }
 #btn-undo.live:active { background: var(--red-light); transform: scale(0.92); }
+
+/* ── Beta badge + bug report button ── */
+.beta-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--red);
+  background: var(--red-light);
+  border: 1px solid var(--red-mid);
+  padding: 1px 6px;
+  border-radius: 10px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.topbar-left {
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topbar-left .view-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#btn-report-bug {
+  flex-shrink: 0;
+}

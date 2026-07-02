@@ -253,4 +253,28 @@ router.get('/fareharbor-agent-log', (req, res) => {
   res.json(rows.map(r => ({ ...r, details: JSON.parse(r.details || '{}') })));
 });
 
+// POST /api/bug-report — submit a bug report
+router.post('/bug-report', (req, res) => {
+  const { description, page } = req.body;
+  const actor = req.session?.actor || 'unknown';
+  if (!description || !description.trim()) return res.status(400).json({ error: 'Description required' });
+
+  db().prepare(`INSERT INTO bug_reports (reported_by, description, page) VALUES (?,?,?)`)
+    .run(actor, description.trim(), page || null);
+  res.json({ ok: true });
+});
+
+// GET /api/bug-reports — admin view of all reports
+router.get('/bug-reports', (req, res) => {
+  const rows = db().prepare(`SELECT * FROM bug_reports ORDER BY created_at DESC LIMIT 100`).all();
+  res.json(rows);
+});
+
+// PATCH /api/bug-reports/:id — mark resolved
+router.patch('/bug-reports/:id', (req, res) => {
+  const { status } = req.body;
+  db().prepare(`UPDATE bug_reports SET status=? WHERE id=?`).run(status || 'resolved', req.params.id);
+  res.json({ ok: true });
+});
+
 module.exports = router;

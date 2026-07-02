@@ -1671,6 +1671,7 @@ async function renderAdmin(c) {
       <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
       <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
       <button class="subtab${window._adminTab==='fareharbor'?' active':''}" onclick="switchAdminTab('fareharbor')">FareHarbor</button>
+      <button class="subtab${window._adminTab==='bugs'?' active':''}" onclick="switchAdminTab('bugs')">Bugs</button>
       <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
     </div>
     <div id="admin-tab-content"></div>`;
@@ -1679,7 +1680,7 @@ async function renderAdmin(c) {
 
 async function switchAdminTab(tab) {
   window._adminTab = tab;
-  const labels = {bikes:'Fleet', log:'Log', fareharbor:'FareHarbor', viewas:'View as'};
+  const labels = {bikes:'Fleet', log:'Log', fareharbor:'FareHarbor', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   renderAdminTab(document.getElementById('content'));
 }
@@ -1690,7 +1691,49 @@ async function renderAdminTab(c) {
   if (window._adminTab === 'bikes') await renderAdminBikes(el);
   else if (window._adminTab === 'viewas') await renderViewAs(el);
   else if (window._adminTab === 'fareharbor') await renderFareHarborLog(el);
+  else if (window._adminTab === 'bugs') await renderBugReports(el);
   else await renderAdminLog(el);
+}
+
+async function renderBugReports(el) {
+  el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  const rows = await api('/api/bug-reports').catch(() => []);
+  const open = rows.filter(r => r.status === 'open');
+  const resolved = rows.filter(r => r.status === 'resolved');
+
+  if (rows.length === 0) {
+    el.innerHTML = '<div class="empty-state"><p>No bug reports yet 🎉</p></div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="section-title" style="margin-top:0">${open.length} open</div>
+    <div class="bike-list">
+      ${open.map(r => `
+        <div class="ticket-card">
+          <div class="tk-problem">${r.description}</div>
+          <div class="tk-meta">${r.reported_by} · ${r.page||''} · ${fmtTime(r.created_at)}</div>
+          <div style="margin-top:0.5rem">
+            <button class="btn btn-sm btn-success" onclick="resolveBugReport(${r.id})">Mark resolved</button>
+          </div>
+        </div>`).join('') || '<div class="today-empty">None open</div>'}
+    </div>
+    ${resolved.length > 0 ? `
+      <div class="section-title">${resolved.length} resolved</div>
+      <div class="bike-list">
+        ${resolved.map(r => `
+          <div class="ticket-card" style="opacity:0.6">
+            <div class="tk-problem">${r.description}</div>
+            <div class="tk-meta">${r.reported_by} · ${fmtTime(r.created_at)}</div>
+          </div>`).join('')}
+      </div>` : ''}
+  `;
+}
+
+async function resolveBugReport(id) {
+  await api(`/api/bug-reports/${id}`, { method:'PATCH', body:{ status:'resolved' }});
+  toast('Marked resolved', 'success');
+  renderAdminTab(document.getElementById('content'));
 }
 
 async function renderFareHarborLog(el) {
@@ -2410,5 +2453,38 @@ async function submitStandaloneBooking() {
       </div>
       <button class="btn btn-primary btn-full" onclick="closeModal()">Got it</button>
     `);
+  }
+}
+
+// ── Bug report ────────────────────────────────────────────────────────────
+document.getElementById('btn-report-bug')?.addEventListener('click', () => {
+  openModal(`
+    <div class="modal-title">🐛 Report a bug</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">This app is in beta — thanks for flagging anything that looks wrong.</p>
+    <div class="form-group">
+      <label class="form-label">What happened?</label>
+      <textarea class="form-textarea" id="bug-description" placeholder="Describe what you were doing and what went wrong..." style="min-height:100px" autofocus></textarea>
+    </div>
+    <div id="bug-error" style="color:#e04040;font-size:0.85rem;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitBugReport()">Send report</button>
+    </div>
+  `);
+});
+
+async function submitBugReport() {
+  const description = document.getElementById('bug-description')?.value?.trim();
+  const err = document.getElementById('bug-error');
+  if (!description) { if(err) err.textContent = 'Please describe what happened'; return; }
+
+  try {
+    await api('/api/bug-report', { method:'POST', body:{
+      description, page: state.currentTab || 'unknown',
+    }});
+    closeModal();
+    toast('Thanks — bug report sent', 'success');
+  } catch(e) {
+    if (err) err.textContent = e.message;
   }
 }
