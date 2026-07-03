@@ -199,15 +199,14 @@ async function showTeamPicker() {
 async function selectMember(memberId) {
   state.pendingMemberId = memberId;
   try {
-    const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId } });
+    const data = await api('/auth/check-member', { method:'POST', body:{ member_id: memberId } });
     if (data.needs_setup) {
       showConfirmEmailScreen(memberId, data.email_on_file);
     } else {
       showPasswordScreen(memberId);
     }
   } catch(e) {
-    // "Password required" error means the account exists and has a password — just show the password screen
-    showPasswordScreen(memberId);
+    toast('Could not check account: ' + e.message, 'error');
   }
 }
 
@@ -289,13 +288,22 @@ function showPasswordScreen(memberId) {
 
 async function submitLogin(memberId) {
   const password = document.getElementById('login-password')?.value;
+  const err = document.getElementById('login-error');
+  if (!password) {
+    if (err) err.textContent = 'Password required';
+    return;
+  }
   try {
     const data = await api('/auth/login', { method:'POST', body:{ member_id: memberId, password } });
+    if (!data?.actor?.id) {
+      // Defensive: never treat a response without a real actor as a successful login
+      if (err) err.textContent = 'Login failed — please try again';
+      return;
+    }
     state.actor = data.actor;
     closeModal();
     showMain();
   } catch(e) {
-    const err = document.getElementById('login-error');
     if (err) err.textContent = e.message;
   }
 }

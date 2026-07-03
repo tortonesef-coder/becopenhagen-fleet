@@ -22,9 +22,9 @@ router.post('/login', (req, res) => {
     return res.json({ needs_setup: true, email_on_file: member.email || null });
   }
 
-  // Probe call with no password — just confirm the account exists and has a password set
+  // A genuinely empty/missing password must NEVER succeed — always reject explicitly.
   if (!password) {
-    return res.json({ needs_setup: false, has_password: true });
+    return res.status(400).json({ error: 'Password required' });
   }
 
   if (!member.password_hash || !verifyPassword(password, member.password_hash, member.password_salt)) {
@@ -35,6 +35,19 @@ router.post('/login', (req, res) => {
   req.session.actor_name = member.name;
   req.session.actor_role = member.role;
   res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role } });
+});
+
+// POST /auth/check-member — safe probe to see if an account needs first-time setup,
+// without touching password verification at all. Used before showing the password
+// field, so the login endpoint itself never has to special-case an empty password.
+router.post('/check-member', (req, res) => {
+  const { member_id } = req.body;
+  const member = db().prepare('SELECT * FROM team_members WHERE id=? AND active=1').get(member_id);
+  if (!member) return res.status(404).json({ error: 'Unknown team member' });
+  res.json({
+    needs_setup: !!member.needs_password_setup,
+    email_on_file: member.email || null,
+  });
 });
 
 // POST /auth/send-verification — sends a 6-digit code to confirm email ownership before first-time setup
