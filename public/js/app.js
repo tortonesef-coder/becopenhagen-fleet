@@ -1772,6 +1772,7 @@ async function renderAdmin(c) {
     <div class="subtab-row">
       <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
       <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
+      <button class="subtab${window._adminTab==='reviews'?' active':''}" onclick="switchAdminTab('reviews')">Reviews</button>
       <button class="subtab${window._adminTab==='invoicing'?' active':''}" onclick="switchAdminTab('invoicing')">Invoicing</button>
       <button class="subtab${window._adminTab==='bugs'?' active':''}" onclick="switchAdminTab('bugs')">Bugs</button>
       <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
@@ -1782,7 +1783,7 @@ async function renderAdmin(c) {
 
 async function switchAdminTab(tab) {
   window._adminTab = tab;
-  const labels = {bikes:'Fleet', log:'Log', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  const labels = {bikes:'Fleet', log:'Log', reviews:'Reviews', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   renderAdminTab(document.getElementById('content'));
 }
@@ -1792,9 +1793,108 @@ async function renderAdminTab(c) {
   if (!el) return;
   if (window._adminTab === 'bikes') await renderAdminBikes(el);
   else if (window._adminTab === 'viewas') await renderViewAs(el);
+  else if (window._adminTab === 'reviews') await renderAdminReviews(el);
   else if (window._adminTab === 'invoicing') await renderAdminInvoicing(el);
   else if (window._adminTab === 'bugs') await renderBugReports(el);
   else await renderAdminLog(el);
+}
+
+async function renderAdminReviews(el) {
+  el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  const [team, reviews] = await Promise.all([
+    api('/api/team').catch(() => []),
+    api('/api/reviews').catch(() => []),
+  ]);
+  const guides = team.filter(m => m.role === 'guide' || m.role === 'admin');
+  const today = new Date().toISOString().substring(0, 10);
+  const platforms = ['Google Maps', 'GetYourGuide', 'Viator', 'TripAdvisor', 'Airbnb'];
+
+  // Group reviews by guide for summary
+  const byGuide = {};
+  reviews.forEach(r => {
+    if (!byGuide[r.guide_id]) byGuide[r.guide_id] = { name: r.guide_name, reviews: [] };
+    byGuide[r.guide_id].reviews.push(r);
+  });
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Log a new review</div>
+      <div style="display:flex;flex-direction:column;gap:0.5rem">
+        <select class="form-select" id="rev-guide">
+          <option value="">Select guide…</option>
+          ${guides.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+        </select>
+        <div style="display:flex;gap:0.5rem">
+          <input class="form-input" type="date" id="rev-date" value="${today}" style="flex:1">
+          <select class="form-select" id="rev-platform" style="flex:1">
+            ${platforms.map(p => `<option value="${p}">${p}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex;gap:0.5rem">
+          <select class="form-select" id="rev-type" style="flex:1">
+            <option value="Tour">Tour</option>
+            <option value="Rental">Rental</option>
+          </select>
+          <input class="form-input" id="rev-reviewer" placeholder="Reviewer name (optional)" style="flex:2">
+        </div>
+        <textarea class="form-textarea" id="rev-text" placeholder="Paste the review text here…" style="min-height:100px"></textarea>
+        <button class="btn btn-primary" id="rev-submit">Log review &amp; notify guide</button>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">All reviews (${reviews.length})</div>
+      ${Object.entries(byGuide).length === 0
+        ? '<div style="font-size:0.85rem;color:var(--text3)">No reviews logged yet</div>'
+        : Object.entries(byGuide).map(([gid, g]) => `
+          <div style="margin-bottom:1rem">
+            <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.35rem">${g.name} <span style="font-weight:400;color:var(--text3);font-size:0.8rem">${g.reviews.length} review${g.reviews.length!==1?'s':''}</span></div>
+            ${g.reviews.map(r => `
+              <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding:0.4rem 0;border-bottom:1px solid var(--border)">
+                <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
+                  <span style="font-size:0.82rem;font-weight:600">${r.review_date} · ${r.platform} · ${r.booking_type}</span>
+                  <button onclick="deleteReview(${r.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0">Delete</button>
+                </div>
+                ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${r.reviewer_name}</span>` : ''}
+                ${r.review_text ? `<div style="font-size:0.78rem;color:var(--text3);margin-top:3px;font-style:italic;line-height:1.4">"${escapeHtml(r.review_text)}"</div>` : ''}
+              </div>`).join('')}
+          </div>`).join('')}
+    </div>
+  `;
+
+  document.getElementById('rev-submit').addEventListener('click', async () => {
+    const guide_id = document.getElementById('rev-guide').value;
+    const review_date = document.getElementById('rev-date').value;
+    const platform = document.getElementById('rev-platform').value;
+    const booking_type = document.getElementById('rev-type').value;
+    const reviewer_name = document.getElementById('rev-reviewer').value.trim();
+    const review_text = document.getElementById('rev-text').value.trim();
+
+    if (!guide_id) { toast('Select a guide', 'error'); return; }
+    if (!review_date) { toast('Pick a date', 'error'); return; }
+
+    const btn = document.getElementById('rev-submit');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await api('/api/reviews', { method: 'POST', body: { guide_id, review_date, platform, booking_type, reviewer_name, review_text } });
+      toast('Review logged' + (document.querySelector(`option[value="${guide_id}"]`)?.textContent ? ' — email sent to guide' : ''), 'success');
+      renderAdminReviews(el);
+    } catch(e) {
+      toast('Error: ' + e.message, 'error');
+      btn.disabled = false; btn.textContent = 'Log review & notify guide';
+    }
+  });
+}
+
+async function deleteReview(id) {
+  if (!confirm('Delete this review?')) return;
+  try {
+    await api(`/api/reviews/${id}`, { method: 'DELETE' });
+    toast('Review deleted', 'success');
+    renderAdminReviews(document.getElementById('admin-tab-content'));
+  } catch(e) {
+    toast('Could not delete: ' + e.message, 'error');
+  }
 }
 
 async function renderAdminInvoicing(el) {
@@ -2329,25 +2429,33 @@ async function renderProfile(c) {
   const actor = state.actor;
   const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
 
-  let worked, upcoming, invoices, instructions;
+  let worked, upcoming, invoices, instructions, reviews;
   try {
-    [worked, upcoming, invoices, instructions] = await Promise.all([
+    [worked, upcoming, invoices, instructions, reviews] = await Promise.all([
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&from=${range.from}&to=${range.to}`),
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&upcoming=1`),
       api(`/api/guides/${actor.id}/invoices`).catch(()=>[]),
       api('/api/guides/invoice-instructions').catch(()=>({text:''})),
+      api(`/api/reviews?guide_id=${actor.id}&from=${range.from}&to=${range.to}`).catch(()=>[]),
     ]);
   } catch(e) {
     c.innerHTML = `<div class="empty-state"><p>Could not load profile: ${escapeHtml(e.message)}</p></div>`;
     return;
   }
 
-  renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions: instructions.text });
+  renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions: instructions.text, reviews });
 }
 
-function renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions }) {
+function renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions, reviews }) {
   const period = window._profilePeriod;
   const custom = window._profileCustom;
+  const reviewCount = reviews.length;
+  const tourCount = worked.count; // completed tours in period
+  const ratio = tourCount > 0 ? (reviewCount / tourCount) : null;
+  const ratioLabel = ratio !== null ? (ratio * 100).toFixed(0) + '%' : '—';
+  const ratioColor = ratio === null ? '' : ratio >= 0.4 ? 'green' : ratio >= 0.2 ? 'amber' : 'red';
+
+  const platformIcon = p => ({'Google Maps':'🗺️','GetYourGuide':'🟠','Viator':'🟢','TripAdvisor':'🦉','Airbnb':'🏠'}[p] || '⭐');
 
   c.innerHTML = `
     <div class="section-title">${actor.name}</div>
@@ -2373,8 +2481,30 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
       </div>
       <div class="stat-card">
         <div class="stat-card-num">${fmtDurationFromMinutes(upcoming.total_minutes)}</div>
-        <div class="stat-card-label">Upcoming (all scheduled)</div>
+        <div class="stat-card-label">Upcoming</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-card-num green">${reviewCount}</div>
+        <div class="stat-card-label">5⭐ reviews · ${range.label}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-num ${ratioColor}">${ratioLabel}</div>
+        <div class="stat-card-label">Review / booking ratio</div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Reviews · ${range.label}</div>
+      ${reviewCount === 0
+        ? '<div style="font-size:0.85rem;color:var(--text3);padding:0.3rem 0">No reviews in this period</div>'
+        : reviews.map(r => `
+          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:0.82rem;font-weight:600">${platformIcon(r.platform)} ${r.platform} · ${r.review_date}</span>
+              ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text3)">${escapeHtml(r.reviewer_name)}</span>` : ''}
+            </div>
+            ${r.review_text ? `<div style="font-size:0.8rem;color:var(--text2);margin-top:4px;font-style:italic;line-height:1.45">"${escapeHtml(r.review_text)}"</div>` : ''}
+          </div>`).join('')}
     </div>
 
     <div class="detail-section">

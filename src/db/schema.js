@@ -295,6 +295,18 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now')),
       updated_by TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS guide_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guide_id TEXT NOT NULL REFERENCES team_members(id),
+      review_date TEXT NOT NULL,
+      reviewer_name TEXT,
+      platform TEXT NOT NULL,
+      booking_type TEXT DEFAULT 'Tour',
+      review_text TEXT,
+      logged_by TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES ('guide_invoice_instructions', ?)`)
