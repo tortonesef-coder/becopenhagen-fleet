@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const FileStore = require('session-file-store')(session);
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('./db/schema');
@@ -19,10 +20,16 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
+  store: new FileStore({
+    path: path.join(__dirname, '../data/sessions'),
+    ttl: 30 * 24 * 60 * 60,
+    retries: 0,
+    logFn: () => {},
+  }),
   secret: process.env.SESSION_SECRET || 'bc-fleet-secret-change-in-prod',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 }
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
 }));
 
 app.use(express.static(path.join(__dirname, '../public')));
