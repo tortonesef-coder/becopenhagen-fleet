@@ -244,12 +244,31 @@ function syncFeedToDB(feed, events) {
     );
   });
 
-  // Remove old events for this feed that no longer exist
+  // Remove old events for this feed that no longer exist.
+  // A row can go missing from the feed for two reasons:
+  //  1) It already happened and FareHarbor's feed rolled past it — keep it
+  //     for a 1-day grace period so recently-completed tours don't vanish
+  //     instantly from the app.
+  //  2) It was rescheduled or cancelled — FareHarbor drops it from the feed
+  //     immediately even though its start time is still in the future. This
+  //     must be deleted right away, or a rescheduled booking leaves a stale
+  //     "ghost" card on its old date/time forever.
   const currentIds = events.map(e => e.uid);
   if (currentIds.length > 0) {
     const placeholders = currentIds.map(() => '?').join(',');
-    db().prepare(`DELETE FROM tour_availabilities WHERE feed_id=? AND start_at < datetime('now', '-1 day') AND availability_id NOT IN (${placeholders})`)
+    db().prepare(`DELETE FROM tour_availabilities
+      WHERE feed_id=?
+      AND availability_id NOT IN (${placeholders})
+      AND (start_at > datetime('now') OR start_at < datetime('now', '-1 day'))`)
       .run(feed.id, ...currentIds);
+  } else {
+    // Feed returned zero events (e.g. temporary fetch hiccup) — don't wipe
+    // everything; only clear out anything that's not a recently-completed
+    // tour, same grace-period logic as above.
+    db().prepare(`DELETE FROM tour_availabilities
+      WHERE feed_id=?
+      AND (start_at > datetime('now') OR start_at < datetime('now', '-1 day'))`)
+      .run(feed.id);
   }
 }
 
