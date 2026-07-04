@@ -1601,6 +1601,58 @@ async function renderLog(c) {
     </div>`;
 }
 
+// ── Markdown renderer (lightweight, no external dependency) ───────────────
+// Supports: headings (#/##/###), bold (**), italic (*), inline code (`),
+// unordered lists (- / *), ordered lists (1.), horizontal rules (---),
+// blank-line paragraphs.
+function renderMarkdown(md) {
+  if (!md) return '';
+  const escape = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const inline = s => s
+    .replace(/`([^`]+)`/g, (_,c) => `<code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.85em">${escape(c)}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, (_,t) => `<strong>${escape(t)}</strong>`)
+    .replace(/\*([^*]+)\*/g, (_,t) => `<em>${escape(t)}</em>`)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_,txt,url) => `<a href="${escape(url)}" target="_blank">${escape(txt)}</a>`);
+
+  const lines = md.split('\n');
+  const out = [];
+  let inList = null; // 'ul' | 'ol' | null
+  let inPara = false;
+
+  const closeList = () => { if (inList) { out.push(`</${inList}>`); inList = null; } };
+  const closePara = () => { if (inPara) { out.push('</p>'); inPara = false; } };
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trimEnd();
+
+    // Heading
+    const hm = line.match(/^(#{1,3})\s+(.+)/);
+    if (hm) { closePara(); closeList(); const lvl=hm[1].length+1; out.push(`<h${lvl} style="margin:0.7em 0 0.25em;font-size:${1.05-lvl*0.07}rem;color:var(--text)">${inline(escape(hm[2]))}</h${lvl}>`); continue; }
+
+    // HR
+    if (/^---+$/.test(line.trim())) { closePara(); closeList(); out.push('<hr style="border:none;border-top:1px solid var(--border);margin:0.75rem 0">'); continue; }
+
+    // Unordered list
+    const ulm = line.match(/^[\s]*[-*]\s+(.+)/);
+    if (ulm) { closePara(); if (inList !== 'ul') { closeList(); out.push('<ul style="margin:0.3em 0 0.3em 1.2em;padding:0">'); inList='ul'; } out.push(`<li style="margin-bottom:0.2em">${inline(escape(ulm[1]))}</li>`); continue; }
+
+    // Ordered list
+    const olm = line.match(/^[\s]*\d+\.\s+(.+)/);
+    if (olm) { closePara(); if (inList !== 'ol') { closeList(); out.push('<ol style="margin:0.3em 0 0.3em 1.2em;padding:0">'); inList='ol'; } out.push(`<li style="margin-bottom:0.2em">${inline(escape(olm[1]))}</li>`); continue; }
+
+    // Blank line
+    if (!line.trim()) { closePara(); closeList(); continue; }
+
+    // Normal paragraph text
+    closeList();
+    if (!inPara) { out.push('<p style="margin:0.35em 0;line-height:1.55">'); inPara=true; } else { out.push(' '); }
+    out.push(inline(escape(line)));
+  }
+  closePara(); closeList();
+  return out.join('');
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 function statusBadge(s) {
   const map={available:'Available',out:'Out',reserved:'Reserved',repair:'Repair',missing:'Missing',city:'In city'};
@@ -2395,7 +2447,7 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
 
     <div class="detail-section">
       <div class="detail-section-title">How to invoice</div>
-      <div style="font-size:0.85rem;color:var(--text2);white-space:pre-wrap;line-height:1.55">${escapeHtml(instructions || 'No instructions have been added yet — ask Fede.')}</div>
+      <div style="font-size:0.85rem;color:var(--text2)">${renderMarkdown(instructions || 'No instructions have been added yet — ask Paloma.')}</div>
     </div>
   `;
 

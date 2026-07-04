@@ -4,19 +4,64 @@ const fs = require('fs');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/fleet.db');
 
-const DEFAULT_INVOICE_INSTRUCTIONS = `How to invoice BeCopenhagen
+const DEFAULT_INVOICE_INSTRUCTIONS = `## How to invoice BeCopenhagen
 
-1. Send one invoice per calendar month, covering all the tours you guided that month.
-2. Use the "Hours worked" total shown above for that period as your quantity — it already includes 15 minutes before and 15 minutes after each tour.
-3. Your invoice should include:
-   - Your full name and, if applicable, your company / CVR number
-   - Invoice number and date
-   - The period covered (e.g. "June 2026")
-   - Total hours and your agreed hourly rate
-   - Your bank account / IBAN for payment
-   - Danish VAT (moms) only if you are VAT-registered
-4. Upload your invoice as a PDF (or a clear photo) using the button above.
-5. Questions about your rate or a specific tour? Ask Fede directly.`;
+Send one invoice per month, covering all work done **between the 23rd of the previous month and the 22nd of the current month** (both dates included).
+
+---
+
+### Your details (top of the invoice)
+
+- Your full name
+- Your address
+- Your CVR number, or your CPR number if you don't have a CVR
+- Your email
+
+### BeCopenhagen's details
+
+- BeCopenhagen, Fortunstræde 1, 1065 København K, Denmark
+- CVR No.: 34 47 85 03
+- Email: tours@becopenhagen.dk
+
+---
+
+### Invoice info
+
+- Invoice number (start at 1, increment each month)
+- Date of the invoice
+
+---
+
+### Line items — list each type of work separately
+
+- *Guide services* — list each tour date, your hourly rate, and the number of hours. Hours are calculated as tour length + 15 min before + 15 min after (the app's Profile tab shows this automatically).
+- *Cancelled tours* — if a tour was cancelled and you are owed a cancellation fee per your agreement, list the date, rate, hours, and the applicable percentage.
+- *Training / preparation* — if applicable, agreed as a lump sum.
+- *Review commissions* — if applicable, 50 DKK per unit as agreed.
+
+---
+
+### Payment details
+
+- Your full name as account holder
+- Bank name
+- Registration number (Reg. No.)
+- Account number (Acc. No.)
+- For international bank accounts: IBAN and BIC/SWIFT instead
+
+**Payment due date:** typically 30 days from the invoice date.
+
+---
+
+### Format
+
+Send as a PDF. You can use Word, Google Docs, or any free invoice tool — what matters is that all the information above is there. Upload it here in the app once it's ready.
+
+---
+
+### Questions?
+
+Contact Paloma at **+45 25 30 33 30** for anything related to invoicing, rates, or your agreement.`;
 
 let db;
 
@@ -254,6 +299,14 @@ function initSchema() {
 
   db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES ('guide_invoice_instructions', ?)`)
     .run(DEFAULT_INVOICE_INSTRUCTIONS);
+
+  // Migration: update invoice instructions to current version if still on the original default
+  // (i.e. the admin hasn't customised it yet — don't overwrite manual edits)
+  const existingInstructions = db.prepare(`SELECT value FROM app_settings WHERE key='guide_invoice_instructions'`).get();
+  if (existingInstructions && existingInstructions.value.startsWith('How to invoice BeCopenhagen\n\n1.')) {
+    db.prepare(`UPDATE app_settings SET value=?, updated_at=datetime('now'), updated_by='migration' WHERE key='guide_invoice_instructions'`)
+      .run(DEFAULT_INVOICE_INSTRUCTIONS);
+  }
 
   // Migrations - update rental values to real prices
   const rentalValues = {A:80,SA:80,AC:80,AT:80,B:80,BM:80,TB:120,MB:80,CC:480,E:240};
