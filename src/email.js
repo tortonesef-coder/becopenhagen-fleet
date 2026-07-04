@@ -4,13 +4,9 @@
 
 const nodemailer = require('nodemailer');
 
-let transporter = null;
-
 function getTransporter() {
-  if (transporter) return transporter;
-
   const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const port = parseInt(process.env.SMTP_PORT || '465', 10);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASSWORD;
 
@@ -19,14 +15,12 @@ function getTransporter() {
     return null;
   }
 
-  transporter = nodemailer.createTransport({
+  return nodemailer.createTransport({
     host,
     port,
-    secure: port === 465, // true for 465 (SSL), false for 587/25 (STARTTLS)
+    secure: true, // Simply.com requires SSL (port 465)
     auth: { user, pass },
   });
-
-  return transporter;
 }
 
 async function sendEmail({ to, toName, subject, htmlContent }) {
