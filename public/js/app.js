@@ -2476,9 +2476,9 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
   const custom = window._profileCustom;
   const reviewCount = reviews.length;
   const tourCount = worked.count;
-  const ratio = tourCount > 0 && reviewCount > 0 ? Math.round(tourCount / reviewCount) : null;
-  const ratioLabel = ratio !== null ? `every ${ratio} booking${ratio === 1 ? '' : 's'}` : '—';
-  const ratioColor = ratio === null ? '' : ratio <= 3 ? 'green' : ratio <= 6 ? 'amber' : 'red';
+  const ratio = tourCount > 0 && reviewCount > 0 ? Math.round((reviewCount / tourCount) * 100) : null;
+  const ratioLabel = ratio !== null ? `${ratio}%` : '—';
+  const ratioColor = ratio === null ? '' : ratio >= 33 ? 'green' : ratio >= 15 ? 'amber' : 'red';
 
   const platformIcon = p => ({'Google Maps':'🗺️','GetYourGuide':'🟠','Viator':'🟢','TripAdvisor':'🦉','Airbnb':'🏠'}[p] || '⭐');
   const platformColors = {
@@ -2524,8 +2524,8 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
         <div class="stat-card-label">5⭐ reviews · ${range.label}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-card-num ${ratioColor}" style="font-size:${ratioLabel.length > 6 ? '1rem' : '1.8rem'}">${ratioLabel}</div>
-        <div class="stat-card-label">1 review per…</div>
+        <div class="stat-card-num ${ratioColor}">${ratioLabel}</div>
+        <div class="stat-card-label">Review rate</div>
       </div>
     </div>
 
