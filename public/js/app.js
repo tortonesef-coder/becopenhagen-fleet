@@ -2465,8 +2465,8 @@ async function renderProfile(c) {
     return;
   }
 
-  // Filter reviews to the selected period client-side
-  const reviews = allReviews.filter(r => r.review_date >= range.from && r.review_date <= range.to);
+  // Filter to this guide and the selected period
+  const reviews = allReviews.filter(r => r.guide_id === actor.id && r.review_date >= range.from && r.review_date <= range.to);
 
   renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions: instructions.text, reviews });
 }
@@ -2475,10 +2475,9 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
   const period = window._profilePeriod;
   const custom = window._profileCustom;
   const reviewCount = reviews.length;
-  const tourCount = worked.count; // completed tours in period
-  const ratio = tourCount > 0 ? (reviewCount / tourCount) : null;
-  const ratioLabel = ratio !== null ? (ratio * 100).toFixed(0) + '%' : '—';
-  const ratioColor = ratio === null ? '' : ratio >= 0.4 ? 'green' : ratio >= 0.2 ? 'amber' : 'red';
+  const tourCount = worked.count;
+  const ratioLabel = reviewCount === 0 ? '—' : tourCount === 0 ? '—' : `every ${Math.round(tourCount / reviewCount)} bookings`;
+  const ratioColor = reviewCount === 0 || tourCount === 0 ? '' : (tourCount / reviewCount) <= 3 ? 'green' : (tourCount / reviewCount) <= 6 ? 'amber' : 'red';
 
   const platformIcon = p => ({'Google Maps':'🗺️','GetYourGuide':'🟠','Viator':'🟢','TripAdvisor':'🦉','Airbnb':'🏠'}[p] || '⭐');
   const platformColors = {
@@ -2525,7 +2524,7 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
       </div>
       <div class="stat-card">
         <div class="stat-card-num ${ratioColor}">${ratioLabel}</div>
-        <div class="stat-card-label">Review / booking ratio</div>
+        <div class="stat-card-label">1 review per…</div>
       </div>
     </div>
 
