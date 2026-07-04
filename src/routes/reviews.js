@@ -33,8 +33,9 @@ router.post('/', requireAdmin, async (req, res) => {
   db().prepare(`INSERT INTO action_log (actor, action, details) VALUES (?,?,?)`)
     .run(actor, 'review_logged', JSON.stringify({ guide_id, guide_name: guide.name, platform, reviewer_name }));
 
-  // Send email to guide if they have an address on file
-  if (guide.email) {
+  // Send email to guide if they have an address on file (skip if notify=false)
+  const shouldNotify = req.body.notify !== false;
+  if (shouldNotify && guide.email) {
     const dateLabel = new Date(review_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
     const subject = `New 5⭐ review for you — ${platform}`;
     const reviewBlock = review_text
