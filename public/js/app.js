@@ -2405,13 +2405,33 @@ function fmtDurationFromMinutes(min) {
 
 function periodRange(period, customFrom, customTo) {
   const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth();
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
   const pad = n => String(n).padStart(2,'0');
-  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-  const monthName = d => d.toLocaleString('en-GB', { month:'long', year:'numeric' });
-  if (period === 'last_month') {
-    const first = new Date(y, m-1, 1), last = new Date(y, m, 0);
-    return { from: fmt(first), to: fmt(last), label: monthName(first) };
+  const fmt = dt => `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+
+  // Billing cycle: 23rd of previous month → 22nd of current month
+  // "this cycle": the cycle that contains today
+  // If today is on or after the 23rd, cycle is 23rd this month → 22nd next month
+  // If today is before the 23rd, cycle is 23rd last month → 22nd this month
+  const thisCycleStart = d >= 23
+    ? new Date(y, m, 23)
+    : new Date(y, m - 1, 23);
+  const thisCycleEnd = d >= 23
+    ? new Date(y, m + 1, 22)
+    : new Date(y, m, 22);
+
+  const lastCycleStart = new Date(thisCycleStart.getFullYear(), thisCycleStart.getMonth() - 1, 23);
+  const lastCycleEnd   = new Date(thisCycleStart.getFullYear(), thisCycleStart.getMonth(), 22);
+
+  const cycleLabel = start => {
+    const s = start.toLocaleString('en-GB', { month: 'short' });
+    const e = new Date(start.getFullYear(), start.getMonth() + 1, 22);
+    const es = e.toLocaleString('en-GB', { month: 'short', year: 'numeric' });
+    return `23 ${s} – 22 ${es}`;
+  };
+
+  if (period === 'last_cycle') {
+    return { from: fmt(lastCycleStart), to: fmt(lastCycleEnd), label: cycleLabel(lastCycleStart) };
   }
   if (period === 'this_year') {
     return { from: `${y}-01-01`, to: `${y}-12-31`, label: String(y) };
@@ -2419,32 +2439,34 @@ function periodRange(period, customFrom, customTo) {
   if (period === 'custom' && customFrom && customTo) {
     return { from: customFrom, to: customTo, label: `${customFrom} – ${customTo}` };
   }
-  // default: this_month
-  const first = new Date(y, m, 1), last = new Date(y, m+1, 0);
-  return { from: fmt(first), to: fmt(last), label: monthName(first) };
+  // default: this_cycle
+  return { from: fmt(thisCycleStart), to: fmt(thisCycleEnd), label: cycleLabel(thisCycleStart) };
 }
 
 async function renderProfile(c) {
   c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
-  if (!window._profilePeriod) window._profilePeriod = 'this_month';
+  if (!window._profilePeriod) window._profilePeriod = 'this_cycle';
   if (!window._profileCustom) window._profileCustom = { from: '', to: '' };
 
   const actor = state.actor;
   const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
 
-  let worked, upcoming, invoices, instructions, reviews;
+  let worked, upcoming, invoices, instructions, allReviews;
   try {
-    [worked, upcoming, invoices, instructions, reviews] = await Promise.all([
+    [worked, upcoming, invoices, instructions, allReviews] = await Promise.all([
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&from=${range.from}&to=${range.to}`),
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&upcoming=1`),
       api(`/api/guides/${actor.id}/invoices`).catch(()=>[]),
       api('/api/guides/invoice-instructions').catch(()=>({text:''})),
-      api(`/api/reviews?guide_id=${actor.id}&from=${range.from}&to=${range.to}`).catch(()=>[]),
+      api(`/api/reviews`).catch(()=>[]),
     ]);
   } catch(e) {
     c.innerHTML = `<div class="empty-state"><p>Could not load profile: ${escapeHtml(e.message)}</p></div>`;
     return;
   }
+
+  // Filter reviews to the selected period client-side
+  const reviews = allReviews.filter(r => r.review_date >= range.from && r.review_date <= range.to);
 
   renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions: instructions.text, reviews });
 }
@@ -2476,8 +2498,8 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
 
     <div class="detail-section" style="border-top:none;padding-top:0;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
       <select class="form-select" id="profile-period-select" style="flex:1;min-width:140px">
-        <option value="this_month" ${period==='this_month'?'selected':''}>This month</option>
-        <option value="last_month" ${period==='last_month'?'selected':''}>Last month</option>
+        <option value="this_cycle" ${period==='this_cycle'||period==='this_month'?'selected':''}>This cycle</option>
+        <option value="last_cycle" ${period==='last_cycle'||period==='last_month'?'selected':''}>Last cycle</option>
         <option value="this_year" ${period==='this_year'?'selected':''}>This year</option>
         <option value="custom" ${period==='custom'?'selected':''}>Custom range</option>
       </select>
