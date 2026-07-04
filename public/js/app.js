@@ -1809,6 +1809,9 @@ async function renderAdminReviews(el) {
   const today = new Date().toISOString().substring(0, 10);
   const platforms = ['Google Maps', 'GetYourGuide', 'Viator', 'TripAdvisor', 'Airbnb'];
 
+  const _pc = {'Google Maps':{bg:'#E8F0FE',fg:'#1A73E8'},'GetYourGuide':{bg:'#FFE8E2',fg:'#CC3D1F'},'Viator':{bg:'#D6F5EC',fg:'#00754A'},'TripAdvisor':{bg:'#D6F5EC',fg:'#00754A'},'Airbnb':{bg:'#FFE2E3',fg:'#D9363E'}};
+  const adminPlatformBadge = p => { const c=_pc[p]||{bg:'var(--surface2)',fg:'var(--text2)'}; return `<span style="font-size:0.7rem;font-weight:700;background:${c.bg};color:${c.fg};padding:2px 8px;border-radius:10px">${p}</span>`; };
+
   // Group reviews by guide for summary
   const byGuide = {};
   reviews.forEach(r => {
@@ -1851,11 +1854,11 @@ async function renderAdminReviews(el) {
             <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.35rem">${g.name} <span style="font-weight:400;color:var(--text3);font-size:0.8rem">${g.reviews.length} review${g.reviews.length!==1?'s':''}</span></div>
             ${g.reviews.map(r => `
               <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding:0.4rem 0;border-bottom:1px solid var(--border)">
-                <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
-                  <span style="font-size:0.82rem;font-weight:600">${r.review_date} · ${r.platform} · ${r.booking_type}</span>
+                <div style="display:flex;width:100%;justify-content:space-between;align-items:center;gap:0.4rem;flex-wrap:wrap">
+                  <span style="display:flex;align-items:center;gap:0.4rem">${adminPlatformBadge(r.platform)}<span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span></span>
                   <button onclick="deleteReview(${r.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0">Delete</button>
                 </div>
-                ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${r.reviewer_name}</span>` : ''}
+                ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${escapeHtml(r.reviewer_name)}</span>` : ''}
                 ${r.review_text ? `<div style="font-size:0.78rem;color:var(--text3);margin-top:3px;font-style:italic;line-height:1.4">"${escapeHtml(r.review_text)}"</div>` : ''}
               </div>`).join('')}
           </div>`).join('')}
@@ -2456,6 +2459,17 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
   const ratioColor = ratio === null ? '' : ratio >= 0.4 ? 'green' : ratio >= 0.2 ? 'amber' : 'red';
 
   const platformIcon = p => ({'Google Maps':'🗺️','GetYourGuide':'🟠','Viator':'🟢','TripAdvisor':'🦉','Airbnb':'🏠'}[p] || '⭐');
+  const platformColors = {
+    'Google Maps':  { bg:'#E8F0FE', fg:'#1A73E8' },
+    'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
+    'Viator':       { bg:'#D6F5EC', fg:'#00754A' },
+    'TripAdvisor':  { bg:'#D6F5EC', fg:'#00754A' },
+    'Airbnb':       { bg:'#FFE2E3', fg:'#D9363E' },
+  };
+  const platformBadge = p => {
+    const c = platformColors[p] || { bg:'var(--surface2)', fg:'var(--text2)' };
+    return `<span style="font-size:0.7rem;font-weight:700;background:${c.bg};color:${c.fg};padding:2px 8px;border-radius:10px">${p}</span>`;
+  };
 
   c.innerHTML = `
     <div class="section-title">${actor.name}</div>
@@ -2499,9 +2513,9 @@ function renderProfileContent(c, { actor, range, worked, upcoming, invoices, ins
         ? '<div style="font-size:0.85rem;color:var(--text3);padding:0.3rem 0">No reviews in this period</div>'
         : reviews.map(r => `
           <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <span style="font-size:0.82rem;font-weight:600">${platformIcon(r.platform)} ${r.platform} · ${r.review_date}</span>
-              ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text3)">${escapeHtml(r.reviewer_name)}</span>` : ''}
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap">
+              <span style="display:flex;align-items:center;gap:0.4rem">${platformBadge(r.platform)}<span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span></span>
+              ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${escapeHtml(r.reviewer_name)}</span>` : ''}
             </div>
             ${r.review_text ? `<div style="font-size:0.8rem;color:var(--text2);margin-top:4px;font-style:italic;line-height:1.45">"${escapeHtml(r.review_text)}"</div>` : ''}
           </div>`).join('')}
