@@ -88,6 +88,7 @@ app.listen(PORT, () => {
   console.log(`BC Fleet running on port ${PORT}`);
   console.log('OpenAI key:', process.env.OPENAI_API_KEY ? 'SET' : 'MISSING');
   console.log('Anthropic key:', process.env.ANTHROPIC_API_KEY ? 'SET' : 'MISSING');
+  console.log('SMTP:', process.env.SMTP_HOST ? `${process.env.SMTP_HOST}:${process.env.SMTP_PORT} user=${process.env.SMTP_USER} pass=${process.env.SMTP_PASSWORD?'SET':'MISSING'}` : 'NOT CONFIGURED');
 });
 
 module.exports = app;
