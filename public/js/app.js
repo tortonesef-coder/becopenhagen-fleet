@@ -576,6 +576,7 @@ function showMain() {
 
 function buildTabbar() {
   if (state.shopMode) {
+    document.getElementById('btn-more-menu')?.classList.add('hidden');
     const tabs = [{id:'action',label:'Action',icon:iconAction()},{id:'bikes',label:'Bikes',icon:iconBike()}];
     document.getElementById('tabbar').innerHTML=tabs.map(t=>`
       <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
@@ -587,10 +588,13 @@ function buildTabbar() {
     return;
   }
   const role=state.actor?.role;
+  document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
   const tabs = role==='mechanic'
     ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}]
     : role==='admin'
     ? [{id:'bikes',label:'Bikes',icon:iconBike()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
+    : role==='guide'
+    ? [{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}]
     : [{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
@@ -608,7 +612,7 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours',rentals:'Rentals'};
+  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours',rentals:'Rentals',profile:'Profile'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id==='bikes') await renderBikes(c);
@@ -618,7 +622,17 @@ async function renderTab(id) {
   else if(id==='admin') await renderAdmin(c);
   else if(id==='tours') await renderTours(c);
   else if(id==='rentals') await renderRentals(c);
+  else if(id==='profile') await renderProfile(c);
 }
+
+function openMoreMenu() {
+  openModal(`
+    <div class="modal-title">More</div>
+    <button class="btn btn-secondary btn-full" style="margin-bottom:0.5rem;display:flex;align-items:center;gap:8px;justify-content:center" onclick="closeModal();renderTab('rentals')">${iconRentals()} Rentals</button>
+    <button class="btn btn-secondary btn-full" style="display:flex;align-items:center;gap:8px;justify-content:center" onclick="closeModal();renderTab('bikes')">${iconBike()} Bikes</button>
+  `);
+}
+document.getElementById('btn-more-menu')?.addEventListener('click', openMoreMenu);
 
 async function drillType(typeId) {
   const bikes=await api(`/api/bikes?type=${typeId}`);
@@ -1603,6 +1617,7 @@ function iconHome(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentC
 function iconBike(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 0 0-1-1h-1V4a1 1 0 0 0-2 0v1H9l3 6h3l1.6-3.2A1 1 0 0 0 15 6z"/><path d="m5.5 17.5 4-8.5"/></svg>`;}
 function iconAction(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;}
 function iconLog(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;}
+function iconProfile(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;}
 function iconTicket(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;}
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -1706,6 +1721,7 @@ async function renderAdmin(c) {
       <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
       <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
       <button class="subtab${window._adminTab==='fareharbor'?' active':''}" onclick="switchAdminTab('fareharbor')">FareHarbor</button>
+      <button class="subtab${window._adminTab==='invoicing'?' active':''}" onclick="switchAdminTab('invoicing')">Invoicing</button>
       <button class="subtab${window._adminTab==='bugs'?' active':''}" onclick="switchAdminTab('bugs')">Bugs</button>
       <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
     </div>
@@ -1715,7 +1731,7 @@ async function renderAdmin(c) {
 
 async function switchAdminTab(tab) {
   window._adminTab = tab;
-  const labels = {bikes:'Fleet', log:'Log', fareharbor:'FareHarbor', bugs:'Bugs', viewas:'View as'};
+  const labels = {bikes:'Fleet', log:'Log', fareharbor:'FareHarbor', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   renderAdminTab(document.getElementById('content'));
 }
@@ -1726,8 +1742,53 @@ async function renderAdminTab(c) {
   if (window._adminTab === 'bikes') await renderAdminBikes(el);
   else if (window._adminTab === 'viewas') await renderViewAs(el);
   else if (window._adminTab === 'fareharbor') await renderFareHarborLog(el);
+  else if (window._adminTab === 'invoicing') await renderAdminInvoicing(el);
   else if (window._adminTab === 'bugs') await renderBugReports(el);
   else await renderAdminLog(el);
+}
+
+async function renderAdminInvoicing(el) {
+  el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  let invoices, instructions;
+  try {
+    [invoices, instructions] = await Promise.all([
+      api('/api/guides/invoices'),
+      api('/api/guides/invoice-instructions'),
+    ]);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Instructions shown to guides</div>
+      <textarea class="form-textarea" id="admin-invoice-instructions" style="min-height:220px;width:100%;box-sizing:border-box;font-family:inherit;font-size:0.85rem">${escapeHtml(instructions.text)}</textarea>
+      <button class="btn btn-primary" id="admin-save-instructions" style="margin-top:0.5rem">Save instructions</button>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Uploaded invoices (${invoices.length})</div>
+      ${invoices.length === 0 ? '<div style="font-size:0.85rem;color:var(--text3)">No invoices uploaded yet</div>' :
+        invoices.map(inv => `
+          <div class="detail-row">
+            <span class="dr-key">${escapeHtml(inv.guide_name)} · ${escapeHtml(inv.period_label || inv.original_filename)} <span style="color:var(--text3);font-size:0.72rem">· ${fmtDateFull((inv.uploaded_at||'').substring(0,10))}</span></span>
+            <span class="dr-val"><a href="/api/guides/invoices/${inv.id}/file" target="_blank">View</a></span>
+          </div>`).join('')}
+    </div>
+  `;
+
+  document.getElementById('admin-save-instructions').addEventListener('click', async (e) => {
+    const btn = e.target;
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      await api('/api/guides/invoice-instructions', { method:'PUT', body: { text: document.getElementById('admin-invoice-instructions').value }});
+      toast('Instructions saved', 'success');
+    } catch(err) {
+      toast('Could not save: ' + err.message, 'error');
+    }
+    btn.disabled = false; btn.textContent = 'Save instructions';
+  });
 }
 
 async function renderBugReports(el) {
@@ -2204,6 +2265,190 @@ function renderRentalsList(el, rentals) {
       </div>`;
     }).join('')}
   `).join('');
+}
+
+// ── PROFILE (guides) ─────────────────────────────────────────────────────
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtDurationFromMinutes(min) {
+  min = min || 0;
+  const h = Math.floor(min / 60), m = min % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function periodRange(period, customFrom, customTo) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const monthName = d => d.toLocaleString('en-GB', { month:'long', year:'numeric' });
+  if (period === 'last_month') {
+    const first = new Date(y, m-1, 1), last = new Date(y, m, 0);
+    return { from: fmt(first), to: fmt(last), label: monthName(first) };
+  }
+  if (period === 'this_year') {
+    return { from: `${y}-01-01`, to: `${y}-12-31`, label: String(y) };
+  }
+  if (period === 'custom' && customFrom && customTo) {
+    return { from: customFrom, to: customTo, label: `${customFrom} – ${customTo}` };
+  }
+  // default: this_month
+  const first = new Date(y, m, 1), last = new Date(y, m+1, 0);
+  return { from: fmt(first), to: fmt(last), label: monthName(first) };
+}
+
+async function renderProfile(c) {
+  c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  if (!window._profilePeriod) window._profilePeriod = 'this_month';
+  if (!window._profileCustom) window._profileCustom = { from: '', to: '' };
+
+  const actor = state.actor;
+  const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
+
+  let worked, upcoming, invoices, instructions;
+  try {
+    [worked, upcoming, invoices, instructions] = await Promise.all([
+      api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&from=${range.from}&to=${range.to}`),
+      api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&upcoming=1`),
+      api(`/api/guides/${actor.id}/invoices`).catch(()=>[]),
+      api('/api/guides/invoice-instructions').catch(()=>({text:''})),
+    ]);
+  } catch(e) {
+    c.innerHTML = `<div class="empty-state"><p>Could not load profile: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions: instructions.text });
+}
+
+function renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions }) {
+  const period = window._profilePeriod;
+  const custom = window._profileCustom;
+
+  c.innerHTML = `
+    <div class="section-title">${actor.name}</div>
+
+    <div class="detail-section" style="border-top:none;padding-top:0;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+      <select class="form-select" id="profile-period-select" style="flex:1;min-width:140px">
+        <option value="this_month" ${period==='this_month'?'selected':''}>This month</option>
+        <option value="last_month" ${period==='last_month'?'selected':''}>Last month</option>
+        <option value="this_year" ${period==='this_year'?'selected':''}>This year</option>
+        <option value="custom" ${period==='custom'?'selected':''}>Custom range</option>
+      </select>
+      ${period==='custom' ? `
+        <input class="form-input" type="date" id="profile-from" value="${custom.from}" style="flex:1;min-width:130px">
+        <input class="form-input" type="date" id="profile-to" value="${custom.to}" style="flex:1;min-width:130px">
+        <button class="btn btn-secondary" id="profile-apply-custom">Apply</button>
+      ` : ''}
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-num green">${fmtDurationFromMinutes(worked.total_minutes)}</div>
+        <div class="stat-card-label">Worked · ${range.label}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-num">${fmtDurationFromMinutes(upcoming.total_minutes)}</div>
+        <div class="stat-card-label">Upcoming (all scheduled)</div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Count worked hours — ${range.label}</div>
+      <div style="font-size:0.78rem;color:var(--text3);margin-bottom:0.5rem">Each tour counts as its scheduled length, plus 15 min before and 15 min after.</div>
+      ${worked.tours.length === 0
+        ? '<div style="font-size:0.85rem;color:var(--text3);padding:0.5rem 0">No completed tours in this period</div>'
+        : worked.tours.map(t => `
+          <div class="detail-row">
+            <span class="dr-key">${fmtDateFull(t.start_date)} · ${t.feed_id}</span>
+            <span class="dr-val">${fmtDurationFromMinutes(t.duration_minutes)}</span>
+          </div>`).join('')}
+      <div class="detail-row" style="border-top:1px solid var(--border);margin-top:0.4rem;padding-top:0.5rem;font-weight:700">
+        <span class="dr-key">Total</span>
+        <span class="dr-val">${fmtDurationFromMinutes(worked.total_minutes)}</span>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Upload invoice</div>
+      <input class="form-input" type="text" id="invoice-period-label" placeholder="Period this invoice covers" value="${escapeHtml(range.label)}" style="margin-bottom:0.5rem;width:100%;box-sizing:border-box">
+      <input type="file" id="invoice-file-input" accept="application/pdf,image/*" style="margin-bottom:0.6rem;display:block;width:100%">
+      <button class="btn btn-primary btn-full" id="invoice-upload-btn">Upload invoice</button>
+
+      <div style="margin-top:0.9rem">
+        ${invoices.length===0 ? '<div style="font-size:0.82rem;color:var(--text3)">No invoices uploaded yet</div>' :
+          invoices.map(inv => `
+            <div class="detail-row">
+              <span class="dr-key">${escapeHtml(inv.period_label || inv.original_filename)} <span style="color:var(--text3);font-size:0.72rem">· ${fmtDateFull((inv.uploaded_at||'').substring(0,10))}</span></span>
+              <span class="dr-val">
+                <a href="/api/guides/invoices/${inv.id}/file" target="_blank" style="margin-right:0.7rem">View</a>
+                <a href="#" onclick="deleteInvoice(${inv.id});return false;" style="color:var(--red)">Delete</a>
+              </span>
+            </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">How to invoice</div>
+      <div style="font-size:0.85rem;color:var(--text2);white-space:pre-wrap;line-height:1.55">${escapeHtml(instructions || 'No instructions have been added yet — ask Fede.')}</div>
+    </div>
+  `;
+
+  document.getElementById('profile-period-select').addEventListener('change', (e) => {
+    window._profilePeriod = e.target.value;
+    renderProfile(document.getElementById('content'));
+  });
+  document.getElementById('profile-apply-custom')?.addEventListener('click', () => {
+    window._profileCustom.from = document.getElementById('profile-from').value;
+    window._profileCustom.to = document.getElementById('profile-to').value;
+    if (!window._profileCustom.from || !window._profileCustom.to) { toast('Pick both dates', 'error'); return; }
+    renderProfile(document.getElementById('content'));
+  });
+  document.getElementById('invoice-upload-btn').addEventListener('click', () => uploadInvoice(actor.id));
+}
+
+function uploadInvoice(guideId) {
+  const fileInput = document.getElementById('invoice-file-input');
+  const file = fileInput.files[0];
+  if (!file) { toast('Choose a file first', 'error'); return; }
+  if (file.size > 15*1024*1024) { toast('File too large (max 15MB)', 'error'); return; }
+
+  const periodLabel = document.getElementById('invoice-period-label').value.trim();
+  const btn = document.getElementById('invoice-upload-btn');
+  btn.disabled = true; btn.textContent = 'Uploading...';
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64 = reader.result.split(',')[1];
+    try {
+      await api(`/api/guides/${guideId}/invoices`, { method:'POST', body: {
+        filename: file.name, mime_type: file.type, data_base64: base64, period_label: periodLabel,
+      }});
+      toast('Invoice uploaded', 'success');
+      renderProfile(document.getElementById('content'));
+    } catch(e) {
+      toast('Upload failed: ' + e.message, 'error');
+      btn.disabled = false; btn.textContent = 'Upload invoice';
+    }
+  };
+  reader.onerror = () => { toast('Could not read file', 'error'); btn.disabled = false; btn.textContent = 'Upload invoice'; };
+  reader.readAsDataURL(file);
+}
+
+async function deleteInvoice(id) {
+  if (!confirm('Delete this invoice?')) return;
+  try {
+    await api(`/api/guides/invoices/${id}`, { method:'DELETE' });
+    toast('Invoice deleted', 'success');
+    renderProfile(document.getElementById('content'));
+  } catch(e) {
+    toast('Could not delete: ' + e.message, 'error');
+  }
 }
 
 async function openTourDetail(availId) {

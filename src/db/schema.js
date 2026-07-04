@@ -4,6 +4,20 @@ const fs = require('fs');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/fleet.db');
 
+const DEFAULT_INVOICE_INSTRUCTIONS = `How to invoice BeCopenhagen
+
+1. Send one invoice per calendar month, covering all the tours you guided that month.
+2. Use the "Hours worked" total shown above for that period as your quantity — it already includes 15 minutes before and 15 minutes after each tour.
+3. Your invoice should include:
+   - Your full name and, if applicable, your company / CVR number
+   - Invoice number and date
+   - The period covered (e.g. "June 2026")
+   - Total hours and your agreed hourly rate
+   - Your bank account / IBAN for payment
+   - Danish VAT (moms) only if you are VAT-registered
+4. Upload your invoice as a PDF (or a clear photo) using the button above.
+5. Questions about your rate or a specific tour? Ask Fede directly.`;
+
 let db;
 
 function getDb() {
@@ -205,7 +219,41 @@ function initSchema() {
       url TEXT,
       last_synced TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS guide_tour_hours (
+      availability_id TEXT PRIMARY KEY,
+      guide TEXT NOT NULL,
+      feed_id TEXT,
+      feed_label TEXT,
+      start_at TEXT,
+      end_at TEXT,
+      start_date TEXT,
+      duration_minutes INTEGER DEFAULT 0,
+      last_synced TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS guide_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guide_id TEXT NOT NULL REFERENCES team_members(id),
+      original_filename TEXT,
+      stored_filename TEXT NOT NULL,
+      mime_type TEXT,
+      size_bytes INTEGER,
+      period_label TEXT,
+      note TEXT,
+      uploaded_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      updated_by TEXT
+    );
   `);
+
+  db.prepare(`INSERT OR IGNORE INTO app_settings (key, value) VALUES ('guide_invoice_instructions', ?)`)
+    .run(DEFAULT_INVOICE_INSTRUCTIONS);
 
   // Migrations - update rental values to real prices
   const rentalValues = {A:80,SA:80,AC:80,AT:80,B:80,BM:80,TB:120,MB:80,CC:480,E:240};

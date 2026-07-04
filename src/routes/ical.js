@@ -218,6 +218,16 @@ function parseIcal(text) {
   return events;
 }
 
+// Tour length + 15 min before + 15 min after, in minutes. Used for guide
+// worked-hours calculations.
+function computeBufferedMinutes(startIso, endIso) {
+  if (!startIso || !endIso) return 0;
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const raw = Math.round((end - start) / 60000);
+  return raw > 0 ? raw + 30 : 0;
+}
+
 // ── DB sync ──────────────────────────────────────────────────────────────
 function syncFeedToDB(feed, events) {
   const upsert = db().prepare(`
@@ -269,6 +279,41 @@ function syncFeedToDB(feed, events) {
       WHERE feed_id=?
       AND (start_at > datetime('now') OR start_at < datetime('now', '-1 day'))`)
       .run(feed.id);
+  }
+
+  // ── Guide worked-hours log ────────────────────────────────────────────
+  // A separate, effectively permanent record of hours guides actually
+  // worked. tour_availabilities is a rolling cache that gets purged once a
+  // tour is a day old, so it can't answer "how many hours did I work last
+  // month?" — this table can, because completed tours are never deleted
+  // from it. Only tours with a guide assigned count.
+  if (feed.type === 'tour') {
+    const upsertHours = db().prepare(`
+      INSERT INTO guide_tour_hours
+        (availability_id, guide, feed_id, feed_label, start_at, end_at, start_date, duration_minutes, last_synced)
+      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(availability_id) DO UPDATE SET
+        guide=excluded.guide, feed_id=excluded.feed_id, feed_label=excluded.feed_label,
+        start_at=excluded.start_at, end_at=excluded.end_at, start_date=excluded.start_date,
+        duration_minutes=excluded.duration_minutes, last_synced=excluded.last_synced
+    `);
+    events.forEach(e => {
+      if (!e.guide) return;
+      upsertHours.run(e.uid, e.guide, feed.id, feed.label, e.start, e.end, e.start_date,
+        computeBufferedMinutes(e.start, e.end));
+    });
+
+    // Same reschedule/cancel cleanup as above, but this table must NEVER
+    // drop a row once its start time is in the past — those are completed
+    // tours and are the whole point of keeping this table permanent.
+    if (currentIds.length > 0) {
+      const placeholders = currentIds.map(() => '?').join(',');
+      db().prepare(`DELETE FROM guide_tour_hours
+        WHERE feed_id=? AND availability_id NOT IN (${placeholders}) AND start_at > datetime('now')`)
+        .run(feed.id, ...currentIds);
+    } else {
+      db().prepare(`DELETE FROM guide_tour_hours WHERE feed_id=? AND start_at > datetime('now')`).run(feed.id);
+    }
   }
 }
 
@@ -441,6 +486,46 @@ router.get('/rentals', (req, res) => {
     bikes_needed: JSON.parse(r.bikes_needed || '{}'),
     bookings: JSON.parse(r.bookings_json || '[]'),
   })));
+});
+
+// GET /api/ical/guide-hours — worked (in a date range) or upcoming hours for a guide.
+// "Worked" only counts tours that have already started, so a reschedule can't
+// retroactively inflate a past period. Duration is tour length + 30 min buffer
+// (15 before, 15 after), computed once at sync time in computeBufferedMinutes.
+router.get('/guide-hours', (req, res) => {
+  const { guide, from, to, upcoming } = req.query;
+  if (!guide) return res.status(400).json({ error: 'guide required' });
+
+  let rows;
+  if (upcoming === '1' || upcoming === 'true') {
+    rows = db().prepare(`SELECT * FROM guide_tour_hours WHERE start_at > datetime('now') ORDER BY start_at`).all();
+  } else {
+    const fromDate = from || '1970-01-01';
+    const toDate = to || '2999-12-31';
+    rows = db().prepare(`
+      SELECT * FROM guide_tour_hours
+      WHERE start_at <= datetime('now') AND start_date >= ? AND start_date <= ?
+      ORDER BY start_at
+    `).all(fromDate, toDate);
+  }
+
+  rows = rows.filter(r => guideMatches(r.guide, guide));
+  const total_minutes = rows.reduce((s, r) => s + (r.duration_minutes || 0), 0);
+
+  res.json({
+    total_minutes,
+    total_hours: Math.round((total_minutes / 60) * 10) / 10,
+    count: rows.length,
+    tours: rows.map(r => ({
+      availability_id: r.availability_id,
+      feed_id: r.feed_id,
+      feed_label: r.feed_label,
+      start_date: r.start_date,
+      start_at: r.start_at,
+      end_at: r.end_at,
+      duration_minutes: r.duration_minutes,
+    })),
+  });
 });
 
 // GET /api/ical/debug — inspect raw stored data
