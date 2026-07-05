@@ -125,4 +125,42 @@ router.post('/create-booking', async (req, res) => {
   }
 });
 
+const CANCEL_SCRIPT = path.join(__dirname, '../../scripts/fareharbor-agent/cancel-booking.js');
+
+// POST /api/fareharbor-agent/cancel-booking
+router.post('/cancel-booking', async (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const { booking_ref } = req.body;
+  if (!booking_ref) return res.status(400).json({ error: 'booking_ref required' });
+
+  const actor = req.session?.actor || 'unknown';
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      execFile('node', [CANCEL_SCRIPT, `--booking=${booking_ref}`], {
+        cwd: path.dirname(CANCEL_SCRIPT),
+        timeout: 90000,
+        env: process.env,
+      }, (error, stdout, stderr) => {
+        console.log('Cancel agent stdout:', stdout);
+        if (stderr) console.error('Cancel agent stderr:', stderr);
+        if (error) return reject(new Error(stdout || stderr || error.message));
+        const match = stdout.match(/successfully cancelled/i);
+        if (match) return resolve({ ok: true, booking_ref });
+        reject(new Error('Cancel agent did not confirm success: ' + stdout.substring(0, 200)));
+      });
+    });
+
+    db().prepare(`INSERT INTO action_log (actor,action,booking_ref,details) VALUES (?,?,?,?)`)
+      .run(actor, 'fareharbor_booking_cancelled', booking_ref, JSON.stringify({ booking_ref }));
+
+    res.json(result);
+  } catch (e) {
+    console.error('Cancel agent failed:', e.message);
+    db().prepare(`INSERT INTO action_log (actor,action,booking_ref,details) VALUES (?,?,?,?)`)
+      .run(actor, 'fareharbor_cancel_failed', booking_ref, JSON.stringify({ booking_ref, error: e.message }));
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
