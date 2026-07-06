@@ -82,10 +82,46 @@ async function sendReminders() {
   }
 }
 
+async function sendInvoiceReminders() {
+  try {
+    const now = new Date();
+    if (now.getUTCDate() !== 20) return; // only on the 20th
+
+    const monthName = now.toLocaleString('en-GB', { month: 'long', timeZone: 'Europe/Copenhagen' });
+    const year = now.getUTCFullYear();
+    const reminderKey = `invoice_reminder_${year}_${now.getUTCMonth()}`;
+
+    // Only send once per month
+    const already = db().prepare(`SELECT value FROM app_settings WHERE key=?`).get(reminderKey);
+    if (already) return;
+
+    const guides = db().prepare(`SELECT name, email FROM team_members WHERE active=1 AND role='guide' AND email IS NOT NULL`).all();
+
+    for (const guide of guides) {
+      const subject = `Invoice reminder — send by the 23rd`;
+      const htmlContent = `
+        <p>Hi ${guide.name},</p>
+        <p>Just a reminder to send your invoice for <strong>${monthName} ${year}</strong> by the <strong>23rd</strong>.</p>
+        <p>You can upload it directly in the app under <strong>Profile → Upload invoice</strong>. Your worked hours for the period are shown there too.</p>
+        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>
+      `;
+      await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent })
+        .catch(e => console.error(`Invoice reminder failed for ${guide.name}:`, e.message));
+      console.log(`Invoice reminder sent to ${guide.name}`);
+    }
+
+    // Mark as sent
+    db().prepare(`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, datetime('now'), datetime('now'))`).run(reminderKey, '1');
+  } catch (e) {
+    console.error('Invoice reminder error:', e.message);
+  }
+}
+
 function startReminders() {
-  // Run immediately on startup then every hour
   sendReminders();
+  sendInvoiceReminders();
   setInterval(sendReminders, 60 * 60 * 1000);
+  setInterval(sendInvoiceReminders, 60 * 60 * 1000);
 }
 
 module.exports = { startReminders };
