@@ -1773,6 +1773,7 @@ async function renderAdmin(c) {
       <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
       <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
       <button class="subtab${window._adminTab==='reviews'?' active':''}" onclick="switchAdminTab('reviews')">Reviews</button>
+      <button class="subtab${window._adminTab==='availability'?' active':''}" onclick="switchAdminTab('availability')">Availability</button>
       <button class="subtab${window._adminTab==='invoicing'?' active':''}" onclick="switchAdminTab('invoicing')">Invoicing</button>
       <button class="subtab${window._adminTab==='bugs'?' active':''}" onclick="switchAdminTab('bugs')">Bugs</button>
       <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
@@ -1783,7 +1784,7 @@ async function renderAdmin(c) {
 
 async function switchAdminTab(tab) {
   window._adminTab = tab;
-  const labels = {bikes:'Fleet', log:'Log', reviews:'Reviews', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  const labels = {bikes:'Fleet', log:'Log', reviews:'Reviews', availability:'Availability', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   renderAdminTab(document.getElementById('content'));
 }
@@ -1794,6 +1795,7 @@ async function renderAdminTab(c) {
   if (window._adminTab === 'bikes') await renderAdminBikes(el);
   else if (window._adminTab === 'viewas') await renderViewAs(el);
   else if (window._adminTab === 'reviews') await renderAdminReviews(el);
+  else if (window._adminTab === 'availability') await renderAdminAvailability(el);
   else if (window._adminTab === 'invoicing') await renderAdminInvoicing(el);
   else if (window._adminTab === 'bugs') await renderBugReports(el);
   else await renderAdminLog(el);
@@ -1897,6 +1899,58 @@ async function deleteReview(id) {
     renderAdminReviews(document.getElementById('admin-tab-content'));
   } catch(e) {
     toast('Could not delete: ' + e.message, 'error');
+  }
+}
+
+async function renderAdminAvailability(el) {
+  el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  let periods;
+  try {
+    periods = await api('/api/guides/unavailability');
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  const fmtDt = s => s ? s.replace('T', ' ').substring(0, 16) : '';
+
+  // Group by guide
+  const byGuide = {};
+  periods.forEach(p => {
+    const name = p.guide_name || p.guide_id;
+    if (!byGuide[name]) byGuide[name] = [];
+    byGuide[name].push(p);
+  });
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Guide unavailability (${periods.length} period${periods.length!==1?'s':''})</div>
+      ${Object.keys(byGuide).length === 0
+        ? '<div style="font-size:0.85rem;color:var(--text3)">No unavailability periods marked</div>'
+        : Object.entries(byGuide).map(([name, ps]) => `
+          <div style="margin-bottom:0.85rem">
+            <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.3rem">${escapeHtml(name)}</div>
+            ${ps.map(p => `
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:0.35rem 0;border-bottom:1px solid var(--border)">
+                <div>
+                  <div style="font-size:0.82rem">${fmtDt(p.from_dt)} → ${fmtDt(p.to_dt)}</div>
+                  ${p.reason ? `<div style="font-size:0.75rem;color:var(--text3)">${escapeHtml(p.reason)}</div>` : ''}
+                </div>
+                <button onclick="adminDeleteUnavailability(${p.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0;margin-left:0.5rem">Remove</button>
+              </div>`).join('')}
+          </div>`).join('')}
+    </div>
+  `;
+}
+
+async function adminDeleteUnavailability(id) {
+  if (!confirm('Remove this unavailability period?')) return;
+  try {
+    await api(`/api/guides/unavailability/${id}`, { method:'DELETE' });
+    toast('Removed', 'success');
+    renderAdminAvailability(document.getElementById('admin-tab-content'));
+  } catch(e) {
+    toast('Could not remove: ' + e.message, 'error');
   }
 }
 
@@ -2478,6 +2532,7 @@ async function renderProfile(c) {
     <div class="subtab-row">
       <button class="subtab${window._profileTab==='overview'?' active':''}" onclick="switchProfileTab('overview')">Overview</button>
       <button class="subtab${window._profileTab==='invoice'?' active':''}" onclick="switchProfileTab('invoice')">Invoice</button>
+      <button class="subtab${window._profileTab==='availability'?' active':''}" onclick="switchProfileTab('availability')">Availability</button>
       <button class="subtab${window._profileTab==='notifications'?' active':''}" onclick="switchProfileTab('notifications')">Notifications</button>
     </div>
     <div id="profile-tab-content"></div>
@@ -2488,7 +2543,7 @@ async function renderProfile(c) {
 async function switchProfileTab(tab) {
   window._profileTab = tab;
   document.querySelectorAll('.subtab').forEach(b => {
-    b.classList.toggle('active', b.textContent === {overview:'Overview', invoice:'Invoice', notifications:'Notifications'}[tab]);
+    b.classList.toggle('active', b.textContent === {overview:'Overview', invoice:'Invoice', availability:'Availability', notifications:'Notifications'}[tab]);
   });
   await renderProfileTab();
 }
@@ -2498,6 +2553,7 @@ async function renderProfileTab() {
   if (!el) return;
   if (window._profileTab === 'notifications') await renderNotificationsTab(el);
   else if (window._profileTab === 'invoice') await renderInvoiceTab(el);
+  else if (window._profileTab === 'availability') await renderAvailabilityTab(el);
   else await renderOverviewTab(el);
 }
 
@@ -2625,6 +2681,89 @@ async function renderInvoiceTab(el) {
     </div>
   `;
   document.getElementById('invoice-upload-btn').addEventListener('click', () => uploadInvoice(actor.id));
+}
+
+async function renderAvailabilityTab(el) {
+  el.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let periods;
+  try {
+    periods = await api('/api/guides/unavailability');
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  const fmtDt = s => s ? s.replace('T', ' ').substring(0, 16) : '';
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Mark unavailability</div>
+      <div style="display:flex;flex-direction:column;gap:0.5rem">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:0.75rem;color:var(--text3);margin-bottom:3px">From</div>
+            <input class="form-input" type="datetime-local" id="unavail-from" style="width:100%;box-sizing:border-box">
+          </div>
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:0.75rem;color:var(--text3);margin-bottom:3px">Until</div>
+            <input class="form-input" type="datetime-local" id="unavail-to" style="width:100%;box-sizing:border-box">
+          </div>
+        </div>
+        <input class="form-input" type="text" id="unavail-reason" placeholder="Reason (optional)">
+        <div id="unavail-error" style="display:none;font-size:0.82rem;color:var(--red);padding:0.5rem 0.7rem;background:var(--red-bg,#fff0f0);border-radius:6px;line-height:1.45"></div>
+        <button class="btn btn-primary" id="unavail-submit">Mark unavailable</button>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Your unavailability periods</div>
+      ${periods.length === 0
+        ? '<div style="font-size:0.85rem;color:var(--text3)">No periods marked</div>'
+        : periods.map(p => `
+          <div class="detail-row" style="align-items:flex-start;flex-direction:column;gap:2px;padding:0.45rem 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
+              <span style="font-size:0.85rem;font-weight:600">${fmtDt(p.from_dt)} → ${fmtDt(p.to_dt)}</span>
+              <button onclick="deleteUnavailability(${p.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">Remove</button>
+            </div>
+            ${p.reason ? `<span style="font-size:0.78rem;color:var(--text3)">${escapeHtml(p.reason)}</span>` : ''}
+          </div>`).join('')}
+    </div>
+  `;
+
+  document.getElementById('unavail-submit').addEventListener('click', async () => {
+    const from_dt = document.getElementById('unavail-from').value;
+    const to_dt = document.getElementById('unavail-to').value;
+    const reason = document.getElementById('unavail-reason').value.trim();
+    const errEl = document.getElementById('unavail-error');
+    errEl.style.display = 'none';
+
+    if (!from_dt || !to_dt) { errEl.textContent = 'Please select both a start and end date/time.'; errEl.style.display = 'block'; return; }
+    if (from_dt >= to_dt) { errEl.textContent = 'End must be after start.'; errEl.style.display = 'block'; return; }
+
+    const btn = document.getElementById('unavail-submit');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    try {
+      await api('/api/guides/unavailability', { method:'POST', body:{ from_dt, to_dt, reason } });
+      toast('Unavailability period saved', 'success');
+      renderAvailabilityTab(el);
+    } catch(e) {
+      errEl.textContent = e.message || 'Could not save. Try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Mark unavailable';
+    }
+  });
+}
+
+async function deleteUnavailability(id) {
+  if (!confirm('Remove this unavailability period?')) return;
+  try {
+    await api(`/api/guides/unavailability/${id}`, { method:'DELETE' });
+    toast('Removed', 'success');
+    renderAvailabilityTab(document.getElementById('profile-tab-content'));
+  } catch(e) {
+    toast('Could not remove: ' + e.message, 'error');
+  }
 }
 
 async function renderNotificationsTab(el) {

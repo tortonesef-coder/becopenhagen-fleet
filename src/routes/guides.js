@@ -130,4 +130,80 @@ router.put('/invoice-instructions', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Unavailability ───────────────────────────────────────────────────────
+
+// GET /api/guides/unavailability — all periods (admin) or own (guide)
+router.get('/unavailability', (req, res) => {
+  const actor = req.session?.actor;
+  const role = req.session?.actor_role;
+  if (!actor) return res.status(401).json({ error: 'Not logged in' });
+
+  const rows = role === 'admin'
+    ? db().prepare(`SELECT gu.*, tm.name as guide_name FROM guide_unavailability gu JOIN team_members tm ON tm.id=gu.guide_id ORDER BY gu.from_dt`).all()
+    : db().prepare(`SELECT * FROM guide_unavailability WHERE guide_id=? ORDER BY from_dt`).all(actor);
+
+  res.json(rows);
+});
+
+// POST /api/guides/unavailability — add a period (self or admin)
+router.post('/unavailability', (req, res) => {
+  const actor = req.session?.actor;
+  const role = req.session?.actor_role;
+  if (!actor) return res.status(401).json({ error: 'Not logged in' });
+
+  const guide_id = role === 'admin' && req.body.guide_id ? req.body.guide_id : actor;
+  const { from_dt, to_dt, reason } = req.body;
+
+  if (!from_dt || !to_dt) return res.status(400).json({ error: 'from_dt and to_dt required' });
+  if (from_dt >= to_dt) return res.status(400).json({ error: 'End must be after start' });
+
+  // Check for assigned tours in this window
+  const guide = db().prepare('SELECT name FROM team_members WHERE id=?').get(guide_id);
+  const conflicts = db().prepare(`
+    SELECT feed_id, start_date, start_time, end_time FROM tour_availabilities
+    WHERE guide IS NOT NULL
+      AND datetime(replace(replace(start_at,'T',' '),'Z','')) < datetime(?)
+      AND datetime(replace(replace(end_at,'T',' '),'Z','')) > datetime(?)
+      AND start_at > datetime('now')
+  `).all(to_dt, from_dt).filter(t => {
+    const g = db().prepare('SELECT name FROM team_members WHERE id=?').get(guide_id);
+    return t.guide && g && (t.guide === g.name || t.guide.includes(g.name));
+  });
+
+  // Re-do with guide name match in JS since SQLite can't do fuzzy match easily
+  const guideName = guide?.name;
+  const allConflicts = db().prepare(`
+    SELECT feed_id, start_date, start_time, end_time, guide FROM tour_availabilities
+    WHERE guide IS NOT NULL
+      AND datetime(replace(replace(start_at,'T',' '),'Z','')) < datetime(?)
+      AND datetime(replace(replace(end_at,'T',' '),'Z','')) > datetime(?)
+      AND start_at > datetime('now')
+  `).all(to_dt, from_dt).filter(t => guideName && (t.guide === guideName || t.guide.toLowerCase().includes(guideName.toLowerCase().split(' ')[0])));
+
+  if (allConflicts.length > 0) {
+    const list = allConflicts.map(t => `${t.feed_id} on ${t.start_date} at ${t.start_time}`).join(', ');
+    return res.status(409).json({
+      error: `You have ${allConflicts.length} tour${allConflicts.length > 1 ? 's' : ''} assigned in this period: ${list}. Please contact Federico to reassign before marking yourself unavailable.`,
+      conflicts: allConflicts,
+    });
+  }
+
+  const result = db().prepare(`INSERT INTO guide_unavailability (guide_id, from_dt, to_dt, reason) VALUES (?,?,?,?)`).run(guide_id, from_dt, to_dt, reason || null);
+  res.json({ ok: true, id: result.lastInsertRowid });
+});
+
+// DELETE /api/guides/unavailability/:id — remove (self or admin)
+router.delete('/unavailability/:id', (req, res) => {
+  const actor = req.session?.actor;
+  const role = req.session?.actor_role;
+  if (!actor) return res.status(401).json({ error: 'Not logged in' });
+
+  const row = db().prepare('SELECT * FROM guide_unavailability WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (role !== 'admin' && row.guide_id !== actor) return res.status(403).json({ error: 'Not authorized' });
+
+  db().prepare('DELETE FROM guide_unavailability WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 module.exports = router;

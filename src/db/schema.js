@@ -308,6 +308,15 @@ function initSchema() {
       PRIMARY KEY (member_id, notification_type)
     );
 
+    CREATE TABLE IF NOT EXISTS guide_unavailability (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guide_id TEXT NOT NULL REFERENCES team_members(id),
+      from_dt TEXT NOT NULL,
+      to_dt TEXT NOT NULL,
+      reason TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS guide_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guide_id TEXT NOT NULL REFERENCES team_members(id),
