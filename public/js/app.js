@@ -590,7 +590,7 @@ function buildTabbar() {
   const role=state.actor?.role;
   document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
   const tabs = role==='mechanic'
-    ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}]
+    ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
     ? [{id:'bikes',label:'Bikes',icon:iconBike()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
     : role==='guide'
@@ -2462,157 +2462,277 @@ function periodRange(period, customFrom, customTo) {
 }
 
 async function renderProfile(c) {
-  c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
-  if (!window._profilePeriod) window._profilePeriod = 'this_cycle';
-  if (!window._profileCustom) window._profileCustom = { from: '', to: '' };
-
   const actor = state.actor;
-  const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
+  const role = actor?.role;
 
-  let worked, upcoming, invoices, instructions, allReviews;
-  try {
-    [worked, upcoming, invoices, instructions, allReviews] = await Promise.all([
-      api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&from=${range.from}&to=${range.to}`),
-      api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&upcoming=1`),
-      api(`/api/guides/${actor.id}/invoices`).catch(()=>[]),
-      api('/api/guides/invoice-instructions').catch(()=>({text:''})),
-      api(`/api/reviews`).catch(()=>[]),
-    ]);
-  } catch(e) {
-    c.innerHTML = `<div class="empty-state"><p>Could not load profile: ${escapeHtml(e.message)}</p></div>`;
+  if (role === 'mechanic') {
+    await renderMechanicProfile(c);
     return;
   }
 
-  // Filter to this guide and the selected period
-  const reviews = allReviews.filter(r => r.guide_id === actor.id && r.review_date >= range.from && r.review_date <= range.to);
+  // Guide profile with sub-tabs
+  if (!window._profileTab) window._profileTab = 'overview';
+  const isTabs = true;
 
-  renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions: instructions.text, reviews });
+  c.innerHTML = `
+    <div class="subtab-row">
+      <button class="subtab${window._profileTab==='overview'?' active':''}" onclick="switchProfileTab('overview')">Overview</button>
+      <button class="subtab${window._profileTab==='invoice'?' active':''}" onclick="switchProfileTab('invoice')">Invoice</button>
+      <button class="subtab${window._profileTab==='notifications'?' active':''}" onclick="switchProfileTab('notifications')">Notifications</button>
+    </div>
+    <div id="profile-tab-content"></div>
+  `;
+  await renderProfileTab();
 }
 
-function renderProfileContent(c, { actor, range, worked, upcoming, invoices, instructions, reviews }) {
-  const period = window._profilePeriod;
-  const custom = window._profileCustom;
+async function switchProfileTab(tab) {
+  window._profileTab = tab;
+  document.querySelectorAll('.subtab').forEach(b => {
+    b.classList.toggle('active', b.textContent === {overview:'Overview', invoice:'Invoice', notifications:'Notifications'}[tab]);
+  });
+  await renderProfileTab();
+}
+
+async function renderProfileTab() {
+  const el = document.getElementById('profile-tab-content');
+  if (!el) return;
+  if (window._profileTab === 'notifications') await renderNotificationsTab(el);
+  else if (window._profileTab === 'invoice') await renderInvoiceTab(el);
+  else await renderOverviewTab(el);
+}
+
+async function renderOverviewTab(el) {
+  el.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  if (!window._profilePeriod) window._profilePeriod = 'this_cycle';
+  if (!window._profileCustom) window._profileCustom = { from: '', to: '' };
+  const actor = state.actor;
+  const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
+
+  let worked, upcoming, allReviews;
+  try {
+    [worked, upcoming, allReviews] = await Promise.all([
+      api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&from=${range.from}&to=${range.to}`),
+      api(`/api/ical/guide-hours?guide=${encodeURIComponent(actor.name)}&upcoming=1`),
+      api(`/api/reviews`).catch(()=>[]),
+    ]);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  const reviews = allReviews.filter(r => r.guide_id === actor.id && r.review_date >= range.from && r.review_date <= range.to);
   const reviewCount = reviews.length;
   const tourCount = worked.count;
   const ratio = tourCount > 0 && reviewCount > 0 ? Math.round((reviewCount / tourCount) * 100) : null;
   const ratioLabel = ratio !== null ? `${ratio}%` : '—';
   const ratioColor = ratio === null ? '' : ratio >= 33 ? 'green' : ratio >= 15 ? 'amber' : 'red';
+  const platformColors = {'Google Maps':{bg:'#E8F0FE',fg:'#1A73E8'},'GetYourGuide':{bg:'#FFE8E2',fg:'#CC3D1F'},'Viator':{bg:'#D6F5EC',fg:'#00754A'},'TripAdvisor':{bg:'#D6F5EC',fg:'#00754A'},'Airbnb':{bg:'#FFE2E3',fg:'#D9363E'}};
+  const platformBadge = p => { const c=platformColors[p]||{bg:'var(--surface2)',fg:'var(--text2)'}; return `<span style="font-size:0.7rem;font-weight:700;background:${c.bg};color:${c.fg};padding:2px 8px;border-radius:10px">${p}</span>`; };
 
-  const platformIcon = p => ({'Google Maps':'🗺️','GetYourGuide':'🟠','Viator':'🟢','TripAdvisor':'🦉','Airbnb':'🏠'}[p] || '⭐');
-  const platformColors = {
-    'Google Maps':  { bg:'#E8F0FE', fg:'#1A73E8' },
-    'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
-    'Viator':       { bg:'#D6F5EC', fg:'#00754A' },
-    'TripAdvisor':  { bg:'#D6F5EC', fg:'#00754A' },
-    'Airbnb':       { bg:'#FFE2E3', fg:'#D9363E' },
-  };
-  const platformBadge = p => {
-    const c = platformColors[p] || { bg:'var(--surface2)', fg:'var(--text2)' };
-    return `<span style="font-size:0.7rem;font-weight:700;background:${c.bg};color:${c.fg};padding:2px 8px;border-radius:10px">${p}</span>`;
-  };
-
-  c.innerHTML = `
+  el.innerHTML = `
     <div class="section-title">${actor.name}</div>
-
     <div class="detail-section" style="border-top:none;padding-top:0;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
       <select class="form-select" id="profile-period-select" style="flex:1;min-width:140px">
-        <option value="this_cycle" ${period==='this_cycle'||period==='this_month'?'selected':''}>This cycle</option>
-        <option value="last_cycle" ${period==='last_cycle'||period==='last_month'?'selected':''}>Last cycle</option>
-        <option value="this_year" ${period==='this_year'?'selected':''}>This year</option>
-        <option value="custom" ${period==='custom'?'selected':''}>Custom range</option>
+        <option value="this_cycle" ${window._profilePeriod==='this_cycle'?'selected':''}>This cycle</option>
+        <option value="last_cycle" ${window._profilePeriod==='last_cycle'?'selected':''}>Last cycle</option>
+        <option value="this_year" ${window._profilePeriod==='this_year'?'selected':''}>This year</option>
+        <option value="custom" ${window._profilePeriod==='custom'?'selected':''}>Custom range</option>
       </select>
-      ${period==='custom' ? `
-        <input class="form-input" type="date" id="profile-from" value="${custom.from}" style="flex:1;min-width:130px">
-        <input class="form-input" type="date" id="profile-to" value="${custom.to}" style="flex:1;min-width:130px">
+      ${window._profilePeriod==='custom' ? `
+        <input class="form-input" type="date" id="profile-from" value="${window._profileCustom.from}" style="flex:1;min-width:130px">
+        <input class="form-input" type="date" id="profile-to" value="${window._profileCustom.to}" style="flex:1;min-width:130px">
         <button class="btn btn-secondary" id="profile-apply-custom">Apply</button>
       ` : ''}
     </div>
-
     <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-card-num green">${fmtDurationFromMinutes(worked.total_minutes)}</div>
-        <div class="stat-card-label">Worked · ${range.label}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-num">${fmtDurationFromMinutes(upcoming.total_minutes)}</div>
-        <div class="stat-card-label">Upcoming</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-num green">${reviewCount}</div>
-        <div class="stat-card-label">5⭐ reviews · ${range.label}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-num ${ratioColor}">${ratioLabel}</div>
-        <div class="stat-card-label">Review rate</div>
-      </div>
+      <div class="stat-card"><div class="stat-card-num green">${fmtDurationFromMinutes(worked.total_minutes)}</div><div class="stat-card-label">Worked · ${range.label}</div></div>
+      <div class="stat-card"><div class="stat-card-num">${fmtDurationFromMinutes(upcoming.total_minutes)}</div><div class="stat-card-label">Upcoming</div></div>
+      <div class="stat-card"><div class="stat-card-num green">${reviewCount}</div><div class="stat-card-label">5⭐ reviews · ${range.label}</div></div>
+      <div class="stat-card"><div class="stat-card-num ${ratioColor}">${ratioLabel}</div><div class="stat-card-label">Review rate</div></div>
     </div>
-
     <div class="detail-section">
       <div class="detail-section-title">Reviews · ${range.label}</div>
-      ${reviewCount === 0
-        ? '<div style="font-size:0.85rem;color:var(--text3);padding:0.3rem 0">No reviews in this period</div>'
-        : reviews.map(r => `
-          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap">
-              <span style="display:flex;align-items:center;gap:0.4rem">${platformBadge(r.platform)}<span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span></span>
-              ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${escapeHtml(r.reviewer_name)}</span>` : ''}
-            </div>
-            ${r.review_text ? `<div style="font-size:0.8rem;color:var(--text2);margin-top:4px;font-style:italic;line-height:1.45">"${escapeHtml(r.review_text)}"</div>` : ''}
-          </div>`).join('')}
+      ${reviewCount === 0 ? '<div style="font-size:0.85rem;color:var(--text3)">No reviews in this period</div>' :
+        reviews.map(r => `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap">
+            <span style="display:flex;align-items:center;gap:0.4rem">${platformBadge(r.platform)}<span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span></span>
+            ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${escapeHtml(r.reviewer_name)}</span>` : ''}
+          </div>
+          ${r.review_text ? `<div style="font-size:0.8rem;color:var(--text2);margin-top:4px;font-style:italic;line-height:1.45">"${escapeHtml(r.review_text)}"</div>` : ''}
+        </div>`).join('')}
     </div>
-
     <div class="detail-section">
       <div class="detail-section-title">Count worked hours — ${range.label}</div>
       <div style="font-size:0.78rem;color:var(--text3);margin-bottom:0.5rem">Each tour counts as its scheduled length, plus 15 min before and 15 min after.</div>
-      ${worked.tours.length === 0
-        ? '<div style="font-size:0.85rem;color:var(--text3);padding:0.5rem 0">No completed tours in this period</div>'
-        : worked.tours.map(t => `
-          <div class="detail-row">
-            <span class="dr-key">${fmtDateFull(t.start_date)} · ${t.feed_id}</span>
-            <span class="dr-val">${fmtDurationFromMinutes(t.duration_minutes)}</span>
-          </div>`).join('')}
+      ${worked.tours.length === 0 ? '<div style="font-size:0.85rem;color:var(--text3)">No completed tours in this period</div>' :
+        worked.tours.map(t => `<div class="detail-row"><span class="dr-key">${fmtDateFull(t.start_date)} · ${t.feed_id}</span><span class="dr-val">${fmtDurationFromMinutes(t.duration_minutes)}</span></div>`).join('')}
       <div class="detail-row" style="border-top:1px solid var(--border);margin-top:0.4rem;padding-top:0.5rem;font-weight:700">
-        <span class="dr-key">Total</span>
-        <span class="dr-val">${fmtDurationFromMinutes(worked.total_minutes)}</span>
+        <span class="dr-key">Total</span><span class="dr-val">${fmtDurationFromMinutes(worked.total_minutes)}</span>
       </div>
-    </div>
-
-    <div class="detail-section">
-      <div class="detail-section-title">Upload invoice</div>
-      <input class="form-input" type="text" id="invoice-period-label" placeholder="Period this invoice covers" value="${escapeHtml(range.label)}" style="margin-bottom:0.5rem;width:100%;box-sizing:border-box">
-      <input type="file" id="invoice-file-input" accept="application/pdf,image/*" style="margin-bottom:0.6rem;display:block;width:100%">
-      <button class="btn btn-primary btn-full" id="invoice-upload-btn">Upload invoice</button>
-
-      <div style="margin-top:0.9rem">
-        ${invoices.length===0 ? '<div style="font-size:0.82rem;color:var(--text3)">No invoices uploaded yet</div>' :
-          invoices.map(inv => `
-            <div class="detail-row">
-              <span class="dr-key">${escapeHtml(inv.period_label || inv.original_filename)} <span style="color:var(--text3);font-size:0.72rem">· ${fmtDateFull((inv.uploaded_at||'').substring(0,10))}</span></span>
-              <span class="dr-val">
-                <a href="/api/guides/invoices/${inv.id}/file" target="_blank" style="margin-right:0.7rem">View</a>
-                <a href="#" onclick="deleteInvoice(${inv.id});return false;" style="color:var(--red)">Delete</a>
-              </span>
-            </div>`).join('')}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <div class="detail-section-title">How to invoice</div>
-      <div style="font-size:0.85rem;color:var(--text2)">${renderMarkdown(instructions || 'No instructions have been added yet — ask Paloma.')}</div>
     </div>
   `;
 
-  document.getElementById('profile-period-select').addEventListener('change', (e) => {
+  document.getElementById('profile-period-select').addEventListener('change', e => {
     window._profilePeriod = e.target.value;
-    renderProfile(document.getElementById('content'));
+    renderOverviewTab(el);
   });
   document.getElementById('profile-apply-custom')?.addEventListener('click', () => {
     window._profileCustom.from = document.getElementById('profile-from').value;
     window._profileCustom.to = document.getElementById('profile-to').value;
     if (!window._profileCustom.from || !window._profileCustom.to) { toast('Pick both dates', 'error'); return; }
-    renderProfile(document.getElementById('content'));
+    renderOverviewTab(el);
   });
+}
+
+async function renderInvoiceTab(el) {
+  el.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  const actor = state.actor;
+  if (!window._profilePeriod) window._profilePeriod = 'this_cycle';
+  if (!window._profileCustom) window._profileCustom = { from: '', to: '' };
+  const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
+
+  let invoices, instructions;
+  try {
+    [invoices, instructions] = await Promise.all([
+      api(`/api/guides/${actor.id}/invoices`).catch(()=>[]),
+      api('/api/guides/invoice-instructions').catch(()=>({text:''})),
+    ]);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Upload invoice</div>
+      <input class="form-input" type="text" id="invoice-period-label" placeholder="Period this invoice covers" value="${escapeHtml(range.label)}" style="margin-bottom:0.5rem;width:100%;box-sizing:border-box">
+      <input type="file" id="invoice-file-input" accept="application/pdf,image/*" style="margin-bottom:0.6rem;display:block;width:100%">
+      <button class="btn btn-primary btn-full" id="invoice-upload-btn">Upload invoice</button>
+      <div style="margin-top:0.9rem">
+        ${invoices.length===0 ? '<div style="font-size:0.82rem;color:var(--text3)">No invoices uploaded yet</div>' :
+          invoices.map(inv => `<div class="detail-row">
+            <span class="dr-key">${escapeHtml(inv.period_label || inv.original_filename)} <span style="color:var(--text3);font-size:0.72rem">· ${fmtDateFull((inv.uploaded_at||'').substring(0,10))}</span></span>
+            <span class="dr-val">
+              <a href="/api/guides/invoices/${inv.id}/file" target="_blank" style="margin-right:0.7rem">View</a>
+              <a href="#" onclick="deleteInvoice(${inv.id});return false;" style="color:var(--red)">Delete</a>
+            </span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">How to invoice</div>
+      <div style="font-size:0.85rem;color:var(--text2)">${renderMarkdown(instructions.text || 'No instructions yet.')}</div>
+    </div>
+  `;
   document.getElementById('invoice-upload-btn').addEventListener('click', () => uploadInvoice(actor.id));
+}
+
+async function renderNotificationsTab(el) {
+  el.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let prefs;
+  try {
+    prefs = await api('/api/notif-prefs');
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Email notifications</div>
+      <div style="font-size:0.82rem;color:var(--text3);margin-bottom:0.75rem">Choose which emails you want to receive.</div>
+      ${prefs.map(p => `
+        <div class="detail-row" style="padding:0.55rem 0">
+          <span class="dr-key" style="font-size:0.88rem">${escapeHtml(p.label)}</span>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex-shrink:0">
+            <input type="checkbox" data-notif-type="${p.id}" ${p.enabled ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer">
+          </label>
+        </div>`).join('')}
+    </div>
+  `;
+
+  el.querySelectorAll('input[data-notif-type]').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      try {
+        await api(`/api/notif-prefs/${cb.dataset.notifType}`, { method:'PUT', body:{ enabled: cb.checked } });
+      } catch(e) {
+        toast('Could not save preference', 'error');
+        cb.checked = !cb.checked;
+      }
+    });
+  });
+}
+
+async function renderMechanicProfile(c) {
+  c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  if (!window._profilePeriod) window._profilePeriod = 'this_cycle';
+  if (!window._profileCustom) window._profileCustom = { from: '', to: '' };
+  const actor = state.actor;
+  const range = periodRange(window._profilePeriod, window._profileCustom.from, window._profileCustom.to);
+
+  let tickets, allReviews;
+  try {
+    [tickets, allReviews] = await Promise.all([
+      api('/api/repairs/tickets').catch(()=>[]),
+      api('/api/reviews').catch(()=>[]),
+    ]);
+  } catch(e) {
+    c.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  const resolved = tickets.filter(t => t.status === 'resolved' && t.resolved_at && t.resolved_at.substring(0,10) >= range.from && t.resolved_at.substring(0,10) <= range.to);
+  const reviews = allReviews.filter(r => r.guide_id === actor.id && r.review_date >= range.from && r.review_date <= range.to);
+  const platformColors = {'Google Maps':{bg:'#E8F0FE',fg:'#1A73E8'},'GetYourGuide':{bg:'#FFE8E2',fg:'#CC3D1F'},'Viator':{bg:'#D6F5EC',fg:'#00754A'},'TripAdvisor':{bg:'#D6F5EC',fg:'#00754A'},'Airbnb':{bg:'#FFE2E3',fg:'#D9363E'}};
+  const platformBadge = p => { const cc=platformColors[p]||{bg:'var(--surface2)',fg:'var(--text2)'}; return `<span style="font-size:0.7rem;font-weight:700;background:${cc.bg};color:${cc.fg};padding:2px 8px;border-radius:10px">${p}</span>`; };
+
+  c.innerHTML = `
+    <div class="section-title">${actor.name}</div>
+    <div class="detail-section" style="border-top:none;padding-top:0;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+      <select class="form-select" id="profile-period-select" style="flex:1;min-width:140px">
+        <option value="this_cycle" ${window._profilePeriod==='this_cycle'?'selected':''}>This cycle</option>
+        <option value="last_cycle" ${window._profilePeriod==='last_cycle'?'selected':''}>Last cycle</option>
+        <option value="this_year" ${window._profilePeriod==='this_year'?'selected':''}>This year</option>
+        <option value="custom" ${window._profilePeriod==='custom'?'selected':''}>Custom range</option>
+      </select>
+      ${window._profilePeriod==='custom' ? `
+        <input class="form-input" type="date" id="profile-from" value="${window._profileCustom.from}" style="flex:1;min-width:130px">
+        <input class="form-input" type="date" id="profile-to" value="${window._profileCustom.to}" style="flex:1;min-width:130px">
+        <button class="btn btn-secondary" id="profile-apply-custom">Apply</button>
+      ` : ''}
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-card-num green">${resolved.length}</div><div class="stat-card-label">Tickets resolved · ${range.label}</div></div>
+      <div class="stat-card"><div class="stat-card-num green">${reviews.length}</div><div class="stat-card-label">5⭐ reviews · ${range.label}</div></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Tickets resolved · ${range.label}</div>
+      ${resolved.length === 0 ? '<div style="font-size:0.85rem;color:var(--text3)">No tickets resolved in this period</div>' :
+        resolved.map(t => `<div class="detail-row"><span class="dr-key">${fmtDateFull(t.resolved_at?.substring(0,10))} · ${escapeHtml(t.bike_id)}</span><span class="dr-val" style="color:var(--text3);font-size:0.8rem">${escapeHtml(t.problem?.substring(0,40) || '')}</span></div>`).join('')}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Reviews · ${range.label}</div>
+      ${reviews.length === 0 ? '<div style="font-size:0.85rem;color:var(--text3)">No reviews in this period</div>' :
+        reviews.map(r => `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">
+            ${platformBadge(r.platform)}<span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span>
+            ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2);margin-left:auto">${escapeHtml(r.reviewer_name)}</span>` : ''}
+          </div>
+          ${r.review_text ? `<div style="font-size:0.8rem;color:var(--text2);margin-top:4px;font-style:italic;line-height:1.45">"${escapeHtml(r.review_text)}"</div>` : ''}
+        </div>`).join('')}
+    </div>
+  `;
+
+  document.getElementById('profile-period-select').addEventListener('change', e => {
+    window._profilePeriod = e.target.value;
+    renderMechanicProfile(c);
+  });
+  document.getElementById('profile-apply-custom')?.addEventListener('click', () => {
+    window._profileCustom.from = document.getElementById('profile-from').value;
+    window._profileCustom.to = document.getElementById('profile-to').value;
+    if (!window._profileCustom.from || !window._profileCustom.to) { toast('Pick both dates', 'error'); return; }
+    renderMechanicProfile(c);
+  });
 }
 
 function uploadInvoice(guideId) {

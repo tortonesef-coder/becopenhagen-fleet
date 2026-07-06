@@ -5,7 +5,7 @@
  * only notified once even across server restarts.
  */
 
-const { getDb } = require('./db/schema');
+const { getDb, isNotifEnabled } = require('./db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('./email');
 
 function db() { return getDb(); }
@@ -15,7 +15,7 @@ async function sendReminders() {
     // Find tours starting between 15h and 17h from now with an assigned guide
     // that haven't been reminded yet. Times stored as ISO UTC strings.
     const tours = db().prepare(`
-      SELECT ta.*, tm.name as guide_name, tm.email as guide_email
+      SELECT ta.*, tm.id as guide_id, tm.name as guide_name, tm.email as guide_email
       FROM tour_availabilities ta
       JOIN team_members tm ON (tm.name = ta.guide OR tm.name LIKE '%' || ta.guide || '%')
       WHERE ta.feed_type = 'tour'
@@ -27,6 +27,10 @@ async function sendReminders() {
     `).all();
 
     for (const tour of tours) {
+      // Always mark as reminded so we don't retry even if pref is off
+      db().prepare(`INSERT OR IGNORE INTO tour_reminders (availability_id) VALUES (?)`).run(tour.availability_id);
+      if (!isNotifEnabled(tour.guide_id, 'tour_reminder')) continue;
+
       const bookings = JSON.parse(tour.bookings_json || '[]');
       const dateLabel = new Date(tour.start_date).toLocaleDateString('en-GB', {
         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
@@ -73,8 +77,6 @@ async function sendReminders() {
         htmlContent,
       }).catch(e => console.error(`Reminder email failed for ${tour.guide_name}:`, e.message));
 
-      // Mark as reminded
-      db().prepare(`INSERT OR IGNORE INTO tour_reminders (availability_id) VALUES (?)`).run(tour.availability_id);
       console.log(`Tour reminder sent to ${tour.guide_name} for ${tour.feed_id} on ${tour.start_date}`);
     }
   } catch (e) {
@@ -95,9 +97,10 @@ async function sendInvoiceReminders() {
     const already = db().prepare(`SELECT value FROM app_settings WHERE key=?`).get(reminderKey);
     if (already) return;
 
-    const guides = db().prepare(`SELECT name, email FROM team_members WHERE active=1 AND role NOT IN ('admin','mechanic') AND email IS NOT NULL`).all();
+    const guides = db().prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND role NOT IN ('admin','mechanic') AND email IS NOT NULL`).all();
 
     for (const guide of guides) {
+      if (!isNotifEnabled(guide.id, 'invoice_reminder')) continue;
       const subject = `Invoice reminder — send by the 23rd`;
       const htmlContent = `
         <p>Hi ${guide.name},</p>

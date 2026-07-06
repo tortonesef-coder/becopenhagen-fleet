@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getDb } = require('../db/schema');
+const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
 
 function db() { return getDb(); }
@@ -35,7 +35,7 @@ router.post('/', requireAdmin, async (req, res) => {
 
   // Send email to guide if they have an address on file (skip if notify=false)
   const shouldNotify = req.body.notify !== false;
-  if (shouldNotify && guide.email) {
+  if (shouldNotify && guide.email && isNotifEnabled(guide.id, 'new_review')) {
     const dateLabel = new Date(review_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
     const subject = `New 5⭐ review for you — ${platform}`;
     const reviewBlock = review_text
@@ -52,7 +52,7 @@ router.post('/', requireAdmin, async (req, res) => {
       </table>
       ${reviewBlock}
       <p>You can see all your reviews in the app under <strong>Profile</strong>.</p>
-      ' + require('./email').EMAIL_FOOTER + '
+      ${EMAIL_FOOTER}
     `;
 
     await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent }).catch(e =>

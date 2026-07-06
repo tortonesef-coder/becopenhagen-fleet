@@ -54,6 +54,7 @@ app.use('/auth', require('./routes/auth'));
 app.use('/api/fareharbor-agent', require('./routes/fareharbor-agent'));
 app.use('/api/guides', require('./routes/guides'));
 app.use('/api/reviews', require('./routes/reviews'));
+app.use('/api/notif-prefs', require('./routes/notif-prefs').router);
 app.use('/api', require('./routes/api'));
 
 app.post('/session/logout', (req, res) => {

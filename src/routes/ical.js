@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getDb } = require('../db/schema');
+const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
 
 function db() { return getDb(); }
@@ -264,13 +264,14 @@ function syncFeedToDB(feed, events) {
     // Notify guide on booking count transitions (tours only, future only)
     if (feed.type !== 'tour' || !guide || !e.start_date || e.start_date < new Date().toISOString().substring(0, 10)) return;
 
-    const member = db().prepare('SELECT name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(guide, `%${guide}%`);
+    const member = db().prepare('SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(guide, `%${guide}%`);
     if (!member?.email) return;
+    const memberId = member.id;
 
     const dateLabel = new Date(e.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
     // First booking arrived
-    if (prevCount === 0 && e.booking_count >= 1) {
+    if (prevCount === 0 && e.booking_count >= 1 && isNotifEnabled(member.id || memberId, 'first_booking')) {
       const subject = `First booking — ${e.feed_id} on ${dateLabel}`;
       const htmlContent = `
         <p>Hi ${member.name},</p>
@@ -281,13 +282,13 @@ function syncFeedToDB(feed, events) {
           <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${e.booking_count}</td></tr>
         </table>
-        ' + require('./email').EMAIL_FOOTER + '`;
+        ${EMAIL_FOOTER}`;
       sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
         .catch(err => console.error('Email error (first booking):', err.message));
     }
 
     // Last booking lost, slot still open
-    if (prevCount >= 1 && e.booking_count === 0) {
+    if (prevCount >= 1 && e.booking_count === 0 && isNotifEnabled(member.id || memberId, 'zero_bookings')) {
       const subject = `No more bookings — ${e.feed_id} on ${dateLabel}`;
       const htmlContent = `
         <p>Hi ${member.name},</p>
@@ -297,7 +298,7 @@ function syncFeedToDB(feed, events) {
           <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
         </table>
-        ' + require('./email').EMAIL_FOOTER + '`;
+        ${EMAIL_FOOTER}`;
       sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
         .catch(err => console.error('Email error (zero bookings):', err.message));
     }
@@ -323,8 +324,9 @@ function syncFeedToDB(feed, events) {
         AND start_at > datetime('now')`).all(feed.id, ...currentIds);
       toDelete.forEach(row => {
         if (!row.guide) return;
-        const member = db().prepare('SELECT name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(row.guide, `%${row.guide}%`);
+        const member = db().prepare('SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(row.guide, `%${row.guide}%`);
         if (!member?.email) return;
+        if (!isNotifEnabled(member.id, 'tour_cancelled')) return;
         const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
         const subject = `Tour cancelled — ${row.feed_id} on ${dateLabel}`;
         const htmlContent = `
@@ -335,7 +337,7 @@ function syncFeedToDB(feed, events) {
             <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
             <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
           </table>
-          ' + require('./email').EMAIL_FOOTER + '`;
+          ${EMAIL_FOOTER}`;
         sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
           .catch(err => console.error('Email error (slot cancelled):', err.message));
       });

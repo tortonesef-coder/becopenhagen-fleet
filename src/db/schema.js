@@ -301,6 +301,13 @@ function initSchema() {
       sent_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS notification_prefs (
+      member_id TEXT NOT NULL REFERENCES team_members(id),
+      notification_type TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      PRIMARY KEY (member_id, notification_type)
+    );
+
     CREATE TABLE IF NOT EXISTS guide_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guide_id TEXT NOT NULL REFERENCES team_members(id),
@@ -348,3 +355,9 @@ function initSchema() {
 }
 
 module.exports = { getDb };
+
+// Check if a notification type is enabled for a member (defaults to true if not set)
+module.exports.isNotifEnabled = function(memberId, type) {
+  const row = getDb().prepare('SELECT enabled FROM notification_prefs WHERE member_id=? AND notification_type=?').get(memberId, type);
+  return row === undefined ? true : !!row.enabled;
+};

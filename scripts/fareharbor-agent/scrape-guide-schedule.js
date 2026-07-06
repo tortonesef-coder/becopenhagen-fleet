@@ -17,7 +17,7 @@
 
 const { chromium } = require('playwright');
 const path = require('path');
-const { getDb } = require('../../src/db/schema');
+const { getDb, isNotifEnabled } = require('../../src/db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
 
 const COMPANY_SLUG = 'becopenhagen';
@@ -258,9 +258,9 @@ async function main() {
 
         // Email guide if newly assigned or reassigned
         if ((isNewAssignment || isReassignment) && guide) {
-          const member = db.prepare(`SELECT name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
+          const member = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
             .get(guide, `%${guide}%`);
-          if (member?.email) {
+          if (member?.email && isNotifEnabled(member.id, 'tour_assigned')) {
             const dateLabel = new Date(startDate).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
             const subject = isReassignment
               ? `Tour update — ${item.feed_id} on ${dateLabel}`
