@@ -1885,7 +1885,7 @@ async function renderGuidesMetrics(el) {
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(g.name)}&upcoming=1`).catch(()=>({total_minutes:0})),
       api(`/api/reviews?guide_id=${g.id}&from=${cycleStart}&to=${cycleEnd}`).catch(()=>[]),
     ]);
-    const ratio = worked.count > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.count) * 100) : null;
+    const ratio = worked.total_bookings > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.total_bookings) * 100) : null;
     return { ...g, worked, upcoming, reviews, ratio };
   }));
 
@@ -2697,8 +2697,8 @@ async function renderOverviewTab(el) {
 
   const reviews = allReviews.filter(r => r.guide_id === actor.id && r.review_date >= range.from && r.review_date <= range.to);
   const reviewCount = reviews.length;
-  const tourCount = worked.count;
-  const ratio = tourCount > 0 && reviewCount > 0 ? Math.round((reviewCount / tourCount) * 100) : null;
+  const bookingCount = worked.total_bookings || 0;
+  const ratio = bookingCount > 0 && reviewCount > 0 ? Math.round((reviewCount / bookingCount) * 100) : null;
   const ratioLabel = ratio !== null ? `${ratio}%` : '—';
   const ratioColor = ratio === null ? '' : ratio >= 33 ? 'green' : ratio >= 15 ? 'amber' : 'red';
   const platformColors = {'Google Maps':{bg:'#E8F0FE',fg:'#1A73E8'},'GetYourGuide':{bg:'#FFE8E2',fg:'#CC3D1F'},'Viator':{bg:'#D6F5EC',fg:'#00754A'},'TripAdvisor':{bg:'#D6F5EC',fg:'#00754A'},'Airbnb':{bg:'#FFE2E3',fg:'#D9363E'}};

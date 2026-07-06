@@ -603,10 +603,17 @@ router.get('/guide-hours', (req, res) => {
   rows = rows.filter(r => guideMatches(r.guide, guide));
   const total_minutes = rows.reduce((s, r) => s + (r.duration_minutes || 0), 0);
 
+  // Sum booking_count from tour_availabilities for completed tours in this set
+  const total_bookings = rows.reduce((s, r) => {
+    const ta = db().prepare('SELECT booking_count FROM tour_availabilities WHERE availability_id=?').get(r.availability_id);
+    return s + (ta?.booking_count || 0);
+  }, 0);
+
   res.json({
     total_minutes,
     total_hours: Math.round((total_minutes / 60) * 10) / 10,
     count: rows.length,
+    total_bookings,
     tours: rows.map(r => ({
       availability_id: r.availability_id,
       feed_id: r.feed_id,
