@@ -573,6 +573,7 @@ function showMain() {
   buildTabbar();
   renderTab(state.shopMode ? 'action' : landingTab());
   if (!state.shopMode) checkBorrowedReminder();
+  if (state.actor?.role === 'admin') startNotifPolling();
 }
 
 function buildTabbar() {
@@ -593,7 +594,7 @@ function buildTabbar() {
   const tabs = role==='mechanic'
     ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
-    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()}]
+    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()},{id:'app-admin',label:'App',icon:iconApp()}]
     : role==='guide'
     ? [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}]
     : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}];
@@ -613,7 +614,7 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides','app-admin':'App'};
+  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id==='bikes') await renderBikes(c);
@@ -626,6 +627,7 @@ async function renderTab(id) {
   else if(id==='operations') await renderOperations(c);
   else if(id==='fleet') await renderFleetAdmin(c);
   else if(id==='guides-admin') await renderGuidesAdmin(c);
+  else if(id==='notifs-admin') await renderNotifsAdmin(c);
   else if(id==='app-admin') await renderAppAdmin(c);
 }
 
@@ -1679,6 +1681,7 @@ function iconOperations(){return`<svg viewBox="0 0 24 24" fill="none" stroke="cu
 function iconFleet(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 0 0-1-1h-1V4a1 1 0 0 0-2 0v1H9l3 6h3l1.6-3.2A1 1 0 0 0 15 6z"/><path d="m5.5 17.5 4-8.5"/><path d="M2 17.5h3.5"/><path d="M15 17.5h3.5"/></svg>`;}
 function iconGuides(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;}
 function iconApp(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M8 10h8"/><path d="M8 14h5"/><circle cx="17" cy="17" r="3" fill="currentColor" stroke="none"/><path d="m15.5 17 1 1 2-2" stroke="white" stroke-width="1.5" fill="none"/></svg>`;}
+function iconNotifs(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;}
 function iconGuidesTab(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;}
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-switch-user').addEventListener('click', switchUser);
@@ -1798,10 +1801,95 @@ async function switchOpsTab(tab) {
 async function renderOpsTab() {
   const el = document.getElementById('ops-tab-content');
   if (!el) return;
-  if (window._opsTab === 'tours') await renderTours(el);
+  if (window._opsTab === 'tours') {
+    // Operations shows only the admin's own tours (as a guide)
+    const name = state.actor?.name;
+    const all = await api('/api/ical/tours');
+    const mine = all.filter(t => t.guide && guideMatches(t.guide, name));
+    renderToursList(el, mine, true);
+  }
   else if (window._opsTab === 'rentals') await renderRentals(el);
   else if (window._opsTab === 'bikes') await renderBikes(el);
   else if (window._opsTab === 'tickets') await renderTickets(el);
+}
+
+// ── Admin Notifications tab ───────────────────────────────────────────────
+let _notifPollInterval = null;
+
+function startNotifPolling() {
+  if (_notifPollInterval) return;
+  updateNotifBadge();
+  _notifPollInterval = setInterval(updateNotifBadge, 30000); // every 30s
+}
+
+async function updateNotifBadge() {
+  if (state.actor?.role !== 'admin') return;
+  try {
+    const data = await api('/api/admin-notifs');
+    const count = data.count || 0;
+    // Find or create badge on the Alerts tab button
+    const btn = document.querySelector('[data-tab="notifs-admin"]');
+    if (!btn) return;
+    let badge = btn.querySelector('.notif-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'notif-badge';
+        badge.style.cssText = 'position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:0.6rem;font-weight:700;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center';
+        btn.style.position = 'relative';
+        btn.appendChild(badge);
+      }
+      badge.textContent = count > 99 ? '99+' : count;
+    } else if (badge) {
+      badge.remove();
+    }
+  } catch(e) { /* ignore */ }
+}
+
+async function renderNotifsAdmin(c) {
+  c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let data;
+  try {
+    data = await api('/api/admin-notifs');
+  } catch(e) {
+    c.innerHTML = `<div class="empty-state"><p>Could not load notifications</p></div>`;
+    return;
+  }
+
+  const notifs = data.notifications || [];
+  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨' };
+  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict' };
+
+  c.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0;display:flex;justify-content:space-between;align-items:center">
+      <div class="detail-section-title" style="margin:0">Alerts (${notifs.length})</div>
+      ${notifs.length > 0 ? `<button class="btn btn-secondary" style="font-size:0.78rem;padding:4px 12px" onclick="dismissAllNotifs()">Dismiss all</button>` : ''}
+    </div>
+    ${notifs.length === 0
+      ? '<div class="empty-state"><p>No alerts — all clear ✅</p></div>'
+      : notifs.map(n => `
+        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':'var(--blue)'}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem">
+            <div>
+              <div style="font-size:0.72rem;color:var(--text3);margin-bottom:2px">${typeIcon[n.type]||'🔔'} ${typeLabel[n.type]||n.type} · ${fmtDateFull(n.created_at?.substring(0,10))}</div>
+              <div style="font-size:0.88rem;font-weight:600">${escapeHtml(n.title)}</div>
+              ${n.body ? `<div style="font-size:0.78rem;color:var(--text2);margin-top:2px">${escapeHtml(n.body)}</div>` : ''}
+            </div>
+            <button onclick="dismissNotif(${n.id})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:1rem;padding:0;flex-shrink:0" title="Dismiss">✕</button>
+          </div>
+        </div>`).join('')}
+  `;
+  updateNotifBadge();
+}
+
+async function dismissNotif(id) {
+  await api(`/api/admin-notifs/dismiss/${id}`, { method:'POST' });
+  renderNotifsAdmin(document.getElementById('content'));
+}
+
+async function dismissAllNotifs() {
+  await api('/api/admin-notifs/dismiss-all', { method:'POST' });
+  renderNotifsAdmin(document.getElementById('content'));
 }
 
 // ── Fleet tab (bike management) ───────────────────────────────────────────
@@ -1812,12 +1900,13 @@ async function renderFleetAdmin(c) {
 
 // ── Guides tab (Reviews, Availability, Metrics) ───────────────────────────
 async function renderGuidesAdmin(c) {
-  if (!window._guidesAdminTab) window._guidesAdminTab = 'reviews';
+  if (!window._guidesAdminTab) window._guidesAdminTab = 'tours-all';
   c.innerHTML = `
     <div class="subtab-row">
+      <button class="subtab${window._guidesAdminTab==='tours-all'?' active':''}" onclick="switchGuidesAdminTab('tours-all')">Tours</button>
+      <button class="subtab${window._guidesAdminTab==='guides'?' active':''}" onclick="switchGuidesAdminTab('guides')">Guides</button>
       <button class="subtab${window._guidesAdminTab==='reviews'?' active':''}" onclick="switchGuidesAdminTab('reviews')">Reviews</button>
       <button class="subtab${window._guidesAdminTab==='availability'?' active':''}" onclick="switchGuidesAdminTab('availability')">Availability</button>
-      <button class="subtab${window._guidesAdminTab==='metrics'?' active':''}" onclick="switchGuidesAdminTab('metrics')">Metrics</button>
     </div>
     <div id="guides-admin-content"></div>`;
   await renderGuidesAdminTab();
@@ -1825,7 +1914,7 @@ async function renderGuidesAdmin(c) {
 
 async function switchGuidesAdminTab(tab) {
   window._guidesAdminTab = tab;
-  const labels = {reviews:'Reviews', availability:'Availability', metrics:'Metrics'};
+  const labels = {'tours-all':'Tours', guides:'Guides', reviews:'Reviews', availability:'Availability'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderGuidesAdminTab();
 }
@@ -1833,9 +1922,53 @@ async function switchGuidesAdminTab(tab) {
 async function renderGuidesAdminTab() {
   const el = document.getElementById('guides-admin-content');
   if (!el) return;
-  if (window._guidesAdminTab === 'reviews') await renderAdminReviews(el);
+  if (window._guidesAdminTab === 'tours-all') await renderAllToursView(el);
+  else if (window._guidesAdminTab === 'guides') await renderGuidesMetrics(el);
+  else if (window._guidesAdminTab === 'reviews') await renderAdminReviews(el);
   else if (window._guidesAdminTab === 'availability') await renderAdminAvailability(el);
-  else await renderGuidesMetrics(el);
+}
+
+async function renderAllToursView(el) {
+  el.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  const [tours, team] = await Promise.all([
+    api('/api/ical/tours'),
+    api('/api/team').catch(()=>[]),
+  ]);
+  const guides = [...new Set(tours.map(t => t.guide).filter(Boolean))].sort();
+  const feedIds = [...new Set(tours.map(t => t.feed_id))].sort();
+
+  if (!window._toursFilter) window._toursFilter = { guide: '', feed: '' };
+
+  const filtered = tours.filter(t =>
+    (!window._toursFilter.guide || t.guide === window._toursFilter.guide) &&
+    (!window._toursFilter.feed || t.feed_id === window._toursFilter.feed)
+  );
+
+  el.innerHTML = `
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;padding-top:0.5rem">
+      <select class="form-select" id="filter-guide" style="flex:1;min-width:120px">
+        <option value="">All guides</option>
+        ${guides.map(g => `<option value="${g}" ${window._toursFilter.guide===g?'selected':''}>${g}</option>`).join('')}
+      </select>
+      <select class="form-select" id="filter-feed" style="flex:1;min-width:100px">
+        <option value="">All tours</option>
+        ${feedIds.map(f => `<option value="${f}" ${window._toursFilter.feed===f?'selected':''}>${f}</option>`).join('')}
+      </select>
+    </div>
+    <div id="all-tours-list"></div>
+  `;
+
+  document.getElementById('filter-guide').addEventListener('change', e => {
+    window._toursFilter.guide = e.target.value;
+    renderAllToursView(el);
+  });
+  document.getElementById('filter-feed').addEventListener('change', e => {
+    window._toursFilter.feed = e.target.value;
+    renderAllToursView(el);
+  });
+
+  const listEl = document.getElementById('all-tours-list');
+  renderToursList(listEl, filtered, false);
 }
 
 // ── App tab (Log, Invoicing, Bugs, View as) ───────────────────────────────

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
+const { createNotification } = require('./admin-notifs');
 
 function db() { return getDb(); }
 
@@ -261,7 +262,20 @@ function syncFeedToDB(feed, events) {
       e.booking_count, JSON.stringify(e.bookings), e.url
     );
 
-    // Notify guide on booking count transitions (tours only, future only)
+    // Dismiss unassigned_tour notification if guide is now assigned
+    if (feed.type === 'tour' && e.guide) {
+      db().prepare(`UPDATE admin_notifications SET dismissed=1 WHERE type='unassigned_tour' AND ref_id=? AND dismissed=0`).run(e.uid);
+    }
+
+    // Notify admin if a future tour has no guide assigned
+    if (feed.type === 'tour' && !e.guide && e.booking_count > 0 && e.start_date && e.start_date > new Date().toISOString().substring(0, 10)) {
+      createNotification(
+        'unassigned_tour',
+        `Unassigned tour: ${e.feed_id} on ${e.start_date}`,
+        `${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''} — no guide assigned yet.`,
+        e.uid
+      );
+    }
     if (feed.type !== 'tour' || !guide || !e.start_date || e.start_date < new Date().toISOString().substring(0, 10)) return;
 
     const member = db().prepare('SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(guide, `%${guide}%`);

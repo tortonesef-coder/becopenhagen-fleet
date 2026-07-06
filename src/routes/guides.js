@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const { getDb } = require('../db/schema');
+const { createNotification } = require('./admin-notifs');
 
 function db() { return getDb(); }
 
@@ -189,6 +190,12 @@ router.post('/unavailability', (req, res) => {
   }
 
   const result = db().prepare(`INSERT INTO guide_unavailability (guide_id, from_dt, to_dt, reason) VALUES (?,?,?,?)`).run(guide_id, from_dt, to_dt, reason || null);
+
+  // Notify admins
+  const notifGuideName = guide?.name || guide_id;
+  const label = `${from_dt.substring(0,10)} → ${to_dt.substring(0,10)}`;
+  createNotification('unavailability', `${notifGuideName} is unavailable: ${label}`, reason || null, result.lastInsertRowid);
+
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 
@@ -203,6 +210,7 @@ router.delete('/unavailability/:id', (req, res) => {
   if (role !== 'admin' && row.guide_id !== actor) return res.status(403).json({ error: 'Not authorized' });
 
   db().prepare('DELETE FROM guide_unavailability WHERE id=?').run(req.params.id);
+  db().prepare(`UPDATE admin_notifications SET dismissed=1 WHERE type='unavailability' AND ref_id=? AND dismissed=0`).run(String(req.params.id));
   res.json({ ok: true });
 });
 
