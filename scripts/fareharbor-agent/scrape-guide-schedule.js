@@ -18,6 +18,7 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const { getDb } = require('../../src/db/schema');
+const { sendEmail } = require('../../src/email');
 
 const COMPANY_SLUG = 'becopenhagen';
 const DAYS_AHEAD = 30;
@@ -222,6 +223,11 @@ async function main() {
 
         const durationMinutes = Math.round(item.duration_h * 60) + 30; // + 15min buffer each side
 
+        // Check if this is a new assignment or a guide change
+        const existing = db.prepare(`SELECT guide FROM tour_availabilities WHERE availability_id=?`).get(availabilityId);
+        const isNewAssignment = guide && (!existing || !existing.guide);
+        const isReassignment = guide && existing?.guide && existing.guide !== guide;
+
         // Upsert into tour_availabilities
         db.prepare(`
           INSERT INTO tour_availabilities
@@ -247,6 +253,34 @@ async function main() {
               start_date=excluded.start_date, duration_minutes=excluded.duration_minutes,
               last_synced=excluded.last_synced
           `).run(availabilityId, guide, item.feed_id, item.label, startAt, endAt, startDate, durationMinutes);
+        }
+
+        // Email guide if newly assigned or reassigned
+        if ((isNewAssignment || isReassignment) && guide) {
+          const member = db.prepare(`SELECT name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
+            .get(guide, `%${guide}%`);
+          if (member?.email) {
+            const dateLabel = new Date(startDate).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+            const subject = isReassignment
+              ? `Tour update — ${item.feed_id} on ${dateLabel}`
+              : `New tour assigned — ${item.feed_id} on ${dateLabel}`;
+            const htmlContent = `
+              <p>Hi ${member.name},</p>
+              <p>${isReassignment ? 'Your assignment has been updated:' : 'You have been assigned to a new tour:'}</p>
+              <table style="border-collapse:collapse;margin:0.5rem 0">
+                <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${item.label}</td></tr>
+                <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
+                <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${startTime}${endTime ? ' – ' + endTime : ''}</td></tr>
+                <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${bookingCount} so far</td></tr>
+                ${isReassignment ? `<tr><td style="padding:3px 12px 3px 0;color:#888">Previously</td><td>${existing.guide}</td></tr>` : ''}
+              </table>
+              <p>You can see all your upcoming tours in the app.</p>
+              <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>
+            `;
+            await sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+              .catch(e => console.error(`  Email failed for ${member.name}:`, e.message));
+            console.log(`  📧 Email sent to ${member.name} (${isReassignment ? 'reassignment' : 'new assignment'})`);
+          }
         }
 
         console.log(`  ✓ ${startDate} ${startTime} ${item.feed_id} guide=${guide || 'unassigned'} bookings=${bookingCount}`);
