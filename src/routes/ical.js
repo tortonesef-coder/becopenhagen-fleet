@@ -456,7 +456,7 @@ router.get('/tours', (req, res) => {
   const limit = parseInt(days) || 30;
 
   const sql = `SELECT * FROM tour_availabilities
-    WHERE feed_type='tour' AND end_at >= datetime('now', '-2 hours')
+    WHERE feed_type='tour' AND end_at >= datetime('now', '-90 minutes')
     AND start_at <= datetime('now', '+${limit} days') ORDER BY start_at`;
 
   let rows = db().prepare(sql).all();
@@ -477,10 +477,22 @@ router.get('/tours', (req, res) => {
 });
 
 // GET /api/ical/rentals — upcoming rental bookings
+// Rentals picked up at 09:30. Shop closes at 16:30 CEST (14:30 UTC).
+// After 14:30 UTC, today's rentals are done — show from tomorrow only.
 router.get('/rentals', (req, res) => {
+  const cutoffHourUTC = 14;
+  const cutoffMinUTC = 30;
+  const now = new Date();
+  const pastShopClose = now.getUTCHours() > cutoffHourUTC ||
+    (now.getUTCHours() === cutoffHourUTC && now.getUTCMinutes() >= cutoffMinUTC);
+
+  const startFilter = pastShopClose
+    ? `date('now', '+1 day')`   // tomorrow onwards
+    : `date('now')`;             // today onwards (whole day)
+
   const rows = db().prepare(`
     SELECT * FROM tour_availabilities
-    WHERE feed_type='rental' AND start_at >= datetime('now', '-1 hour')
+    WHERE feed_type='rental' AND start_date >= ${startFilter}
     ORDER BY start_at LIMIT 50
   `).all();
   res.json(rows.map(r => ({
