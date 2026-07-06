@@ -456,8 +456,10 @@ router.get('/tours', (req, res) => {
   const limit = parseInt(days) || 30;
 
   const sql = `SELECT * FROM tour_availabilities
-    WHERE feed_type='tour' AND end_at >= datetime('now', '-90 minutes')
-    AND start_at <= datetime('now', '+${limit} days') ORDER BY start_at`;
+    WHERE feed_type='tour'
+    AND datetime(replace(replace(end_at,'T',' '),'Z','')) >= datetime('now', '-90 minutes')
+    AND datetime(replace(replace(start_at,'T',' '),'Z','')) <= datetime('now', '+${limit} days')
+    ORDER BY start_at`;
 
   let rows = db().prepare(sql).all();
 
@@ -487,8 +489,8 @@ router.get('/rentals', (req, res) => {
     (now.getUTCHours() === cutoffHourUTC && now.getUTCMinutes() >= cutoffMinUTC);
 
   const startFilter = pastShopClose
-    ? `date('now', '+1 day')`   // tomorrow onwards
-    : `date('now')`;             // today onwards (whole day)
+    ? `date('now', '+1 day')`
+    : `date('now')`;
 
   const rows = db().prepare(`
     SELECT * FROM tour_availabilities

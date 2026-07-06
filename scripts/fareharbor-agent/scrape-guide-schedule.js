@@ -218,8 +218,9 @@ async function main() {
         const { guide, bookingCount, startAt, endAt, startDate, startTime, endTime } = details;
         if (!startDate) { console.log(`  Skipping ${availabilityId} — could not parse date`); continue; }
 
-        // Skip slots in the past
-        if (startDate < new Date().toISOString().substring(0, 10)) continue;
+        // Skip slots in the past (use same UTC comparison fix)
+        const endUtc = endAt ? new Date(endAt) : null;
+        if (!startDate || (endUtc && endUtc < new Date())) continue;
 
         const durationMinutes = Math.round(item.duration_h * 60) + 30; // + 15min buffer each side
 
