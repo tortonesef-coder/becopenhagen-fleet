@@ -296,6 +296,11 @@ function initSchema() {
       updated_by TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS tour_reminders (
+      availability_id TEXT PRIMARY KEY,
+      sent_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS guide_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guide_id TEXT NOT NULL REFERENCES team_members(id),

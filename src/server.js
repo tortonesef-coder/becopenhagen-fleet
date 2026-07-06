@@ -91,6 +91,9 @@ getDb();
 // Start iCal polling after DB is ready
 startPolling();
 
+// Start 16h-before tour reminders (runs every hour)
+require('./tour-reminders').startReminders();
+
 app.listen(PORT, () => {
   console.log(`BC Fleet running on port ${PORT}`);
   console.log('OpenAI key:', process.env.OPENAI_API_KEY ? 'SET' : 'MISSING');
