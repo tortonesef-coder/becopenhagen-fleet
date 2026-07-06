@@ -17,7 +17,7 @@
 
 const { chromium } = require('playwright');
 const path = require('path');
-const { getDb, initSchema } = require('../../src/db/schema');
+const { getDb } = require('../../src/db/schema');
 
 const COMPANY_SLUG = 'becopenhagen';
 const DAYS_AHEAD = 60;
@@ -174,7 +174,6 @@ async function main() {
     throw new Error('FAREHARBOR_EMAIL and FAREHARBOR_PASSWORD env vars required');
   }
 
-  initSchema();
   const db = getDb();
 
   const browser = await chromium.launch({ headless: true });
