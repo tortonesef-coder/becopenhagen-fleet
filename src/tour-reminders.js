@@ -95,7 +95,7 @@ async function sendInvoiceReminders() {
     const already = db().prepare(`SELECT value FROM app_settings WHERE key=?`).get(reminderKey);
     if (already) return;
 
-    const guides = db().prepare(`SELECT name, email FROM team_members WHERE active=1 AND role='guide' AND email IS NOT NULL`).all();
+    const guides = db().prepare(`SELECT name, email FROM team_members WHERE active=1 AND role NOT IN ('admin','mechanic') AND email IS NOT NULL`).all();
 
     for (const guide of guides) {
       const subject = `Invoice reminder — send by the 23rd`;
