@@ -2359,31 +2359,49 @@ function renderRentalsList(el, rentals) {
     return;
   }
 
-  const byDate = {};
+  // Flatten: one entry per booking, keeping availability context
+  const allBookings = [];
   rentals.forEach(r => {
-    const d = r.start_date || r.start_at?.substring(0,10);
-    if (!byDate[d]) byDate[d] = [];
-    byDate[d].push(r);
+    const bookings = r.bookings || [];
+    if (bookings.length === 0) return;
+    bookings.forEach(b => {
+      allBookings.push({ ...b, _feed_id: r.feed_id, _start_date: r.start_date, _start_time: r.start_time, _end_time: r.end_time, _avail_id: r.availability_id });
+    });
   });
 
-  el.innerHTML = Object.entries(byDate).map(([date, items]) => `
+  // Group by date
+  const byDate = {};
+  allBookings.forEach(b => {
+    const d = b._start_date;
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(b);
+  });
+
+  const sourceColors = {
+    'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
+    'Viator':       { bg:'#D6F5EC', fg:'#00754A' },
+    'TripAdvisor':  { bg:'#D6F5EC', fg:'#00754A' },
+    'Airbnb':       { bg:'#FFE2E3', fg:'#D9363E' },
+  };
+
+  el.innerHTML = Object.entries(byDate).map(([date, bookings]) => `
     <div class="section-title">${fmtDateFull(date)}</div>
-    ${items.map(r => {
-      const bookings = r.bookings || [];
-      const dayCount = r.feed_id || '';
-      return `<div class="rental-card" onclick="openRentalDetail('${r.availability_id}')">
+    ${bookings.map(b => {
+      const sc = sourceColors[b.source];
+      const sourceBadge = (b.source && b.source !== 'direct' && sc)
+        ? `<span style="font-size:0.68rem;font-weight:700;background:${sc.bg};color:${sc.fg};padding:2px 7px;border-radius:10px">${b.source}</span>`
+        : '';
+      const comment = b.comments ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);line-height:1.45;white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : '';
+      const bikes = b.what ? `<div style="margin-top:0.35rem;font-size:0.82rem;font-weight:600;color:var(--blue)">${escapeHtml(b.what)}</div>` : '';
+      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}')">
         <div class="rental-card-top">
-          <span class="rental-duration-badge">${dayCount}</span>
-          <span class="rental-time">${r.start_time || ''}${r.end_time?' – '+r.end_time:''}</span>
-          <span class="rental-count">${bookings.length} booking${bookings.length!==1?'s':''}</span>
+          <span class="rental-duration-badge">${b._feed_id}</span>
+          <span class="rental-time">${b._start_time || ''}${b._end_time ? ' – ' + b._end_time : ''}</span>
+          ${sourceBadge ? `<span style="margin-left:auto">${sourceBadge}</span>` : ''}
         </div>
-        <div class="rental-customers">
-          ${bookings.map(b=>`
-            <div class="rental-customer-row">
-              <span class="rcr-name">${b.name||'Unknown'}</span>
-              ${b.what ? `<span class="rcr-what">${b.what}</span>` : ''}
-            </div>`).join('')}
-        </div>
+        <div style="font-size:0.97rem;font-weight:700;color:var(--text)">${escapeHtml(b.name || 'Unknown')}</div>
+        ${bikes}
+        ${comment}
       </div>`;
     }).join('')}
   `).join('');
