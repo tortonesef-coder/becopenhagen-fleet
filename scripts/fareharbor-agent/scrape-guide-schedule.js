@@ -18,7 +18,7 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const { getDb } = require('../../src/db/schema');
-const { sendEmail } = require('../../src/email');
+const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
 
 const COMPANY_SLUG = 'becopenhagen';
 const DAYS_AHEAD = 30;
@@ -276,7 +276,7 @@ async function main() {
                 ${isReassignment ? `<tr><td style="padding:3px 12px 3px 0;color:#888">Previously</td><td>${existing.guide}</td></tr>` : ''}
               </table>
               <p>You can see all your upcoming tours in the app.</p>
-              <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>
+              ${EMAIL_FOOTER}
             `;
             await sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
               .catch(e => console.error(`  Email failed for ${member.name}:`, e.message));

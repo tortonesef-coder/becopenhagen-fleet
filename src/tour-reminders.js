@@ -6,7 +6,7 @@
  */
 
 const { getDb } = require('./db/schema');
-const { sendEmail } = require('./email');
+const { sendEmail, EMAIL_FOOTER } = require('./email');
 
 function db() { return getDb(); }
 
@@ -63,7 +63,7 @@ async function sendReminders() {
             ${bookingRows}
           </table>` : ''}
         <p style="margin-top:1rem">See full details in the app.</p>
-        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>
+        ${EMAIL_FOOTER}
       `;
 
       await sendEmail({
@@ -103,7 +103,7 @@ async function sendInvoiceReminders() {
         <p>Hi ${guide.name},</p>
         <p>Just a reminder to send your invoice for <strong>${monthName} ${year}</strong> by the <strong>23rd</strong>.</p>
         <p>You can upload it directly in the app under <strong>Profile → Upload invoice</strong>. Your worked hours for the period are shown there too.</p>
-        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>
+        ${EMAIL_FOOTER}
       `;
       await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent })
         .catch(e => console.error(`Invoice reminder failed for ${guide.name}:`, e.message));

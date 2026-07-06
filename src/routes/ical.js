@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
-const { sendEmail } = require('../email');
+const { sendEmail, EMAIL_FOOTER } = require('../email');
 
 function db() { return getDb(); }
 
@@ -281,7 +281,7 @@ function syncFeedToDB(feed, events) {
           <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${e.booking_count}</td></tr>
         </table>
-        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>`;
+        ' + require('./email').EMAIL_FOOTER + '`;
       sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
         .catch(err => console.error('Email error (first booking):', err.message));
     }
@@ -297,7 +297,7 @@ function syncFeedToDB(feed, events) {
           <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
         </table>
-        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>`;
+        ' + require('./email').EMAIL_FOOTER + '`;
       sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
         .catch(err => console.error('Email error (zero bookings):', err.message));
     }
@@ -335,7 +335,7 @@ function syncFeedToDB(feed, events) {
             <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
             <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
           </table>
-          <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>`;
+          ' + require('./email').EMAIL_FOOTER + '`;
         sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
           .catch(err => console.error('Email error (slot cancelled):', err.message));
       });

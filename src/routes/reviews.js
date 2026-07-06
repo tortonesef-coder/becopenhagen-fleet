@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
-const { sendEmail } = require('../email');
+const { sendEmail, EMAIL_FOOTER } = require('../email');
 
 function db() { return getDb(); }
 
@@ -52,7 +52,7 @@ router.post('/', requireAdmin, async (req, res) => {
       </table>
       ${reviewBlock}
       <p>You can see all your reviews in the app under <strong>Profile</strong>.</p>
-      <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>
+      ' + require('./email').EMAIL_FOOTER + '
     `;
 
     await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent }).catch(e =>
