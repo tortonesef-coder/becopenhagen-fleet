@@ -55,6 +55,10 @@ router.post('/:id/invoices', requireSelfOrAdmin, (req, res) => {
   db().prepare(`INSERT INTO action_log (actor,action,details) VALUES (?,?,?)`)
     .run(actor, 'invoice_upload', JSON.stringify({ guide_id: req.params.id, filename, period_label }));
 
+  // Notify admins
+  const periodStr = period_label ? ` for ${period_label}` : '';
+  createNotification('invoice', `New invoice from ${member.name}${periodStr}`, filename || null, result.lastInsertRowid);
+
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 

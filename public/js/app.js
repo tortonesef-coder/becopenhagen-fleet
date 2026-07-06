@@ -594,7 +594,7 @@ function buildTabbar() {
   const tabs = role==='mechanic'
     ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
-    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()},{id:'app-admin',label:'App',icon:iconApp()}]
+    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
     : role==='guide'
     ? [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}]
     : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}];
@@ -1857,8 +1857,8 @@ async function renderNotifsAdmin(c) {
   }
 
   const notifs = data.notifications || [];
-  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨' };
-  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict' };
+  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾' };
+  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice' };
 
   c.innerHTML = `
     <div class="detail-section" style="border-top:none;padding-top:0;display:flex;justify-content:space-between;align-items:center">
@@ -1868,7 +1868,7 @@ async function renderNotifsAdmin(c) {
     ${notifs.length === 0
       ? '<div class="empty-state"><p>No alerts — all clear ✅</p></div>'
       : notifs.map(n => `
-        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':'var(--blue)'}">
+        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':n.type==='invoice'?'var(--green)':'var(--blue)'}">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem">
             <div>
               <div style="font-size:0.72rem;color:var(--text3);margin-bottom:2px">${typeIcon[n.type]||'🔔'} ${typeLabel[n.type]||n.type} · ${fmtDateFull(n.created_at?.substring(0,10))}</div>
