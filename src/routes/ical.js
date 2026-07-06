@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
+const { sendEmail } = require('../email');
 
 function db() { return getDb(); }
 
@@ -247,6 +248,11 @@ function syncFeedToDB(feed, events) {
   `);
 
   events.forEach(e => {
+    // Check previous state for notification triggers
+    const prev = db().prepare('SELECT booking_count, guide FROM tour_availabilities WHERE availability_id=?').get(e.uid);
+    const prevCount = prev?.booking_count ?? null;
+    const guide = e.guide || prev?.guide;
+
     upsert.run(
       e.uid, feed.id, feed.label, feed.type,
       e.guide, e.start, e.end,
@@ -254,6 +260,47 @@ function syncFeedToDB(feed, events) {
       e.summary, JSON.stringify(e.bikes_needed), e.total_bikes,
       e.booking_count, JSON.stringify(e.bookings), e.url
     );
+
+    // Notify guide on booking count transitions (tours only, future only)
+    if (feed.type !== 'tour' || !guide || !e.start_date || e.start_date < new Date().toISOString().substring(0, 10)) return;
+
+    const member = db().prepare('SELECT name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(guide, `%${guide}%`);
+    if (!member?.email) return;
+
+    const dateLabel = new Date(e.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+    // First booking arrived
+    if (prevCount === 0 && e.booking_count >= 1) {
+      const subject = `First booking — ${e.feed_id} on ${dateLabel}`;
+      const htmlContent = `
+        <p>Hi ${member.name},</p>
+        <p>Your first booking just came in for:</p>
+        <table style="border-collapse:collapse;margin:0.5rem 0">
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${e.feed_label || e.feed_id}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${e.booking_count}</td></tr>
+        </table>
+        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>`;
+      sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+        .catch(err => console.error('Email error (first booking):', err.message));
+    }
+
+    // Last booking lost, slot still open
+    if (prevCount >= 1 && e.booking_count === 0) {
+      const subject = `No more bookings — ${e.feed_id} on ${dateLabel}`;
+      const htmlContent = `
+        <p>Hi ${member.name},</p>
+        <p>All bookings have been cancelled or rebooked for your tour. The slot is still open and may get new bookings.</p>
+        <table style="border-collapse:collapse;margin:0.5rem 0">
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${e.feed_label || e.feed_id}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
+        </table>
+        <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>`;
+      sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+        .catch(err => console.error('Email error (zero bookings):', err.message));
+    }
   });
 
   // Remove old events for this feed that no longer exist.
@@ -268,6 +315,32 @@ function syncFeedToDB(feed, events) {
   const currentIds = events.map(e => e.uid);
   if (currentIds.length > 0) {
     const placeholders = currentIds.map(() => '?').join(',');
+
+    // Before deleting, email any guide assigned to a future slot being removed
+    if (feed.type === 'tour') {
+      const toDelete = db().prepare(`SELECT * FROM tour_availabilities
+        WHERE feed_id=? AND availability_id NOT IN (${placeholders})
+        AND start_at > datetime('now')`).all(feed.id, ...currentIds);
+      toDelete.forEach(row => {
+        if (!row.guide) return;
+        const member = db().prepare('SELECT name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(row.guide, `%${row.guide}%`);
+        if (!member?.email) return;
+        const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+        const subject = `Tour cancelled — ${row.feed_id} on ${dateLabel}`;
+        const htmlContent = `
+          <p>Hi ${member.name},</p>
+          <p>The following tour has been cancelled:</p>
+          <table style="border-collapse:collapse;margin:0.5rem 0">
+            <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${row.feed_label || row.feed_id}</td></tr>
+            <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
+            <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
+          </table>
+          <p style="color:#888;font-size:0.9em">— BeCopenhagen</p>`;
+        sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+          .catch(err => console.error('Email error (slot cancelled):', err.message));
+      });
+    }
+
     db().prepare(`DELETE FROM tour_availabilities
       WHERE feed_id=?
       AND availability_id NOT IN (${placeholders})
