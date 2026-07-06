@@ -181,6 +181,8 @@ function parseIcal(text) {
       else if (blockLower.includes('tripadvisor')) source = 'TripAdvisor';
       else if (blockLower.includes('viator')) source = 'Viator';
       else if (blockLower.includes('airbnb')) source = 'Airbnb';
+      // Airbnb bookings have no email address in the iCal block
+      else if (!emailRaw) source = 'Airbnb';
 
       bookings.push({
         ref, name, phone,
