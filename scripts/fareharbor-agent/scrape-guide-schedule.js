@@ -178,13 +178,26 @@ async function main() {
   }
 
   const db = getDb();
-
   const browser = await chromium.launch({ headless: true });
 
-  try {
-    // Step 1: Login to dashboard once, reuse the page for all detail fetches
-    const { page: dashPage } = await loginToDashboard(browser);
+  // Login once, re-login if session dies
+  let dashContext, dashPage;
+  async function ensureLoggedIn() {
+    try {
+      if (dashPage) await dashPage.locator('body').innerText().catch(() => { throw new Error('dead'); });
+    } catch {
+      console.log('  Re-logging into dashboard...');
+      dashContext = null; dashPage = null;
+    }
+    if (!dashPage) {
+      const result = await loginToDashboard(browser);
+      dashContext = result.context;
+      dashPage = result.page;
+    }
+  }
 
+  try {
+    await ensureLoggedIn();
     let totalUpserted = 0;
 
     for (const item of TOUR_ITEMS) {
@@ -196,9 +209,10 @@ async function main() {
 
       // Step 3: For each, fetch dashboard details
       for (const { availabilityId } of availabilities) {
+        await ensureLoggedIn();
         console.log(`  Fetching details for availability ${availabilityId}...`);
         const details = await fetchAvailabilityDetails(dashPage, item.id, availabilityId);
-        if (!details) continue;
+        if (!details) { dashPage = null; continue; } // force re-login on next iteration
 
         const { guide, bookingCount, startAt, endAt, startDate, startTime, endTime } = details;
         if (!startDate) { console.log(`  Skipping ${availabilityId} — could not parse date`); continue; }
