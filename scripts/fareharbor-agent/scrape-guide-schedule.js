@@ -21,7 +21,6 @@ const { getDb } = require('../../src/db/schema');
 
 const COMPANY_SLUG = 'becopenhagen';
 const DAYS_AHEAD = 30;
-const SKIP_IF_SYNCED_WITHIN_HOURS = 5; // don't re-scrape slots synced less than 5h ago
 
 // Random delay between requests to avoid rate limiting
 const delay = (min, max) => new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
@@ -197,17 +196,6 @@ async function main() {
 
       // Step 3: For each, fetch dashboard details
       for (const { availabilityId } of availabilities) {
-        // Skip if already synced recently
-        const existing = db.prepare(`SELECT last_synced FROM tour_availabilities WHERE availability_id=?`).get(availabilityId);
-        if (existing?.last_synced) {
-          const syncedAt = new Date(existing.last_synced);
-          const hoursAgo = (Date.now() - syncedAt) / 3600000;
-          if (hoursAgo < SKIP_IF_SYNCED_WITHIN_HOURS) {
-            console.log(`  Skipping ${availabilityId} — synced ${hoursAgo.toFixed(1)}h ago`);
-            continue;
-          }
-        }
-
         console.log(`  Fetching details for availability ${availabilityId}...`);
         const details = await fetchAvailabilityDetails(dashPage, item.id, availabilityId);
         if (!details) continue;
