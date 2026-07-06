@@ -558,9 +558,10 @@ async function showShopWhoAreYou() {
 }
 
 function landingTab() {
-  if (state.actor?.role === 'guide') return 'tours';
-  if (state.actor?.role === 'mechanic') return 'tickets';
-  return 'bikes';
+  if (state.actor?.role === 'guide') return 'action';
+  if (state.actor?.role === 'mechanic') return 'action';
+  if (state.actor?.role === 'admin') return 'operations';
+  return 'action';
 }
 
 function showMain() {
@@ -590,12 +591,12 @@ function buildTabbar() {
   const role=state.actor?.role;
   document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
   const tabs = role==='mechanic'
-    ? [{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'profile',label:'Profile',icon:iconProfile()}]
+    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
-    ? [{id:'bikes',label:'Bikes',icon:iconBike()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'admin',label:'Admin',icon:iconAdmin()}]
+    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()}]
     : role==='guide'
-    ? [{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}]
-    : [{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'action',label:'Action',icon:iconAction()},{id:'log',label:'Log',icon:iconLog()}];
+    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}]
+    : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
@@ -612,17 +613,20 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
-  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',admin:'Admin',tours:'Tours',rentals:'Rentals',profile:'Profile'};
+  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides','app-admin':'App'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id==='bikes') await renderBikes(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
   else if(id==='tickets') await renderTickets(c);
-  else if(id==='admin') await renderAdmin(c);
   else if(id==='tours') await renderTours(c);
   else if(id==='rentals') await renderRentals(c);
   else if(id==='profile') await renderProfile(c);
+  else if(id==='operations') await renderOperations(c);
+  else if(id==='fleet') await renderFleetAdmin(c);
+  else if(id==='guides-admin') await renderGuidesAdmin(c);
+  else if(id==='app-admin') await renderAppAdmin(c);
 }
 
 function openMoreMenu() {
@@ -1671,7 +1675,11 @@ function iconAction(){return`<svg viewBox="0 0 24 24" fill="none" stroke="curren
 function iconLog(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;}
 function iconProfile(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;}
 function iconTicket(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;}
-
+function iconOperations(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="6" height="6" rx="1"/><rect x="9" y="3" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="2" y="12" width="6" height="9" rx="1"/><rect x="9" y="12" width="13" height="4" rx="1"/><rect x="9" y="18" width="13" height="3" rx="1"/></svg>`;}
+function iconFleet(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 0 0-1-1h-1V4a1 1 0 0 0-2 0v1H9l3 6h3l1.6-3.2A1 1 0 0 0 15 6z"/><path d="m5.5 17.5 4-8.5"/><path d="M2 17.5h3.5"/><path d="M15 17.5h3.5"/></svg>`;}
+function iconGuides(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;}
+function iconApp(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M8 10h8"/><path d="M8 14h5"/><circle cx="17" cy="17" r="3" fill="currentColor" stroke="none"/><path d="m15.5 17 1 1 2-2" stroke="white" stroke-width="1.5" fill="none"/></svg>`;}
+function iconGuidesTab(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;}
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-switch-user').addEventListener('click', switchUser);
 
@@ -1766,40 +1774,151 @@ async function processVoiceRecording(actionType, mimeType, stream) {
 }
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────
-async function renderAdmin(c) {
-  if (!window._adminTab) window._adminTab = 'bikes';
+// ── Operations tab (Tours, Rentals, Bikes, Tickets, Action sub-tabs) ─────
+async function renderOperations(c) {
+  if (!window._opsTab) window._opsTab = 'tours';
   c.innerHTML = `
     <div class="subtab-row">
-      <button class="subtab${window._adminTab==='bikes'?' active':''}" onclick="switchAdminTab('bikes')">Fleet</button>
-      <button class="subtab${window._adminTab==='log'?' active':''}" onclick="switchAdminTab('log')">Log</button>
-      <button class="subtab${window._adminTab==='reviews'?' active':''}" onclick="switchAdminTab('reviews')">Reviews</button>
-      <button class="subtab${window._adminTab==='availability'?' active':''}" onclick="switchAdminTab('availability')">Availability</button>
-      <button class="subtab${window._adminTab==='invoicing'?' active':''}" onclick="switchAdminTab('invoicing')">Invoicing</button>
-      <button class="subtab${window._adminTab==='bugs'?' active':''}" onclick="switchAdminTab('bugs')">Bugs</button>
-      <button class="subtab${window._adminTab==='viewas'?' active':''}" onclick="switchAdminTab('viewas')">View as</button>
+      <button class="subtab${window._opsTab==='tours'?' active':''}" onclick="switchOpsTab('tours')">Tours</button>
+      <button class="subtab${window._opsTab==='rentals'?' active':''}" onclick="switchOpsTab('rentals')">Rentals</button>
+      <button class="subtab${window._opsTab==='bikes'?' active':''}" onclick="switchOpsTab('bikes')">Bikes</button>
+      <button class="subtab${window._opsTab==='tickets'?' active':''}" onclick="switchOpsTab('tickets')">Tickets</button>
     </div>
-    <div id="admin-tab-content"></div>`;
-  renderAdminTab(c);
+    <div id="ops-tab-content"></div>`;
+  await renderOpsTab();
 }
 
-async function switchAdminTab(tab) {
-  window._adminTab = tab;
-  const labels = {bikes:'Fleet', log:'Log', reviews:'Reviews', availability:'Availability', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+async function switchOpsTab(tab) {
+  window._opsTab = tab;
+  const labels = {tours:'Tours',rentals:'Rentals',bikes:'Bikes',tickets:'Tickets'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
-  renderAdminTab(document.getElementById('content'));
+  await renderOpsTab();
 }
 
-async function renderAdminTab(c) {
-  const el = document.getElementById('admin-tab-content');
+async function renderOpsTab() {
+  const el = document.getElementById('ops-tab-content');
   if (!el) return;
-  if (window._adminTab === 'bikes') await renderAdminBikes(el);
-  else if (window._adminTab === 'viewas') await renderViewAs(el);
-  else if (window._adminTab === 'reviews') await renderAdminReviews(el);
-  else if (window._adminTab === 'availability') await renderAdminAvailability(el);
-  else if (window._adminTab === 'invoicing') await renderAdminInvoicing(el);
-  else if (window._adminTab === 'bugs') await renderBugReports(el);
+  if (window._opsTab === 'tours') await renderTours(el);
+  else if (window._opsTab === 'rentals') await renderRentals(el);
+  else if (window._opsTab === 'bikes') await renderBikes(el);
+  else if (window._opsTab === 'tickets') await renderTickets(el);
+}
+
+// ── Fleet tab (bike management) ───────────────────────────────────────────
+async function renderFleetAdmin(c) {
+  c.innerHTML = `<div id="fleet-admin-content"></div>`;
+  await renderAdminBikes(document.getElementById('fleet-admin-content'));
+}
+
+// ── Guides tab (Reviews, Availability, Metrics) ───────────────────────────
+async function renderGuidesAdmin(c) {
+  if (!window._guidesAdminTab) window._guidesAdminTab = 'reviews';
+  c.innerHTML = `
+    <div class="subtab-row">
+      <button class="subtab${window._guidesAdminTab==='reviews'?' active':''}" onclick="switchGuidesAdminTab('reviews')">Reviews</button>
+      <button class="subtab${window._guidesAdminTab==='availability'?' active':''}" onclick="switchGuidesAdminTab('availability')">Availability</button>
+      <button class="subtab${window._guidesAdminTab==='metrics'?' active':''}" onclick="switchGuidesAdminTab('metrics')">Metrics</button>
+    </div>
+    <div id="guides-admin-content"></div>`;
+  await renderGuidesAdminTab();
+}
+
+async function switchGuidesAdminTab(tab) {
+  window._guidesAdminTab = tab;
+  const labels = {reviews:'Reviews', availability:'Availability', metrics:'Metrics'};
+  document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
+  await renderGuidesAdminTab();
+}
+
+async function renderGuidesAdminTab() {
+  const el = document.getElementById('guides-admin-content');
+  if (!el) return;
+  if (window._guidesAdminTab === 'reviews') await renderAdminReviews(el);
+  else if (window._guidesAdminTab === 'availability') await renderAdminAvailability(el);
+  else await renderGuidesMetrics(el);
+}
+
+// ── App tab (Log, Invoicing, Bugs, View as) ───────────────────────────────
+async function renderAppAdmin(c) {
+  if (!window._appAdminTab) window._appAdminTab = 'log';
+  c.innerHTML = `
+    <div class="subtab-row">
+      <button class="subtab${window._appAdminTab==='log'?' active':''}" onclick="switchAppAdminTab('log')">Log</button>
+      <button class="subtab${window._appAdminTab==='invoicing'?' active':''}" onclick="switchAppAdminTab('invoicing')">Invoicing</button>
+      <button class="subtab${window._appAdminTab==='bugs'?' active':''}" onclick="switchAppAdminTab('bugs')">Bugs</button>
+      <button class="subtab${window._appAdminTab==='viewas'?' active':''}" onclick="switchAppAdminTab('viewas')">View as</button>
+    </div>
+    <div id="app-admin-content"></div>`;
+  await renderAppAdminTab();
+}
+
+async function switchAppAdminTab(tab) {
+  window._appAdminTab = tab;
+  const labels = {log:'Log', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
+  await renderAppAdminTab();
+}
+
+async function renderAppAdminTab() {
+  const el = document.getElementById('app-admin-content');
+  if (!el) return;
+  if (window._appAdminTab === 'invoicing') await renderAdminInvoicing(el);
+  else if (window._appAdminTab === 'bugs') await renderBugReports(el);
+  else if (window._appAdminTab === 'viewas') await renderViewAs(el);
   else await renderAdminLog(el);
 }
+
+// ── Guide metrics ─────────────────────────────────────────────────────────
+async function renderGuidesMetrics(el) {
+  el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  const cycleStart = d >= 23 ? `${y}-${String(m+1).padStart(2,'0')}-23` : `${y}-${String(m).padStart(2,'0')}-23`;
+  const cycleEnd   = d >= 23 ? `${y+( m===11?1:0)}-${String((m+2)%12||12).padStart(2,'0')}-22` : `${y}-${String(m+1).padStart(2,'0')}-22`;
+
+  const team = await api('/api/team').catch(()=>[]);
+  const guides = team.filter(g => g.role === 'guide');
+
+  const data = await Promise.all(guides.map(async g => {
+    const [worked, upcoming, reviews] = await Promise.all([
+      api(`/api/ical/guide-hours?guide=${encodeURIComponent(g.name)}&from=${cycleStart}&to=${cycleEnd}`).catch(()=>({total_minutes:0,count:0})),
+      api(`/api/ical/guide-hours?guide=${encodeURIComponent(g.name)}&upcoming=1`).catch(()=>({total_minutes:0})),
+      api(`/api/reviews?guide_id=${g.id}&from=${cycleStart}&to=${cycleEnd}`).catch(()=>[]),
+    ]);
+    const ratio = worked.count > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.count) * 100) : null;
+    return { ...g, worked, upcoming, reviews, ratio };
+  }));
+
+  el.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Guide metrics — current cycle</div>
+      ${data.map(g => `
+        <div style="padding:0.6rem 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:700;margin-bottom:0.3rem">${g.name}</div>
+          <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);gap:0.35rem">
+            <div class="stat-card" style="padding:0.5rem 0.6rem">
+              <div class="stat-card-num green" style="font-size:1.1rem">${fmtDurationFromMinutes(g.worked.total_minutes)}</div>
+              <div class="stat-card-label">Worked</div>
+            </div>
+            <div class="stat-card" style="padding:0.5rem 0.6rem">
+              <div class="stat-card-num" style="font-size:1.1rem">${fmtDurationFromMinutes(g.upcoming.total_minutes)}</div>
+              <div class="stat-card-label">Upcoming</div>
+            </div>
+            <div class="stat-card" style="padding:0.5rem 0.6rem">
+              <div class="stat-card-num green" style="font-size:1.1rem">${g.reviews.length}</div>
+              <div class="stat-card-label">Reviews</div>
+            </div>
+            <div class="stat-card" style="padding:0.5rem 0.6rem">
+              <div class="stat-card-num ${g.ratio===null?'':g.ratio>=33?'green':g.ratio>=15?'amber':'red'}" style="font-size:1.1rem">${g.ratio !== null ? g.ratio + '%' : '—'}</div>
+              <div class="stat-card-label">Rate</div>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
+}
+
+
 
 async function renderAdminReviews(el) {
   el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
@@ -3058,8 +3177,8 @@ function exitViewAs() {
   const banner = document.getElementById('view-as-banner');
   if (banner) banner.remove();
   buildTabbar();
-  renderTab('admin');
-  window._adminTab = 'viewas';
+  renderTab('app-admin');
+  window._appAdminTab = 'viewas';
 }
 
 // ── Shop mode: ask who did this AFTER the action completes ──────────────
