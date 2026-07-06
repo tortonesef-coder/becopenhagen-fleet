@@ -49,7 +49,7 @@ async function sendReminders() {
       const subject = `Reminder — ${tour.feed_id} tomorrow at ${tour.start_time}`;
       const htmlContent = `
         <p>Hi ${tour.guide_name},</p>
-        <p>You have a tour coming up in about 16 hours:</p>
+        <p>Reminder — you have a tour tomorrow:</p>
         <table style="border-collapse:collapse;margin:0.5rem 0 1rem">
           <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${tour.feed_label || tour.feed_id}</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
