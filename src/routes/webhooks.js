@@ -4,6 +4,30 @@ const { getDb } = require('../db/schema');
 
 function db() { return getDb(); }
 
+// Detect booking source from webhook payload
+function detectSource(booking, contact) {
+  // Check contact email for platform relay addresses
+  const email = (contact.email || '').toLowerCase();
+  if (email.includes('getyourguide') || email.includes('@reply.getyourguide')) return 'GetYourGuide';
+  if (email.includes('tripadvisor') || email.includes('viator')) return 'Viator';
+  if (email.includes('airbnb')) return 'Airbnb';
+
+  // Check affiliate/reseller info in the payload
+  const affiliate = booking.affiliate || booking.channel || booking.reseller || '';
+  const affiliateStr = JSON.stringify(affiliate).toLowerCase();
+  if (affiliateStr.includes('airbnb')) return 'Airbnb';
+  if (affiliateStr.includes('getyourguide')) return 'GetYourGuide';
+  if (affiliateStr.includes('viator') || affiliateStr.includes('tripadvisor')) return 'Viator';
+
+  // Check booking note or any other field
+  const note = (booking.note || '').toLowerCase();
+  if (note.includes('airbnb')) return 'Airbnb';
+  if (note.includes('getyourguide')) return 'GetYourGuide';
+  if (note.includes('viator')) return 'Viator';
+
+  return 'direct';
+}
+
 // Map customer_type singular/plural text to bike type IDs
 // "Adult incl. bike for the tour" -> needs a bike (A)
 // "Adult with own bike" -> does NOT need a bike
@@ -51,6 +75,11 @@ router.post('/fareharbor', express.json({ type: '*/*' }), (req, res) => {
     const ref = String(booking.pk);
     const status = booking.status || 'booked';
     const contact = booking.contact || {};
+
+    // Log keys available on booking for source detection debugging
+    console.log('Webhook booking keys:', Object.keys(booking).join(', '));
+    if (booking.affiliate) console.log('affiliate:', JSON.stringify(booking.affiliate).substring(0, 200));
+    if (booking.channel) console.log('channel:', JSON.stringify(booking.channel).substring(0, 200));
     const availability = booking.availability || {};
     const item = availability.item || {};
     const customers = booking.customers || [];
@@ -143,6 +172,7 @@ router.post('/fareharbor', express.json({ type: '*/*' }), (req, res) => {
         const bookingRecord = {
           ref, name: customerName, phone: customerPhone, email: customerEmail,
           created_at: createdAt, note, what: bikesNeededStr,
+          source: detectSource(booking, contact),
         };
         if (idx >= 0) bookings[idx] = { ...bookings[idx], ...bookingRecord };
         else bookings.push(bookingRecord);
