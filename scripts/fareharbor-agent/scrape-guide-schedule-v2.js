@@ -37,7 +37,12 @@ const TOUR_ITEMS = {
 // Map crew user names to guide names. 'Crew 1' means the real guide name
 // is in the crew note. Guides with their own accounts map directly.
 function resolveGuideName(crewMember) {
-  const userName = crewMember?.user?.name || '';
+  let userName = crewMember?.user?.name || '';
+  // Abbreviated user objects only have a uri like /users/crew1/ — extract username
+  if (!userName && crewMember?.user?.uri) {
+    const m = crewMember.user.uri.match(/\/users\/([^/]+)\//);
+    if (m) userName = m[1];
+  }
   const note = (crewMember?.note || '').trim();
   if (/^crew\s*\d*$/i.test(userName)) {
     return note || null; // generic crew account — real name is the note
@@ -95,7 +100,13 @@ function extractAvailabilities(calendarJson) {
   for (const week of weeks) {
     for (const day of week.days || []) {
       for (const av of day.availabilities || []) {
-        const itemPk = av.item?.pk;
+        // FareHarbor abbreviates repeated objects: item may be {cls, uri} only.
+        // Parse the item pk from the availability URI: /items/709131/availabilities/...
+        let itemPk = av.item?.pk;
+        if (!itemPk) {
+          const m = (av.uri || av.item?.uri || '').match(/\/items\/(\d+)\//);
+          itemPk = m ? parseInt(m[1], 10) : null;
+        }
         if (!TOUR_ITEMS[itemPk]) continue; // skip rentals, gift certs, etc.
 
         // Extract guide from crew members (first Guide-role crew member)
