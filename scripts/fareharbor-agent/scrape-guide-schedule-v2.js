@@ -210,7 +210,10 @@ async function main() {
       // Previous state for notification triggers
       const prev = db.prepare('SELECT guide FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);
       const isNewAssignment = av.guide && (!prev || !prev.guide);
-      const isReassignment = av.guide && prev?.guide && prev.guide !== av.guide;
+      // Use fuzzy matching, not raw string equality — our own extraction fixes
+      // can change how the same person's name is represented (e.g. "federico"
+      // -> "Federico"), which would otherwise look like a false reassignment
+      const isReassignment = av.guide && prev?.guide && !guideMatches(prev.guide, av.guide);
 
       db.prepare(`
         INSERT INTO tour_availabilities
