@@ -19,6 +19,7 @@ const { chromium } = require('playwright');
 const { getDb, isNotifEnabled } = require('../../src/db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
 const { guideMatches } = require('../../src/guide-name-match');
+const { logTourChange } = require('../../src/tour-change-log');
 
 const COMPANY_SLUG = 'becopenhagen';
 
@@ -208,12 +209,16 @@ async function main() {
         : 210;
 
       // Previous state for notification triggers
-      const prev = db.prepare('SELECT guide FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);
+      const prevRow = db.prepare('SELECT guide, booking_count FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);
+      const prev = prevRow; // keep existing variable name usage below
       const isNewAssignment = av.guide && (!prev || !prev.guide);
       // Use fuzzy matching, not raw string equality — our own extraction fixes
       // can change how the same person's name is represented (e.g. "federico"
       // -> "Federico"), which would otherwise look like a false reassignment
       const isReassignment = av.guide && prev?.guide && !guideMatches(prev.guide, av.guide);
+
+      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide, source: 'v2' });
+      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'booking_count', old_value: prev?.booking_count, new_value: av.booking_count, source: 'v2' });
 
       db.prepare(`
         INSERT INTO tour_availabilities
@@ -324,6 +329,7 @@ async function main() {
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
       console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
+      logTourChange(db, { availability_id: row.availability_id, feed_id: row.feed_id, start_date: row.start_date, field: 'status', old_value: 'active', new_value: 'cancelled', source: 'v2' });
 
       if (row.guide) {
         const allMembers = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1`).all();

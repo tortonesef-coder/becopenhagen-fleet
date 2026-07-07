@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
 const { createNotification, resolveNotification } = require('./admin-notifs');
+const { logTourChange } = require('../tour-change-log');
 
 function db() { return getDb(); }
 
@@ -276,6 +277,9 @@ function syncFeedToDB(feed, events) {
     const prev = db().prepare('SELECT booking_count, guide FROM tour_availabilities WHERE availability_id=?').get(e.uid);
     const prevCount = prev?.booking_count ?? null;
     const guide = e.guide || prev?.guide;
+
+    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: e.guide, source: 'ical' });
+    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical' });
 
     upsert.run(
       e.uid, feed.id, feed.label, feed.type,

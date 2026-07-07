@@ -291,6 +291,42 @@ router.get('/sent-emails', (req, res) => {
   res.json(rows);
 });
 
+// POST /api/page-view — lightweight log of tab navigation (best-effort, fire-and-forget)
+router.post('/page-view', (req, res) => {
+  const actor = req.session?.actor || null;
+  const actorName = req.session?.actor_name || null;
+  const { tab } = req.body;
+  if (!tab) return res.status(400).json({ error: 'tab required' });
+  db().prepare(`INSERT INTO page_views (actor, actor_name, tab) VALUES (?,?,?)`).run(actor, actorName, tab);
+  res.json({ ok: true });
+});
+
+// GET /api/page-views — admin audit log of tab navigation
+router.get('/page-views', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const hours = parseInt(req.query.hours, 10);
+  const rows = hours
+    ? db().prepare(`SELECT * FROM page_views WHERE created_at >= datetime('now', ?) ORDER BY created_at DESC LIMIT 1000`).all(`-${hours} hours`)
+    : db().prepare(`SELECT * FROM page_views ORDER BY created_at DESC LIMIT 1000`).all();
+  res.json(rows);
+});
+
+// GET /api/tour-changes — audit log of tour_availabilities changes (guide, bookings, cancellations)
+router.get('/tour-changes', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const { availability_id } = req.query;
+  const hours = parseInt(req.query.hours, 10);
+  let rows;
+  if (availability_id) {
+    rows = db().prepare(`SELECT * FROM tour_change_log WHERE availability_id=? ORDER BY created_at DESC LIMIT 200`).all(availability_id);
+  } else if (hours) {
+    rows = db().prepare(`SELECT * FROM tour_change_log WHERE created_at >= datetime('now', ?) ORDER BY created_at DESC LIMIT 500`).all(`-${hours} hours`);
+  } else {
+    rows = db().prepare(`SELECT * FROM tour_change_log ORDER BY created_at DESC LIMIT 500`).all();
+  }
+  res.json(rows);
+});
+
 // PATCH /api/bug-reports/:id — mark resolved
 router.patch('/bug-reports/:id', (req, res) => {
   const { status } = req.body;

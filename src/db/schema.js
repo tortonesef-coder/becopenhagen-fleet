@@ -339,6 +339,32 @@ function initSchema() {
       sent_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS tour_change_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      availability_id TEXT NOT NULL,
+      feed_id TEXT,
+      start_date TEXT,
+      field TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      source TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS page_views (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor TEXT,
+      actor_name TEXT,
+      tab TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tour_change_log_avail ON tour_change_log(availability_id);
+    CREATE INDEX IF NOT EXISTS idx_tour_change_log_created ON tour_change_log(created_at);
+    CREATE INDEX IF NOT EXISTS idx_page_views_created ON page_views(created_at);
+    CREATE INDEX IF NOT EXISTS idx_page_views_actor ON page_views(actor);
+    CREATE INDEX IF NOT EXISTS idx_emails_sent_created ON emails_sent(sent_at);
+
     CREATE TABLE IF NOT EXISTS guide_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guide_id TEXT NOT NULL REFERENCES team_members(id),

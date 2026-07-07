@@ -53,6 +53,12 @@ async function api(path, opts={}) {
   return r.json();
 }
 
+// Fire-and-forget page view logging — never blocks or throws into the caller
+function logPageView(tab) {
+  if (!tab) return;
+  api('/api/page-view', { method: 'POST', body: { tab } }).catch(() => {});
+}
+
 // ── Toast + Undo ──────────────────────────────────────────────────────────
 function toast(msg, type="") {
   const el = document.getElementById("toast");
@@ -616,6 +622,7 @@ function setActiveTab(id) {
 
 async function renderTab(id) {
   setActiveTab(id);
+  logPageView(id);
   const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
@@ -2071,7 +2078,9 @@ async function renderAppAdmin(c) {
   c.innerHTML = `
     <div class="subtab-row">
       <button class="subtab${window._appAdminTab==='log'?' active':''}" onclick="switchAppAdminTab('log')">Log</button>
+      <button class="subtab${window._appAdminTab==='changes'?' active':''}" onclick="switchAppAdminTab('changes')">Changes</button>
       <button class="subtab${window._appAdminTab==='emails'?' active':''}" onclick="switchAppAdminTab('emails')">Emails</button>
+      <button class="subtab${window._appAdminTab==='visits'?' active':''}" onclick="switchAppAdminTab('visits')">Visits</button>
       <button class="subtab${window._appAdminTab==='invoicing'?' active':''}" onclick="switchAppAdminTab('invoicing')">Invoicing</button>
       <button class="subtab${window._appAdminTab==='bugs'?' active':''}" onclick="switchAppAdminTab('bugs')">Bugs</button>
       <button class="subtab${window._appAdminTab==='viewas'?' active':''}" onclick="switchAppAdminTab('viewas')">View as</button>
@@ -2082,7 +2091,7 @@ async function renderAppAdmin(c) {
 
 async function switchAppAdminTab(tab) {
   window._appAdminTab = tab;
-  const labels = {log:'Log', emails:'Emails', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  const labels = {log:'Log', changes:'Changes', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderAppAdminTab();
 }
@@ -2093,8 +2102,115 @@ async function renderAppAdminTab() {
   if (window._appAdminTab === 'invoicing') await renderAdminInvoicing(el);
   else if (window._appAdminTab === 'bugs') await renderBugReports(el);
   else if (window._appAdminTab === 'emails') await renderSentEmails(el);
+  else if (window._appAdminTab === 'changes') await renderTourChanges(el);
+  else if (window._appAdminTab === 'visits') await renderPageVisits(el);
   else if (window._appAdminTab === 'viewas') await renderViewAs(el);
   else await renderAdminLog(el);
+}
+
+async function renderTourChanges(el) {
+  el.innerHTML = `
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;padding-top:0.5rem">
+      <select class="form-select" id="changes-window-select" style="flex:1">
+        <option value="24">Last 24 hours</option>
+        <option value="1">Last hour</option>
+        <option value="72">Last 3 days</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="tour-changes-list"><div class="empty-state"><p>Loading...</p></div></div>
+  `;
+  document.getElementById('changes-window-select').addEventListener('change', e => loadTourChanges(e.target.value));
+  await loadTourChanges('24');
+}
+
+async function loadTourChanges(hours) {
+  const listEl = document.getElementById('tour-changes-list');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let rows;
+  try {
+    rows = await api(`/api/tour-changes${hours ? '?hours=' + hours : ''}`);
+  } catch(e) {
+    listEl.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+  if (rows.length === 0) {
+    listEl.innerHTML = `<div class="empty-state"><p>No changes in this window</p></div>`;
+    return;
+  }
+  const fieldColor = { guide: 'var(--blue)', booking_count: 'var(--green)', status: 'var(--red)' };
+  listEl.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">${rows.length} change${rows.length!==1?'s':''}</div>
+      ${rows.map(r => `
+        <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+            <span style="font-size:0.8rem;font-weight:700;color:${fieldColor[r.field]||'var(--text)'}">${escapeHtml(r.field)}</span>
+            <span style="font-size:0.72rem;color:var(--text3)">${r.created_at} · ${escapeHtml(r.source||'')}</span>
+          </div>
+          <div style="font-size:0.82rem;color:var(--text2)">
+            ${r.feed_id ? escapeHtml(r.feed_id) + ' · ' : ''}${r.start_date || ''}
+            — <span style="text-decoration:line-through;color:var(--text3)">${escapeHtml(String(r.old_value ?? '∅'))}</span>
+            → <strong>${escapeHtml(String(r.new_value ?? '∅'))}</strong>
+          </div>
+          <div style="font-size:0.7rem;color:var(--text3)">id: ${escapeHtml(r.availability_id)}</div>
+        </div>`).join('')}
+    </div>
+  `;
+}
+
+async function renderPageVisits(el) {
+  el.innerHTML = `
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;padding-top:0.5rem">
+      <select class="form-select" id="visits-window-select" style="flex:1">
+        <option value="24">Last 24 hours</option>
+        <option value="1">Last hour</option>
+        <option value="168">Last 7 days</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="page-visits-list"><div class="empty-state"><p>Loading...</p></div></div>
+  `;
+  document.getElementById('visits-window-select').addEventListener('change', e => loadPageVisits(e.target.value));
+  await loadPageVisits('24');
+}
+
+async function loadPageVisits(hours) {
+  const listEl = document.getElementById('page-visits-list');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let rows;
+  try {
+    rows = await api(`/api/page-views${hours ? '?hours=' + hours : ''}`);
+  } catch(e) {
+    listEl.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+  if (rows.length === 0) {
+    listEl.innerHTML = `<div class="empty-state"><p>No visits in this window</p></div>`;
+    return;
+  }
+  // Group by actor, then by tab, for a quick "who's using what" summary
+  const byActor = {};
+  rows.forEach(r => {
+    const name = r.actor_name || r.actor || 'Unknown';
+    if (!byActor[name]) byActor[name] = {};
+    byActor[name][r.tab] = (byActor[name][r.tab] || 0) + 1;
+  });
+
+  listEl.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">${rows.length} visit${rows.length!==1?'s':''} · by person</div>
+      ${Object.entries(byActor).map(([name, tabs]) => `
+        <div style="margin-bottom:0.6rem">
+          <div style="font-weight:700;font-size:0.88rem;margin-bottom:0.2rem">${escapeHtml(name)}</div>
+          <div style="font-size:0.78rem;color:var(--text2)">
+            ${Object.entries(tabs).sort((a,b)=>b[1]-a[1]).map(([tab,count]) => `${escapeHtml(tab)} (${count})`).join(' · ')}
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
 }
 
 async function renderSentEmails(el) {

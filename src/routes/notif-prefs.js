@@ -45,11 +45,17 @@ router.put('/:type', (req, res) => {
     return res.status(400).json({ error: 'Unknown notification type' });
   }
 
+  const before = db().prepare('SELECT enabled FROM notification_prefs WHERE member_id=? AND notification_type=?').get(actor, type);
+  const oldEnabled = before ? !!before.enabled : true; // default is enabled
+
   db().prepare(`
     INSERT INTO notification_prefs (member_id, notification_type, enabled)
     VALUES (?, ?, ?)
     ON CONFLICT(member_id, notification_type) DO UPDATE SET enabled=excluded.enabled
   `).run(actor, type, enabled ? 1 : 0);
+
+  db().prepare(`INSERT INTO action_log (actor, action, details) VALUES (?,?,?)`)
+    .run(actor, 'notif_pref_toggled', JSON.stringify({ type, old: oldEnabled, new: !!enabled }));
 
   res.json({ ok: true });
 });
