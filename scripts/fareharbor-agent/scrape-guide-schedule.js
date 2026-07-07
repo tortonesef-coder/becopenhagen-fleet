@@ -21,7 +21,8 @@ const { getDb, isNotifEnabled } = require('../../src/db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
 
 const COMPANY_SLUG = 'becopenhagen';
-const DAYS_AHEAD = 30;
+const DAYS_AHEAD = parseInt(process.argv.find(a => a.startsWith('--days='))?.split('=')[1] || '30', 10);
+const FROM_DAY   = parseInt(process.argv.find(a => a.startsWith('--from-day='))?.split('=')[1] || '0', 10);
 
 // Random delay between requests to avoid rate limiting
 const delay = (min, max) => new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
@@ -212,19 +213,29 @@ async function main() {
       console.log(`  ${item.feed_id}: ${avails.length} IDs`);
     }
 
-    // Step 2: Sort by date so we process nearest days first across all tour types
-    // IDs without a date go at the end
-    allAvailabilities.sort((a, b) => {
+    // Filter to the requested day window
+    const now = new Date();
+    const windowStart = new Date(now); windowStart.setDate(now.getDate() + FROM_DAY);
+    const windowEnd   = new Date(now); windowEnd.setDate(now.getDate() + DAYS_AHEAD);
+    const windowStartStr = windowStart.toISOString().substring(0, 10);
+    const windowEndStr   = windowEnd.toISOString().substring(0, 10);
+
+    const filtered = allAvailabilities.filter(a => {
+      if (!a.date) return true; // include undated, let dashboard step decide
+      return a.date >= windowStartStr && a.date <= windowEndStr;
+    });
+
+    // Sort by date so we process nearest days first across all tour types
+    filtered.sort((a, b) => {
       if (!a.date && !b.date) return 0;
       if (!a.date) return 1;
       if (!b.date) return -1;
       return a.date.localeCompare(b.date);
     });
 
-    console.log(`\nTotal: ${allAvailabilities.length} availabilities to check (sorted by date)`);
+    console.log(`\nTotal: ${filtered.length} availabilities in window (day ${FROM_DAY}–${DAYS_AHEAD}), sorted by date`);
 
-    // Step 3: Hit dashboard for each, nearest dates first
-    for (const { availabilityId, item } of allAvailabilities) {
+    for (const { availabilityId, item } of filtered) {
       await ensureLoggedIn();
       console.log(`  Fetching ${item.feed_id} availability ${availabilityId}...`);
       const details = await fetchAvailabilityDetails(dashPage, item.id, availabilityId);
