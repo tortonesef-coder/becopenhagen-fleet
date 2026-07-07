@@ -1777,7 +1777,35 @@ async function processVoiceRecording(actionType, mimeType, stream) {
 }
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────
-// ── Operations tab (Tours, Rentals, Bikes, Tickets, Action sub-tabs) ─────
+// ── Guide name matching (mirror of backend logic in ical.js) ─────────────
+const GUIDE_ALIASES = {
+  'hassan': ['hasse', 'hassesorensen', 'hassesoerensen'],
+  'pam': ['paloma'],
+};
+
+function normalizeName(s) {
+  if (!s) return '';
+  return s.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z]/g, '');
+}
+
+function guideMatches(availGuide, personName) {
+  if (!availGuide || !personName) return false;
+  const a = normalizeName(availGuide);
+  const p = normalizeName(personName);
+  if (!a || !p) return false;
+  if (a === p || a.includes(p) || p.includes(a)) return true;
+  const personAliases = GUIDE_ALIASES[p] || [];
+  if (personAliases.some(alias => a === alias || a.includes(alias) || alias.includes(a))) return true;
+  for (const [canonical, aliases] of Object.entries(GUIDE_ALIASES)) {
+    if (aliases.includes(p) && (a === canonical || a.includes(canonical))) return true;
+    if (aliases.some(al => a.includes(al)) && (p === canonical || p.includes(canonical))) return true;
+  }
+  return false;
+}
+
+// ── Operations tab (Tours, Rentals, Bikes, Tickets sub-tabs) ─────
 async function renderOperations(c) {
   if (!window._opsTab) window._opsTab = 'tours';
   c.innerHTML = `
