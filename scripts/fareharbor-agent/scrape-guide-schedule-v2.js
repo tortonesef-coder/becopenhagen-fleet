@@ -355,9 +355,13 @@ async function main() {
 
       const startTime = hhmm(av.start_at);
       const endTime = hhmm(av.end_at);
+      // Food Tour (F3, F3P) needs 30min prep before and after, not the usual
+      // 15 — everything else keeps the standard 15+15 buffer.
+      const isFoodTour = av.item.feed_id === 'F3' || av.item.feed_id === 'F3P';
+      const buffer = isFoodTour ? 60 : 30;
       const durationMinutes = av.start_at && av.end_at
-        ? Math.round((new Date(av.end_at) - new Date(av.start_at)) / 60000) + 30
-        : 210;
+        ? Math.round((new Date(av.end_at) - new Date(av.start_at)) / 60000) + buffer
+        : (isFoodTour ? 240 : 210);
 
       // Previous state for notification triggers
       const prevRow = db.prepare('SELECT guide, booking_count, total_bikes FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);

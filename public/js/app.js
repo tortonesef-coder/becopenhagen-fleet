@@ -3297,7 +3297,7 @@ async function renderOverviewTab(el) {
     </div>
     <div class="detail-section">
       <div class="detail-section-title">Count worked hours — ${range.label}</div>
-      <div style="font-size:0.78rem;color:var(--text3);margin-bottom:0.5rem">Each tour counts as its scheduled length, plus 15 min before and 15 min after.</div>
+      <div style="font-size:0.78rem;color:var(--text3);margin-bottom:0.5rem">Each tour counts as its scheduled length plus prep time before and after.</div>
       ${worked.tours.length === 0 ? '<div style="font-size:0.85rem;color:var(--text3)">No completed tours in this period</div>' :
         worked.tours.map(t => `<div class="detail-row"><span class="dr-key">${fmtDateFull(t.start_date)} · ${t.feed_id}</span><span class="dr-val">${fmtDurationFromMinutes(t.duration_minutes)}</span></div>`).join('')}
       <div class="detail-row" style="border-top:1px solid var(--border);margin-top:0.4rem;padding-top:0.5rem;font-weight:700">

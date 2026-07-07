@@ -249,12 +249,16 @@ function parseIcal(text) {
 
 // Tour length + 15 min before + 15 min after, in minutes. Used for guide
 // worked-hours calculations.
-function computeBufferedMinutes(startIso, endIso) {
+function computeBufferedMinutes(startIso, endIso, feedId) {
   if (!startIso || !endIso) return 0;
   const start = new Date(startIso);
   const end = new Date(endIso);
   const raw = Math.round((end - start) / 60000);
-  return raw > 0 ? raw + 30 : 0;
+  if (raw <= 0) return 0;
+  // Food Tour (F3, F3P) needs 30min prep before and after, not the usual 15 —
+  // everything else keeps the standard 15+15 buffer.
+  const buffer = (feedId === 'F3' || feedId === 'F3P') ? 60 : 30;
+  return raw + buffer;
 }
 
 // ── DB sync ──────────────────────────────────────────────────────────────
@@ -477,7 +481,7 @@ function syncFeedToDB(feed, events) {
     events.forEach(e => {
       if (!e.guide) return;
       upsertHours.run(e.uid, e.guide, feed.id, feed.label, e.start, e.end, e.start_date,
-        computeBufferedMinutes(e.start, e.end), e.booking_count);
+        computeBufferedMinutes(e.start, e.end, feed.id), e.booking_count);
     });
 
     // Same reschedule/cancel cleanup as above, but this table must NEVER
@@ -617,8 +621,9 @@ router.get('/rentals', (req, res) => {
 
 // GET /api/ical/guide-hours — worked (in a date range) or upcoming hours for a guide.
 // "Worked" only counts tours that have already started, so a reschedule can't
-// retroactively inflate a past period. Duration is tour length + 30 min buffer
-// (15 before, 15 after), computed once at sync time in computeBufferedMinutes.
+// retroactively inflate a past period. Duration is tour length + a prep buffer
+// (15 before/after normally, 30 before/after for the Food Tour), computed
+// once at sync time in computeBufferedMinutes.
 router.get('/guide-hours', (req, res) => {
   const { guide, from, to, upcoming } = req.query;
   if (!guide) return res.status(400).json({ error: 'guide required' });
