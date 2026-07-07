@@ -80,24 +80,47 @@ function parseIcal(text) {
     const localEnd = end ? new Date(end.getTime() + offsetMs) : null;
 
     // Extract guide from LOCATION field
-    // Formats: "Crew 1 (Guide - Andrew)", "Hasse Sørensen (Guide)", ""
+    // Formats: "Crew 1 (Guide - Andrew)", "Hasse Sørensen (Guide)", "Federico Tortonese (Guide - Spanish tour)"
+    //
+    // "Crew N" is a generic placeholder account — when someone books under a
+    // shared "Crew 1" login, the REAL guide's name goes in the trailing
+    // "Guide - X" text instead. But when a guide is assigned under their own
+    // real account (e.g. "Federico Tortonese"), that name IS the guide, and
+    // any trailing "Guide - X" text is something else entirely — a language
+    // tag, a note, anything — never another person's name. Always prefer the
+    // real account name; only fall back to the trailing text for placeholder
+    // accounts.
     let guide = null;
     if (location) {
-      const m1 = location.match(/Guide\s*[-–]\s*([^)]+)\)/i);
-      const m2 = location.match(/^([^(]+)\s*\(Guide\)/i);
-      if (m1) guide = m1[1].trim();
-      else if (m2) guide = m2[1].trim();
-      else if (location.includes('Guide')) guide = location.replace(/\(.*?\)/g,'').trim();
+      const prefixMatch = location.match(/^([^(]+)\s*\(Guide/i);
+      const prefixName = prefixMatch ? prefixMatch[1].trim() : null;
+      const isPlaceholder = prefixName && /^crew\s*\d*$/i.test(prefixName);
+
+      if (prefixName && !isPlaceholder) {
+        guide = prefixName;
+      } else {
+        const noteMatch = location.match(/Guide\s*[-–]\s*([^)]+)\)/i);
+        if (noteMatch) guide = noteMatch[1].trim();
+        else if (prefixName) guide = prefixName;
+        else if (location.includes('Guide')) guide = location.replace(/\(.*?\)/g,'').trim();
+      }
     }
     // Also check description for CREW line
     if (!guide) {
       const cm = description.match(/CREW:\s*\n([^\n]+)/i);
       if (cm) {
         const crew = cm[1].trim();
-        const m1 = crew.match(/Guide\s*[-–]\s*([^)]+)\)/i);
-        const m2 = crew.match(/^([^(]+)\s*\(Guide\)/i);
-        if (m1) guide = m1[1].trim();
-        else if (m2) guide = m2[1].trim();
+        const prefixMatch = crew.match(/^([^(]+)\s*\(Guide/i);
+        const prefixName = prefixMatch ? prefixMatch[1].trim() : null;
+        const isPlaceholder = prefixName && /^crew\s*\d*$/i.test(prefixName);
+
+        if (prefixName && !isPlaceholder) {
+          guide = prefixName;
+        } else {
+          const noteMatch = crew.match(/Guide\s*[-–]\s*([^)]+)\)/i);
+          if (noteMatch) guide = noteMatch[1].trim();
+          else if (prefixName) guide = prefixName;
+        }
       }
     }
 
