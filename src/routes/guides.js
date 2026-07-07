@@ -6,6 +6,7 @@ const { getDb } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
 const { createNotification } = require('./admin-notifs');
 const { guideMatches } = require('../guide-name-match');
+const { getActor } = require('../actor');
 
 function db() { return getDb(); }
 
@@ -17,8 +18,7 @@ function safeFilename(name) {
 }
 
 function requireSelfOrAdmin(req, res, next) {
-  const actor = req.session?.actor;
-  const role = req.session?.actor_role;
+  const { id: actor, role } = getActor(req);
   if (!actor) return res.status(401).json({ error: 'Not logged in' });
   if (role === 'admin' || actor === req.params.id) return next();
   return res.status(403).json({ error: 'Not authorized' });
@@ -184,8 +184,7 @@ router.put('/invoice-instructions', (req, res) => {
 
 // GET /api/guides/unavailability — all periods (admin) or own (guide)
 router.get('/unavailability', (req, res) => {
-  const actor = req.session?.actor;
-  const role = req.session?.actor_role;
+  const { id: actor, role } = getActor(req);
   if (!actor) return res.status(401).json({ error: 'Not logged in' });
 
   const rows = role === 'admin'
@@ -197,8 +196,7 @@ router.get('/unavailability', (req, res) => {
 
 // POST /api/guides/unavailability — add a period (self or admin)
 router.post('/unavailability', (req, res) => {
-  const actor = req.session?.actor;
-  const role = req.session?.actor_role;
+  const { id: actor, role } = getActor(req);
   if (!actor) return res.status(401).json({ error: 'Not logged in' });
 
   const guide_id = role === 'admin' && req.body.guide_id ? req.body.guide_id : actor;
@@ -239,8 +237,7 @@ router.post('/unavailability', (req, res) => {
 
 // DELETE /api/guides/unavailability/:id — remove (self or admin)
 router.delete('/unavailability/:id', (req, res) => {
-  const actor = req.session?.actor;
-  const role = req.session?.actor_role;
+  const { id: actor, role } = getActor(req);
   if (!actor) return res.status(401).json({ error: 'Not logged in' });
 
   const row = db().prepare('SELECT * FROM guide_unavailability WHERE id=?').get(req.params.id);

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
+const { getActor } = require('../actor');
 
 function db() { return getDb(); }
 
@@ -16,7 +17,7 @@ const GUIDE_NOTIF_TYPES = [
 
 // GET /api/notif-prefs — get current user's preferences
 router.get('/', (req, res) => {
-  const actor = req.session?.actor;
+  const { id: actor } = getActor(req);
   if (!actor) return res.status(401).json({ error: 'Not logged in' });
 
   const rows = db().prepare('SELECT notification_type, enabled FROM notification_prefs WHERE member_id=?').all(actor);
@@ -34,7 +35,7 @@ router.get('/', (req, res) => {
 
 // PUT /api/notif-prefs/:type — toggle a single notification type
 router.put('/:type', (req, res) => {
-  const actor = req.session?.actor;
+  const { id: actor } = getActor(req);
   if (!actor) return res.status(401).json({ error: 'Not logged in' });
 
   const { enabled } = req.body;

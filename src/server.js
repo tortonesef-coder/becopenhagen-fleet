@@ -55,25 +55,6 @@ app.use((req, res, next) => {
     req.session.actor_name = 'Shop';
   }
 
-  // "View as" — admins can preview the app as another team member. The real
-  // session stays admin; we only override req.session.actor for this request
-  // if the header is present AND the real logged-in user is an admin.
-  const viewAsId = req.headers['x-view-as'];
-  if (viewAsId && req.session?.actor_role === 'admin') {
-    const { getDb } = require('./db/schema');
-    const target = getDb().prepare('SELECT id, name, role FROM team_members WHERE id=? AND active=1').get(viewAsId);
-    if (target) {
-      req.session = new Proxy(req.session, {
-        get(obj, prop) {
-          if (prop === 'actor') return target.id;
-          if (prop === 'actor_name') return target.name;
-          if (prop === 'actor_role') return target.role;
-          return obj[prop];
-        }
-      });
-    }
-  }
-
   req.actor = req.session?.actor || null;
   next();
 });
