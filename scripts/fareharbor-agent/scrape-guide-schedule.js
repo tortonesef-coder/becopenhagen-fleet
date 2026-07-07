@@ -213,29 +213,21 @@ async function main() {
       console.log(`  ${item.feed_id}: ${avails.length} IDs`);
     }
 
-    // Filter to the requested day window
-    const now = new Date();
-    const windowStart = new Date(now); windowStart.setDate(now.getDate() + FROM_DAY);
-    const windowEnd   = new Date(now); windowEnd.setDate(now.getDate() + DAYS_AHEAD);
-    const windowStartStr = windowStart.toISOString().substring(0, 10);
-    const windowEndStr   = windowEnd.toISOString().substring(0, 10);
-
-    const filtered = allAvailabilities.filter(a => {
-      if (!a.date) return true; // include undated, let dashboard step decide
-      return a.date >= windowStartStr && a.date <= windowEndStr;
-    });
-
-    // Sort by date so we process nearest days first across all tour types
-    filtered.sort((a, b) => {
+    // Sort by date so we process nearest days first (undated go last)
+    allAvailabilities.sort((a, b) => {
       if (!a.date && !b.date) return 0;
       if (!a.date) return 1;
       if (!b.date) return -1;
       return a.date.localeCompare(b.date);
     });
 
-    console.log(`\nTotal: ${filtered.length} availabilities in window (day ${FROM_DAY}–${DAYS_AHEAD}), sorted by date`);
+    console.log(`\nTotal: ${allAvailabilities.length} availabilities to check, will filter to day ${FROM_DAY}–${DAYS_AHEAD}`);
 
-    for (const { availabilityId, item } of filtered) {
+    const now2 = new Date();
+    const windowStartStr = new Date(now2.getTime() + FROM_DAY * 86400000).toISOString().substring(0, 10);
+    const windowEndStr   = new Date(now2.getTime() + DAYS_AHEAD * 86400000).toISOString().substring(0, 10);
+
+    for (const { availabilityId, item } of allAvailabilities) {
       await ensureLoggedIn();
 
       // If we already have this in the DB and it's not in the urgent window (next 3 days),
@@ -258,6 +250,12 @@ async function main() {
 
       const endUtc = endAt ? new Date(endAt) : null;
       if (endUtc && endUtc < new Date()) continue;
+
+      // Apply day window filter using the actual parsed date
+      if (startDate < windowStartStr || startDate > windowEndStr) {
+        console.log(`  Skipping ${availabilityId} — ${startDate} outside window (${windowStartStr} to ${windowEndStr})`);
+        continue;
+      }
 
         const durationMinutes = Math.round(item.duration_h * 60) + 30; // + 15min buffer each side
 
