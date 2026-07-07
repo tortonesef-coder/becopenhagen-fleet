@@ -20,6 +20,7 @@ const { getDb, isNotifEnabled } = require('../../src/db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
 const { guideMatches } = require('../../src/guide-name-match');
 const { logTourChange } = require('../../src/tour-change-log');
+const { createNotification, resolveNotification } = require('../../src/routes/admin-notifs');
 
 const COMPANY_SLUG = 'becopenhagen';
 
@@ -133,6 +134,23 @@ function extractBikesFromResources(av, activeGuideNames) {
   return { bikesNeeded, total };
 }
 
+// Extract which active guide (if any) has a resource-blocking entry for this
+// availability (e.g. "Andrew (L3, L3P, L2P)"). This is a SECOND, independent
+// signal for who's guiding — separate from the crew-assignment signal we
+// already use as the authoritative `guide` field. For now this is only used
+// to detect and flag disagreements between the two, not to set the guide.
+function extractGuideFromResources(av, activeGuideNames) {
+  const matches = [];
+  for (const entry of av.resource_use_summaries || []) {
+    const rawName = entry.resource?.name || '';
+    const baseName = rawName.replace(/\s*\(.*\)\s*$/, '').trim();
+    for (const gn of activeGuideNames) {
+      if (guideMatches(baseName, gn) && !matches.includes(gn)) matches.push(gn);
+    }
+  }
+  return matches;
+}
+
 function extractAvailabilities(calendarJson, activeGuideNames) {
   const out = [];
   const weeks = calendarJson?.calendar?.weeks || [];
@@ -169,6 +187,7 @@ function extractAvailabilities(calendarJson, activeGuideNames) {
         }
 
         const { bikesNeeded, total: totalBikes } = extractBikesFromResources(av, activeGuideNames);
+        const resourceGuides = extractGuideFromResources(av, activeGuideNames);
 
         out.push({
           availability_id: String(av.pk),
@@ -180,6 +199,7 @@ function extractAvailabilities(calendarJson, activeGuideNames) {
           customer_count: av.customer_count ?? 0,
           bikes_needed: bikesNeeded,
           total_bikes: totalBikes,
+          resourceGuides,
           guide,
           _raw: JSON.stringify(av).substring(0, 4000), // capped — full record for forensic logging
         });
@@ -254,6 +274,24 @@ async function main() {
       // can change how the same person's name is represented (e.g. "federico"
       // -> "Federico"), which would otherwise look like a false reassignment
       const isReassignment = av.guide && prev?.guide && !guideMatches(prev.guide, av.guide);
+
+      // Cross-check: does the resource-blocking assignment agree with the
+      // crew-based guide assignment? Validation only — crew-based stays
+      // authoritative for now, this just surfaces disagreements for review.
+      if (av.resourceGuides.length > 0) {
+        const agrees = av.guide && av.resourceGuides.some(rg => guideMatches(av.guide, rg));
+        if (!agrees) {
+          const dateLabel = new Date(av.start_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+          createNotification(
+            'guide_mismatch',
+            `Guide mismatch — ${av.item.feed_id} on ${dateLabel}`,
+            `Crew assignment says "${av.guide || 'nobody'}", but resource blocking says "${av.resourceGuides.join(', ')}".`,
+            av.availability_id + '-guidecheck'
+          );
+        } else {
+          resolveNotification('guide_mismatch', av.availability_id + '-guidecheck');
+        }
+      }
 
       logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide, source: 'v2', raw_data: av._raw });
       logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'booking_count', old_value: prev?.booking_count, new_value: av.booking_count, source: 'v2', raw_data: av._raw });
