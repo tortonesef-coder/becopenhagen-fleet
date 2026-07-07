@@ -414,13 +414,13 @@ async function main() {
       if (av.guide && !isZeroBookingPrivate) {
         db.prepare(`
           INSERT INTO guide_tour_hours
-            (availability_id, guide, feed_id, feed_label, start_at, end_at, start_date, duration_minutes, last_synced)
-          VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+            (availability_id, guide, feed_id, feed_label, start_at, end_at, start_date, duration_minutes, booking_count, last_synced)
+          VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
           ON CONFLICT(availability_id) DO UPDATE SET
             guide=excluded.guide, start_at=excluded.start_at, end_at=excluded.end_at,
             start_date=excluded.start_date, duration_minutes=excluded.duration_minutes,
-            last_synced=excluded.last_synced
-        `).run(av.availability_id, av.guide, av.item.feed_id, av.item.label, av.start_at, av.end_at, av.start_date, durationMinutes);
+            booking_count=excluded.booking_count, last_synced=excluded.last_synced
+        `).run(av.availability_id, av.guide, av.item.feed_id, av.item.label, av.start_at, av.end_at, av.start_date, durationMinutes, av.booking_count);
       }
 
       // Collect assignment for batched digest email (sent once per guide at the end)

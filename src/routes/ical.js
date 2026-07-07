@@ -452,17 +452,17 @@ function syncFeedToDB(feed, events) {
   if (feed.type === 'tour') {
     const upsertHours = db().prepare(`
       INSERT INTO guide_tour_hours
-        (availability_id, guide, feed_id, feed_label, start_at, end_at, start_date, duration_minutes, last_synced)
-      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+        (availability_id, guide, feed_id, feed_label, start_at, end_at, start_date, duration_minutes, booking_count, last_synced)
+      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
       ON CONFLICT(availability_id) DO UPDATE SET
         guide=excluded.guide, feed_id=excluded.feed_id, feed_label=excluded.feed_label,
         start_at=excluded.start_at, end_at=excluded.end_at, start_date=excluded.start_date,
-        duration_minutes=excluded.duration_minutes, last_synced=excluded.last_synced
+        duration_minutes=excluded.duration_minutes, booking_count=excluded.booking_count, last_synced=excluded.last_synced
     `);
     events.forEach(e => {
       if (!e.guide) return;
       upsertHours.run(e.uid, e.guide, feed.id, feed.label, e.start, e.end, e.start_date,
-        computeBufferedMinutes(e.start, e.end));
+        computeBufferedMinutes(e.start, e.end), e.booking_count);
     });
 
     // Same reschedule/cancel cleanup as above, but this table must NEVER
@@ -624,11 +624,10 @@ router.get('/guide-hours', (req, res) => {
   rows = rows.filter(r => guideMatches(r.guide, guide));
   const total_minutes = rows.reduce((s, r) => s + (r.duration_minutes || 0), 0);
 
-  // Sum booking_count from tour_availabilities for completed tours in this set
-  const total_bookings = rows.reduce((s, r) => {
-    const ta = db().prepare('SELECT booking_count FROM tour_availabilities WHERE availability_id=?').get(r.availability_id);
-    return s + (ta?.booking_count || 0);
-  }, 0);
+  // booking_count is stored directly on guide_tour_hours at sync time —
+  // tour_availabilities is a rolling cache that gets purged, so we can't
+  // rely on it still having a row for older tours
+  const total_bookings = rows.reduce((s, r) => s + (r.booking_count || 0), 0);
 
   res.json({
     total_minutes,

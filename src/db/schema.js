@@ -274,6 +274,7 @@ function initSchema() {
       end_at TEXT,
       start_date TEXT,
       duration_minutes INTEGER DEFAULT 0,
+      booking_count INTEGER DEFAULT 0,
       last_synced TEXT
     );
 
@@ -424,6 +425,9 @@ function initSchema() {
 
   const changeCols = db.prepare("PRAGMA table_info(tour_change_log)").all().map(c => c.name);
   if (!changeCols.includes('raw_data')) db.exec("ALTER TABLE tour_change_log ADD COLUMN raw_data TEXT");
+
+  const gthCols = db.prepare("PRAGMA table_info(guide_tour_hours)").all().map(c => c.name);
+  if (!gthCols.includes('booking_count')) db.exec("ALTER TABLE guide_tour_hours ADD COLUMN booking_count INTEGER DEFAULT 0");
 }
 
 module.exports = { getDb };
