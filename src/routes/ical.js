@@ -268,19 +268,23 @@ function syncFeedToDB(feed, events) {
     ON CONFLICT(availability_id) DO UPDATE SET
       guide=excluded.guide, start_at=excluded.start_at, end_at=excluded.end_at,
       start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
-      bikes_needed=excluded.bikes_needed, total_bikes=excluded.total_bikes,
+      bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN excluded.bikes_needed ELSE bikes_needed END,
+      total_bikes=CASE WHEN excluded.total_bikes > 0 THEN excluded.total_bikes ELSE total_bikes END,
       booking_count=excluded.booking_count, bookings_json=excluded.bookings_json,
       last_synced=excluded.last_synced, summary=excluded.summary
   `);
 
   events.forEach(e => {
     // Check previous state for notification triggers
-    const prev = db().prepare('SELECT booking_count, guide FROM tour_availabilities WHERE availability_id=?').get(e.uid);
+    const prev = db().prepare('SELECT booking_count, guide, total_bikes FROM tour_availabilities WHERE availability_id=?').get(e.uid);
     const prevCount = prev?.booking_count ?? null;
     const guide = e.guide || prev?.guide;
 
     logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: e.guide, source: 'ical', raw_data: e._rawBlock });
     logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical', raw_data: e._rawBlock });
+    if (e.total_bikes > 0) {
+      logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'total_bikes', old_value: prev?.total_bikes, new_value: e.total_bikes, source: 'ical', raw_data: e._rawBlock });
+    }
 
     upsert.run(
       e.uid, feed.id, feed.label, feed.type,

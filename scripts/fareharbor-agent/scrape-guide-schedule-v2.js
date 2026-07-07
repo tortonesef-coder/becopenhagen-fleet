@@ -101,7 +101,39 @@ async function fetchMonth(page, year, month) {
   return results;
 }
 
-function extractAvailabilities(calendarJson) {
+// Map a resource name (from resource_use_summaries) to a bike category.
+// Falls back to 'A' (adult bike) for generic/pooled resources like
+// "Guided Tour Bikes" where FareHarbor doesn't track a finer breakdown.
+function categorizeBikeResource(name) {
+  const n = (name || '').toLowerCase();
+  if (/electric|e-bike/.test(n)) return 'E';
+  if (/toddler/.test(n)) return 'AT';
+  if (/child.*seat|\+.*child/.test(n)) return 'AC';
+  if (/kid|child/.test(n)) return 'B';
+  return 'A';
+}
+
+// Extract real bike counts from resource_use_summaries, excluding
+// guide-blocking resources (named "GuideName (feed, codes)" — these exist
+// purely to prevent double-booking a guide, they aren't bikes).
+function extractBikesFromResources(av, activeGuideNames) {
+  const bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0 };
+  let total = 0;
+  for (const entry of av.resource_use_summaries || []) {
+    const rawName = entry.resource?.name || '';
+    const baseName = rawName.replace(/\s*\(.*\)\s*$/, '').trim();
+    const isGuideResource = activeGuideNames.some(gn => guideMatches(baseName, gn));
+    if (isGuideResource) continue;
+    const count = entry.total_use_count || 0;
+    if (count <= 0) continue;
+    const cat = categorizeBikeResource(rawName);
+    bikesNeeded[cat] += count;
+    total += count;
+  }
+  return { bikesNeeded, total };
+}
+
+function extractAvailabilities(calendarJson, activeGuideNames) {
   const out = [];
   const weeks = calendarJson?.calendar?.weeks || [];
   for (const week of weeks) {
@@ -136,6 +168,8 @@ function extractAvailabilities(calendarJson) {
           if (guide) break;
         }
 
+        const { bikesNeeded, total: totalBikes } = extractBikesFromResources(av, activeGuideNames);
+
         out.push({
           availability_id: String(av.pk),
           item: TOUR_ITEMS[itemPk],
@@ -144,6 +178,8 @@ function extractAvailabilities(calendarJson) {
           start_date: day.at,
           booking_count: av.booking_count ?? 0,
           customer_count: av.customer_count ?? 0,
+          bikes_needed: bikesNeeded,
+          total_bikes: totalBikes,
           guide,
           _raw: JSON.stringify(av).substring(0, 4000), // capped — full record for forensic logging
         });
@@ -166,6 +202,7 @@ async function main() {
   }
 
   const db = getDb();
+  const activeGuideNames = db.prepare(`SELECT name FROM team_members WHERE active=1`).all().map(r => r.name);
   const browser = await chromium.launch({ headless: true });
 
   try {
@@ -185,7 +222,7 @@ async function main() {
       const jsonResponses = await fetchMonth(page, y, m);
       let monthCount = 0;
       for (const json of jsonResponses) {
-        const avs = extractAvailabilities(json);
+        const avs = extractAvailabilities(json, activeGuideNames);
         monthCount += avs.length;
         all = all.concat(avs);
       }
@@ -210,7 +247,7 @@ async function main() {
         : 210;
 
       // Previous state for notification triggers
-      const prevRow = db.prepare('SELECT guide, booking_count FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);
+      const prevRow = db.prepare('SELECT guide, booking_count, total_bikes FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);
       const prev = prevRow; // keep existing variable name usage below
       const isNewAssignment = av.guide && (!prev || !prev.guide);
       // Use fuzzy matching, not raw string equality — our own extraction fixes
@@ -220,19 +257,25 @@ async function main() {
 
       logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide, source: 'v2', raw_data: av._raw });
       logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'booking_count', old_value: prev?.booking_count, new_value: av.booking_count, source: 'v2', raw_data: av._raw });
+      if (av.total_bikes > 0) {
+        logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'total_bikes', old_value: prev?.total_bikes, new_value: av.total_bikes, source: 'v2', raw_data: av._raw });
+      }
 
       db.prepare(`
         INSERT INTO tour_availabilities
           (availability_id, feed_id, feed_label, feed_type, guide, start_at, end_at,
-           start_date, start_time, end_time, booking_count, last_synced)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+           start_date, start_time, end_time, booking_count, bikes_needed, total_bikes, last_synced)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
         ON CONFLICT(availability_id) DO UPDATE SET
           guide=excluded.guide,
           start_at=excluded.start_at, end_at=excluded.end_at,
           start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
-          booking_count=excluded.booking_count, last_synced=excluded.last_synced
+          booking_count=excluded.booking_count, last_synced=excluded.last_synced,
+          bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN excluded.bikes_needed ELSE bikes_needed END,
+          total_bikes=CASE WHEN excluded.total_bikes > 0 THEN excluded.total_bikes ELSE total_bikes END
       `).run(av.availability_id, av.item.feed_id, av.item.label, 'tour',
-             av.guide, av.start_at, av.end_at, av.start_date, startTime, endTime, av.booking_count);
+             av.guide, av.start_at, av.end_at, av.start_date, startTime, endTime, av.booking_count,
+             JSON.stringify(av.bikes_needed), av.total_bikes);
 
       if (av.guide) {
         db.prepare(`
