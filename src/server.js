@@ -32,6 +32,20 @@ app.use(session({
   cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
 }));
 
+// Serve index.html with cache-busting version stamp (git commit hash)
+const { execSync } = require('child_process');
+let APP_VERSION = 'dev';
+try { APP_VERSION = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch(e) {}
+
+const indexHtml = require('fs').readFileSync(require('path').join(__dirname, '../public/index.html'), 'utf8');
+const indexHtmlVersioned = indexHtml.replace(/__VERSION__/g, APP_VERSION);
+
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.send(indexHtmlVersioned);
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.use((req, res, next) => {
