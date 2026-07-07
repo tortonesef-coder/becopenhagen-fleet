@@ -7,7 +7,7 @@ const nodemailer = require('nodemailer');
 const EMAIL_FOOTER = `
   <p style="margin-top:1.5rem;padding-top:0.75rem;border-top:1px solid #eee;color:#aaa;font-size:0.8em">
     This is an automated email — please do not reply.<br>
-    For questions, contact Paloma (+45 25 30 33 30) or Federico.
+    For questions, contact Paloma (+45 25 30 33 30) or Federico (+45 93 89 38 79).
   </p>
 `;
 
