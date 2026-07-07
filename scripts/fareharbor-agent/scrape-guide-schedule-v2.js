@@ -127,8 +127,8 @@ function extractAvailabilities(calendarJson) {
         out.push({
           availability_id: String(av.pk),
           item: TOUR_ITEMS[itemPk],
-          start_at: av.utc_start_at || av.start_at,
-          end_at: av.utc_end_at || av.end_at,
+          start_at: av.utc_start_at ? new Date(av.utc_start_at).toISOString() : av.start_at,
+          end_at: av.utc_end_at ? new Date(av.utc_end_at).toISOString() : av.end_at,
           start_date: day.at,
           booking_count: av.booking_count ?? 0,
           customer_count: av.customer_count ?? 0,
