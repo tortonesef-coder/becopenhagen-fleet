@@ -2081,6 +2081,7 @@ async function renderAppAdmin(c) {
     <div class="subtab-row">
       <button class="subtab${window._appAdminTab==='log'?' active':''}" onclick="switchAppAdminTab('log')">Log</button>
       <button class="subtab${window._appAdminTab==='changes'?' active':''}" onclick="switchAppAdminTab('changes')">Changes</button>
+      <button class="subtab${window._appAdminTab==='bookings-history'?' active':''}" onclick="switchAppAdminTab('bookings-history')">Bookings</button>
       <button class="subtab${window._appAdminTab==='webhooks'?' active':''}" onclick="switchAppAdminTab('webhooks')">Webhooks</button>
       <button class="subtab${window._appAdminTab==='emails'?' active':''}" onclick="switchAppAdminTab('emails')">Emails</button>
       <button class="subtab${window._appAdminTab==='visits'?' active':''}" onclick="switchAppAdminTab('visits')">Visits</button>
@@ -2095,7 +2096,7 @@ async function renderAppAdmin(c) {
 async function switchAppAdminTab(tab) {
   window._appAdminTab = tab;
   logPageView(`app-admin.${tab}`);
-  const labels = {log:'Log', changes:'Changes', webhooks:'Webhooks', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  const labels = {log:'Log', changes:'Changes', 'bookings-history':'Bookings', webhooks:'Webhooks', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderAppAdminTab();
 }
@@ -2104,6 +2105,7 @@ async function renderAppAdminTab() {
   const el = document.getElementById('app-admin-content');
   if (!el) return;
   if (window._appAdminTab === 'invoicing') await renderAdminInvoicing(el);
+  else if (window._appAdminTab === 'bookings-history') await renderBookingsHistory(el);
   else if (window._appAdminTab === 'bugs') await renderBugReports(el);
   else if (window._appAdminTab === 'emails') await renderSentEmails(el);
   else if (window._appAdminTab === 'changes') await renderTourChanges(el);
@@ -2111,6 +2113,86 @@ async function renderAppAdminTab() {
   else if (window._appAdminTab === 'visits') await renderPageVisits(el);
   else if (window._appAdminTab === 'viewas') await renderViewAs(el);
   else await renderAdminLog(el);
+}
+
+async function renderBookingsHistory(el) {
+  el.innerHTML = `
+    <div style="padding-top:0.5rem;margin-bottom:0.75rem">
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+        <select class="form-select" id="bh-mode" style="flex:1">
+          <option value="days_ago">Bookings made exactly N days ago</option>
+          <option value="date">Bookings made on a specific date</option>
+          <option value="range">Bookings made in a date range</option>
+          <option value="recent">Most recent bookings</option>
+        </select>
+      </div>
+      <div id="bh-inputs" style="display:flex;gap:0.5rem"></div>
+    </div>
+    <div id="bookings-history-list"><div class="empty-state"><p>Choose a query above</p></div></div>
+  `;
+  const modeSelect = document.getElementById('bh-mode');
+  modeSelect.addEventListener('change', renderBhInputs);
+  renderBhInputs();
+
+  function renderBhInputs() {
+    const mode = modeSelect.value;
+    const inputsEl = document.getElementById('bh-inputs');
+    if (mode === 'days_ago') {
+      inputsEl.innerHTML = `
+        <input class="form-input" type="number" id="bh-days-ago" placeholder="e.g. 22" style="flex:1" value="22">
+        <button class="btn btn-primary" id="bh-run">Run</button>`;
+    } else if (mode === 'date') {
+      inputsEl.innerHTML = `
+        <input class="form-input" type="date" id="bh-date" style="flex:1">
+        <button class="btn btn-primary" id="bh-run">Run</button>`;
+    } else if (mode === 'range') {
+      inputsEl.innerHTML = `
+        <input class="form-input" type="date" id="bh-from" style="flex:1">
+        <input class="form-input" type="date" id="bh-to" style="flex:1">
+        <button class="btn btn-primary" id="bh-run">Run</button>`;
+    } else {
+      inputsEl.innerHTML = `<button class="btn btn-primary" id="bh-run" style="width:100%">Run</button>`;
+    }
+    document.getElementById('bh-run').addEventListener('click', runBhQuery);
+  }
+
+  async function runBhQuery() {
+    const mode = modeSelect.value;
+    const listEl = document.getElementById('bookings-history-list');
+    listEl.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+
+    let qs = '';
+    if (mode === 'days_ago') qs = `?days_ago=${document.getElementById('bh-days-ago').value}`;
+    else if (mode === 'date') qs = `?date=${document.getElementById('bh-date').value}`;
+    else if (mode === 'range') qs = `?from=${document.getElementById('bh-from').value}&to=${document.getElementById('bh-to').value}`;
+
+    let data;
+    try {
+      data = await api(`/api/ical/bookings-history${qs}`);
+    } catch(e) {
+      listEl.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+      return;
+    }
+
+    if (data.count === 0) {
+      listEl.innerHTML = `<div class="empty-state"><p>No bookings found</p></div>`;
+      return;
+    }
+
+    listEl.innerHTML = `
+      <div class="detail-section" style="border-top:none;padding-top:0">
+        <div class="detail-section-title">${data.count} booking${data.count!==1?'s':''}</div>
+        ${data.bookings.map(b => `
+          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+              <span style="font-size:0.85rem;font-weight:700">${escapeHtml(b.customer_name || 'Unknown')}</span>
+              <span style="font-size:0.72rem;color:var(--text3)">${b.booking_created_at || ''}</span>
+            </div>
+            <div style="font-size:0.78rem;color:var(--text2)">${escapeHtml(b.feed_id || '')} · tour on ${b.tour_start_date || '?'} · ${escapeHtml(b.source || 'direct')}${b.total ? ' · ' + escapeHtml(b.total) : ''}</div>
+          </div>`).join('')}
+      </div>
+    `;
+  }
 }
 
 async function renderTourChanges(el) {

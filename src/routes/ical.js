@@ -294,6 +294,21 @@ function syncFeedToDB(feed, events) {
       e.booking_count, JSON.stringify(e.bookings), e.url
     );
 
+    // Permanent bookings ledger — tour_availabilities/bookings_json is a
+    // rolling cache (gets purged), so this is the only place we can answer
+    // "how many bookings were made on day X" later. Never deleted.
+    (e.bookings || []).forEach(b => {
+      if (!b.ref) return;
+      db().prepare(`
+        INSERT INTO bookings (ref, availability_id, feed_id, feed_type, tour_start_date, customer_name, customer_email, customer_phone, source, total, booking_created_at, last_seen_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+        ON CONFLICT(ref) DO UPDATE SET
+          availability_id=excluded.availability_id, tour_start_date=excluded.tour_start_date,
+          customer_name=excluded.customer_name, source=excluded.source, total=excluded.total,
+          last_seen_at=excluded.last_seen_at
+      `).run(b.ref, e.uid, feed.id, feed.type, e.start_date, b.name || null, b.email || null, b.phone || null, b.source || null, b.total || null, b.created_at || null);
+    });
+
     // Resolve unassigned_tour notifications if guide is now assigned
     // (distinct from a manual dismiss — this allows the alert to fire again
     // if the guide is later removed)
@@ -658,6 +673,30 @@ router.get('/debug', (req, res) => {
 router.post('/sync', async (req, res) => {
   res.json({ ok: true, message: 'Sync started' });
   await syncAllFeeds();
+});
+
+// GET /api/ical/bookings-history — query the permanent bookings ledger.
+// ?date=YYYY-MM-DD — bookings CREATED on that exact date
+// ?days_ago=22 — bookings created exactly N days ago
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD — bookings created in a range
+// No params — most recent 200 bookings
+router.get('/bookings-history', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const { date, days_ago, from, to } = req.query;
+
+  let rows;
+  if (days_ago !== undefined) {
+    const target = new Date(Date.now() - parseInt(days_ago, 10) * 86400000).toISOString().substring(0, 10);
+    rows = db().prepare(`SELECT * FROM bookings WHERE date(booking_created_at) = ? ORDER BY booking_created_at`).all(target);
+  } else if (date) {
+    rows = db().prepare(`SELECT * FROM bookings WHERE date(booking_created_at) = ? ORDER BY booking_created_at`).all(date);
+  } else if (from && to) {
+    rows = db().prepare(`SELECT * FROM bookings WHERE date(booking_created_at) BETWEEN ? AND ? ORDER BY booking_created_at`).all(from, to);
+  } else {
+    rows = db().prepare(`SELECT * FROM bookings ORDER BY booking_created_at DESC LIMIT 200`).all();
+  }
+
+  res.json({ count: rows.length, bookings: rows });
 });
 
 module.exports = { router, startPolling };

@@ -360,6 +360,25 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS bookings (
+      ref TEXT PRIMARY KEY,
+      availability_id TEXT,
+      feed_id TEXT,
+      feed_type TEXT,
+      tour_start_date TEXT,
+      customer_name TEXT,
+      customer_email TEXT,
+      customer_phone TEXT,
+      source TEXT,
+      total TEXT,
+      booking_created_at TEXT,
+      first_seen_at TEXT DEFAULT (datetime('now')),
+      last_seen_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bookings_created ON bookings(booking_created_at);
+    CREATE INDEX IF NOT EXISTS idx_bookings_tour_date ON bookings(tour_start_date);
+
     CREATE TABLE IF NOT EXISTS page_views (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor TEXT,
