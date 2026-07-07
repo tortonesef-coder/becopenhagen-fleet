@@ -247,7 +247,19 @@ function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds,
           if (guide) break;
         }
 
-        const { bikesNeeded, total: totalBikes } = extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId);
+        // Only trust resource-based bike counts for PRIVATE tours (feed_id
+        // ending in 'P'). We confirmed "Guided Tour Bikes" gives clean
+        // integers there. For GROUP tours, some shared/pooled resources
+        // (e.g. "Electric Cargo Bike") report fractional total_use_count —
+        // looks like a prorated utilization split across overlapping
+        // bookings, not a literal per-booking count. Rather than risk
+        // silently undercounting group tours by skipping those fractional
+        // entries, leave group tours on the existing (working) iCal
+        // text-based count entirely.
+        const isPrivateTour = TOUR_ITEMS[itemPk].feed_id.endsWith('P');
+        const { bikesNeeded, total: totalBikes } = isPrivateTour
+          ? extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId)
+          : { bikesNeeded: { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 }, total: 0 };
         const resourceGuides = extractGuideFromResources(av, activeGuideNames, guideResourceIds);
 
         out.push({
