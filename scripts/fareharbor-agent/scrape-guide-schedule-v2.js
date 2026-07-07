@@ -113,6 +113,10 @@ function extractAvailabilities(calendarJson) {
         }
         if (!TOUR_ITEMS[itemPk]) continue; // skip rentals, gift certs, etc.
 
+        // Skip slots that are closed for online booking AND have no bookings —
+        // they will never run, guides don't need to see them
+        if ((av.booking_count ?? 0) === 0 && av.is_bookable === false) continue;
+
         // Extract guide from crew members (first Guide-role crew member)
         let guide = null;
         for (const group of av.grouped_crew_members || []) {
