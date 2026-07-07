@@ -121,7 +121,8 @@ function extractAvailabilities(calendarJson) {
         // Extract guide from crew members (first Guide-role crew member)
         let guide = null;
         for (const group of av.grouped_crew_members || []) {
-          const roleName = group.role?.short_name || group.role?.unicode || '';
+          const roleName = (group.role?.short_name || group.role?.unicode || '').toLowerCase();
+          if (roleName !== 'guide') continue; // only trust the actual Guide role, not other crew roles/notes
           for (const cm of group.crew_members || []) {
             const name = resolveGuideName(cm);
             if (name) { guide = name; break; }
