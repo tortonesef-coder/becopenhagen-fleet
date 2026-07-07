@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const { getDb } = require('../db/schema');
+const { sendEmail, EMAIL_FOOTER } = require('../email');
 const { createNotification } = require('./admin-notifs');
 
 function db() { return getDb(); }
@@ -116,7 +117,50 @@ router.delete('/invoices/:invoiceId', (req, res) => {
 
 // ── Invoicing instructions (admin-editable text shown on every guide's profile) ──
 
-// GET /api/guides/invoice-instructions — anyone logged in can read it
+// POST /api/guides/invoices/:invoiceId/send-to-soren — email invoice to Søren as attachment
+router.post('/invoices/:invoiceId/send-to-soren', async (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+
+  const inv = db().prepare(`
+    SELECT gi.*, tm.name as guide_name FROM guide_invoices gi
+    JOIN team_members tm ON tm.id = gi.guide_id
+    WHERE gi.id=?
+  `).get(req.params.invoiceId);
+  if (!inv) return res.status(404).json({ error: 'Not found' });
+
+  const filePath = path.join(INVOICES_DIR, inv.guide_id, inv.stored_filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File missing on disk' });
+
+  const { sendEmail } = require('../email');
+  const periodStr = inv.period_label ? ` for ${inv.period_label}` : '';
+  const subject = `Invoice from ${inv.guide_name}${periodStr}`;
+  const fileBuffer = fs.readFileSync(filePath);
+  const base64 = fileBuffer.toString('base64');
+
+  const result = await sendEmail({
+    to: 'sorenherlev@gmail.com',
+    toName: 'Søren',
+    subject,
+    htmlContent: `
+      <p>Hi Søren,</p>
+      <p>Please find attached the invoice from <strong>${inv.guide_name}</strong>${periodStr}.</p>
+      <p style="color:#888;font-size:0.9em">Sent via BeCopenhagen Fleet app.</p>
+    `,
+    attachments: [{
+      filename: inv.original_filename || inv.stored_filename,
+      content: base64,
+      encoding: 'base64',
+      contentType: inv.mime_type || 'application/octet-stream',
+    }],
+  });
+
+  if (!result?.ok) return res.status(500).json({ error: result?.error || 'Email failed' });
+
+  db().prepare(`INSERT INTO action_log (actor,action,details) VALUES (?,?,?)`)
+    .run(req.session.actor, 'invoice_sent_to_soren', JSON.stringify({ invoice_id: inv.id, guide_name: inv.guide_name }));
+
+  res.json({ ok: true });
+});
 router.get('/invoice-instructions', (req, res) => {
   if (!req.session?.actor) return res.status(401).json({ error: 'Not logged in' });
   const row = db().prepare(`SELECT value FROM app_settings WHERE key='guide_invoice_instructions'`).get();
@@ -216,6 +260,49 @@ router.delete('/unavailability/:id', (req, res) => {
   db().prepare('DELETE FROM guide_unavailability WHERE id=?').run(req.params.id);
   db().prepare(`UPDATE admin_notifications SET dismissed=1 WHERE type='unavailability' AND ref_id=? AND dismissed=0`).run(String(req.params.id));
   res.json({ ok: true });
+});
+
+// POST /api/guides/invoices/:invoiceId/send-to-soren — email PDF to Søren
+router.post('/invoices/:invoiceId/send-to-soren', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+
+  const inv = db().prepare(`
+    SELECT gi.*, tm.name as guide_name
+    FROM guide_invoices gi JOIN team_members tm ON tm.id=gi.guide_id
+    WHERE gi.id=?
+  `).get(req.params.invoiceId);
+  if (!inv) return res.status(404).json({ error: 'Not found' });
+
+  const filePath = require('path').join(__dirname, '../../data/invoices', inv.guide_id, inv.stored_filename);
+  if (!require('fs').existsSync(filePath)) return res.status(404).json({ error: 'File missing on disk' });
+
+  const periodStr = inv.period_label ? ` — ${inv.period_label}` : '';
+  const subject = `Invoice from ${inv.guide_name}${periodStr}`;
+  const htmlContent = `
+    <p>Hi Søren,</p>
+    <p>Please find attached the invoice from <strong>${inv.guide_name}</strong>${periodStr}.</p>
+    ${EMAIL_FOOTER}
+  `;
+
+  sendEmail({
+    to: 'sorenherlev@gmail.com',
+    toName: 'Søren',
+    subject,
+    htmlContent,
+    attachments: [{
+      filename: inv.original_filename || inv.stored_filename,
+      path: filePath,
+      contentType: inv.mime_type || 'application/octet-stream',
+    }],
+  }).then(r => {
+    if (r.ok) {
+      db().prepare(`INSERT INTO action_log (actor,action,details) VALUES (?,?,?)`)
+        .run(req.session.actor, 'invoice_sent_to_soren', JSON.stringify({ invoice_id: inv.id, guide_name: inv.guide_name }));
+      res.json({ ok: true });
+    } else {
+      res.status(500).json({ error: r.error });
+    }
+  }).catch(e => res.status(500).json({ error: e.message }));
 });
 
 module.exports = router;

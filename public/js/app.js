@@ -2206,6 +2206,16 @@ async function adminDeleteUnavailability(id) {
   }
 }
 
+async function sendInvoiceToSoren(invoiceId, guideName, periodLabel) {
+  if (!confirm(`Send ${guideName}'s invoice (${periodLabel}) to Søren at sorenherlev@gmail.com?`)) return;
+  try {
+    await api(`/api/guides/invoices/${invoiceId}/send-to-soren`, { method: 'POST' });
+    toast(`Sent to Søren`, 'success');
+  } catch(e) {
+    toast('Could not send: ' + e.message, 'error');
+  }
+}
+
 async function renderAdminInvoicing(el) {
   el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
   let invoices, instructions;
@@ -2232,7 +2242,10 @@ async function renderAdminInvoicing(el) {
         invoices.map(inv => `
           <div class="detail-row">
             <span class="dr-key">${escapeHtml(inv.guide_name)} · ${escapeHtml(inv.period_label || inv.original_filename)} <span style="color:var(--text3);font-size:0.72rem">· ${fmtDateFull((inv.uploaded_at||'').substring(0,10))}</span></span>
-            <span class="dr-val"><a href="/api/guides/invoices/${inv.id}/file" target="_blank">View</a></span>
+            <span class="dr-val" style="display:flex;gap:0.75rem;align-items:center">
+              <a href="/api/guides/invoices/${inv.id}/file" target="_blank">View</a>
+              <a href="#" onclick="sendInvoiceToSoren(${inv.id},'${escapeHtml(inv.guide_name)}','${escapeHtml(inv.period_label||inv.original_filename)}');return false;" style="color:var(--green);font-weight:600">Send to Søren</a>
+            </span>
           </div>`).join('')}
     </div>
   `;

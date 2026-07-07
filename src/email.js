@@ -33,7 +33,7 @@ function getTransporter() {
   });
 }
 
-async function sendEmail({ to, toName, subject, htmlContent }) {
+async function sendEmail({ to, toName, subject, htmlContent, attachments }) {
   const t = getTransporter();
   if (!t) return { ok: false, error: 'Email not configured' };
 
@@ -43,6 +43,7 @@ async function sendEmail({ to, toName, subject, htmlContent }) {
       to: toName ? '"' + toName + '" <' + to + '>' : to,
       subject,
       html: htmlContent,
+      attachments: attachments || [],
     });
     return { ok: true };
   } catch (e) {
