@@ -42,8 +42,10 @@ const state = {
 
 // ── API ───────────────────────────────────────────────────────────────────
 async function api(path, opts={}) {
+  const headers = {'Content-Type':'application/json'};
+  if (state.viewingAs && state.actor?.id) headers['X-View-As'] = state.actor.id;
   const r = await fetch(path, {
-    headers:{'Content-Type':'application/json'},
+    headers,
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
