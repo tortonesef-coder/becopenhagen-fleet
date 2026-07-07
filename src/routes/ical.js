@@ -356,7 +356,7 @@ function syncFeedToDB(feed, events) {
           <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${e.booking_count}</td></tr>
         </table>
         ${EMAIL_FOOTER}`;
-      sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+      sendEmail({ to: member.email, toName: member.name, subject, htmlContent, category: 'first_booking' })
         .catch(err => console.error('Email error (first booking):', err.message));
     }
 
@@ -372,7 +372,7 @@ function syncFeedToDB(feed, events) {
           <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
         </table>
         ${EMAIL_FOOTER}`;
-      sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+      sendEmail({ to: member.email, toName: member.name, subject, htmlContent, category: 'zero_bookings' })
         .catch(err => console.error('Email error (zero bookings):', err.message));
     }
   });
@@ -413,7 +413,7 @@ function syncFeedToDB(feed, events) {
             <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
           </table>
           ${EMAIL_FOOTER}`;
-        sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+        sendEmail({ to: member.email, toName: member.name, subject, htmlContent, category: 'tour_cancelled' })
           .catch(err => console.error('Email error (slot cancelled):', err.message));
       });
     }

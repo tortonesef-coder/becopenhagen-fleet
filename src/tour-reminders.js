@@ -80,6 +80,7 @@ async function sendReminders() {
         toName: tour.guide_name,
         subject,
         htmlContent,
+        category: 'tour_reminder',
       }).catch(e => console.error(`Reminder email failed for ${tour.guide_name}:`, e.message));
 
       console.log(`Tour reminder sent to ${tour.guide_name} for ${tour.feed_id} on ${tour.start_date}`);
@@ -113,7 +114,7 @@ async function sendInvoiceReminders() {
         <p>You can upload it directly in the app under <strong>Profile → Upload invoice</strong>. Your worked hours for the period are shown there too.</p>
         ${EMAIL_FOOTER}
       `;
-      await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent })
+      await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent, category: 'invoice_reminder' })
         .catch(e => console.error(`Invoice reminder failed for ${guide.name}:`, e.message));
       console.log(`Invoice reminder sent to ${guide.name}`);
     }

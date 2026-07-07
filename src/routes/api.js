@@ -280,6 +280,17 @@ router.get('/bug-reports', (req, res) => {
   res.json(rows);
 });
 
+// GET /api/sent-emails — admin audit log of every email sent, most recent first.
+// Optional ?hours=24 to filter to a recent window (default: all, capped at 500).
+router.get('/sent-emails', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const hours = parseInt(req.query.hours, 10);
+  const rows = hours
+    ? db().prepare(`SELECT * FROM emails_sent WHERE sent_at >= datetime('now', ?) ORDER BY sent_at DESC LIMIT 500`).all(`-${hours} hours`)
+    : db().prepare(`SELECT * FROM emails_sent ORDER BY sent_at DESC LIMIT 500`).all();
+  res.json(rows);
+});
+
 // PATCH /api/bug-reports/:id — mark resolved
 router.patch('/bug-reports/:id', (req, res) => {
   const { status } = req.body;

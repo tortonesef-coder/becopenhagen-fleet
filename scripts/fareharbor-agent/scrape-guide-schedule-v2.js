@@ -307,7 +307,7 @@ async function main() {
         <p>You can see all your upcoming tours in the app.</p>
         ${EMAIL_FOOTER}`;
 
-      await sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+      await sendEmail({ to: member.email, toName: member.name, subject, htmlContent, category: 'tour_assigned' })
         .catch(e => console.error(`Digest email failed for ${member.name}:`, e.message));
       console.log(`📧 Digest email → ${member.name}: ${items.length} tour(s) (${newCount} new, ${updateCount} updated)`);
     }
@@ -339,7 +339,7 @@ async function main() {
               <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
             </table>
             ${EMAIL_FOOTER}`;
-          await sendEmail({ to: member.email, toName: member.name, subject: `Tour cancelled — ${row.feed_id} on ${dateLabel}`, htmlContent })
+          await sendEmail({ to: member.email, toName: member.name, subject: `Tour cancelled — ${row.feed_id} on ${dateLabel}`, htmlContent, category: 'tour_cancelled' })
             .catch(e => console.error(`Cancel email failed:`, e.message));
         }
       }

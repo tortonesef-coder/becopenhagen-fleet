@@ -2071,6 +2071,7 @@ async function renderAppAdmin(c) {
   c.innerHTML = `
     <div class="subtab-row">
       <button class="subtab${window._appAdminTab==='log'?' active':''}" onclick="switchAppAdminTab('log')">Log</button>
+      <button class="subtab${window._appAdminTab==='emails'?' active':''}" onclick="switchAppAdminTab('emails')">Emails</button>
       <button class="subtab${window._appAdminTab==='invoicing'?' active':''}" onclick="switchAppAdminTab('invoicing')">Invoicing</button>
       <button class="subtab${window._appAdminTab==='bugs'?' active':''}" onclick="switchAppAdminTab('bugs')">Bugs</button>
       <button class="subtab${window._appAdminTab==='viewas'?' active':''}" onclick="switchAppAdminTab('viewas')">View as</button>
@@ -2081,7 +2082,7 @@ async function renderAppAdmin(c) {
 
 async function switchAppAdminTab(tab) {
   window._appAdminTab = tab;
-  const labels = {log:'Log', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  const labels = {log:'Log', emails:'Emails', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderAppAdminTab();
 }
@@ -2091,8 +2092,75 @@ async function renderAppAdminTab() {
   if (!el) return;
   if (window._appAdminTab === 'invoicing') await renderAdminInvoicing(el);
   else if (window._appAdminTab === 'bugs') await renderBugReports(el);
+  else if (window._appAdminTab === 'emails') await renderSentEmails(el);
   else if (window._appAdminTab === 'viewas') await renderViewAs(el);
   else await renderAdminLog(el);
+}
+
+async function renderSentEmails(el) {
+  el.innerHTML = `
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;padding-top:0.5rem">
+      <select class="form-select" id="email-window-select" style="flex:1">
+        <option value="24">Last 24 hours</option>
+        <option value="1">Last hour</option>
+        <option value="72">Last 3 days</option>
+        <option value="168">Last 7 days</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="sent-emails-list"><div class="empty-state"><p>Loading...</p></div></div>
+  `;
+  document.getElementById('email-window-select').addEventListener('change', e => loadSentEmails(e.target.value));
+  await loadSentEmails('24');
+}
+
+async function loadSentEmails(hours) {
+  const listEl = document.getElementById('sent-emails-list');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let rows;
+  try {
+    rows = await api(`/api/sent-emails${hours ? '?hours=' + hours : ''}`);
+  } catch(e) {
+    listEl.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  if (rows.length === 0) {
+    listEl.innerHTML = `<div class="empty-state"><p>No emails sent in this window</p></div>`;
+    return;
+  }
+
+  // Group by recipient for quick "who got spammed" scanning
+  const byRecipient = {};
+  rows.forEach(r => {
+    const key = r.to_name || r.to_email;
+    if (!byRecipient[key]) byRecipient[key] = [];
+    byRecipient[key].push(r);
+  });
+  const counts = Object.entries(byRecipient).sort((a,b) => b[1].length - a[1].length);
+
+  listEl.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">${rows.length} email${rows.length!==1?'s':''} sent · by recipient</div>
+      ${counts.map(([name, emails]) => `
+        <div class="detail-row">
+          <span class="dr-key">${escapeHtml(name)}</span>
+          <span class="dr-val" style="font-weight:700;color:${emails.length>=5?'var(--red)':emails.length>=3?'var(--amber)':'var(--text2)'}">${emails.length}</span>
+        </div>`).join('')}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">All emails</div>
+      ${rows.map(r => `
+        <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem">
+          <div>
+            <div style="font-size:0.85rem;font-weight:600">${escapeHtml(r.subject)}</div>
+            <div style="font-size:0.75rem;color:var(--text3)">${escapeHtml(r.to_name || r.to_email)} · ${r.sent_at}${r.category ? ' · ' + escapeHtml(r.category) : ''}</div>
+          </div>
+          ${!r.ok ? `<span style="font-size:0.7rem;font-weight:700;color:var(--red);background:#FFF0F0;padding:2px 8px;border-radius:10px;flex-shrink:0">failed</span>` : ''}
+        </div>`).join('')}
+    </div>
+  `;
 }
 
 // ── Guide metrics ─────────────────────────────────────────────────────────

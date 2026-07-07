@@ -3,6 +3,7 @@
 // hosts the team's mailboxes, so this consolidates onto one provider.
 
 const nodemailer = require('nodemailer');
+const { getDb } = require('./db/schema');
 
 const EMAIL_FOOTER = `
   <p style="margin-top:1.5rem;padding-top:0.75rem;border-top:1px solid #eee;color:#aaa;font-size:0.8em">
@@ -31,7 +32,7 @@ function getTransporter() {
   });
 }
 
-async function sendEmail({ to, toName, subject, htmlContent, attachments }) {
+async function sendEmail({ to, toName, subject, htmlContent, attachments, category }) {
   const t = getTransporter();
   if (!t) return { ok: false, error: 'Email not configured' };
 
@@ -43,10 +44,21 @@ async function sendEmail({ to, toName, subject, htmlContent, attachments }) {
       html: htmlContent,
       attachments: attachments || [],
     });
+    logEmail(to, toName, subject, category, true, null);
     return { ok: true };
   } catch (e) {
     console.error('SMTP send error:', e.message);
+    logEmail(to, toName, subject, category, false, e.message);
     return { ok: false, error: e.message };
+  }
+}
+
+function logEmail(to, toName, subject, category, ok, error) {
+  try {
+    getDb().prepare(`INSERT INTO emails_sent (to_email, to_name, subject, category, ok, error) VALUES (?,?,?,?,?,?)`)
+      .run(to, toName || null, subject, category || null, ok ? 1 : 0, error || null);
+  } catch (e) {
+    console.error('Failed to log sent email:', e.message);
   }
 }
 

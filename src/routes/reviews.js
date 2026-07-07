@@ -55,7 +55,7 @@ router.post('/', requireAdmin, async (req, res) => {
       ${EMAIL_FOOTER}
     `;
 
-    await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent }).catch(e =>
+    await sendEmail({ to: guide.email, toName: guide.name, subject, htmlContent, category: 'new_review' }).catch(e =>
       console.error('Review email failed:', e.message)
     );
   }

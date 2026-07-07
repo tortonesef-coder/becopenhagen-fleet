@@ -328,6 +328,17 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS emails_sent (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      to_email TEXT NOT NULL,
+      to_name TEXT,
+      subject TEXT NOT NULL,
+      category TEXT,
+      ok INTEGER DEFAULT 1,
+      error TEXT,
+      sent_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS guide_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guide_id TEXT NOT NULL REFERENCES team_members(id),
