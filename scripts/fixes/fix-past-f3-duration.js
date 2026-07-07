@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// One-off fix: completed tours stop being re-synced once they age out of the
-// live FareHarbor feed, so the Food Tour buffer change (15+15 -> 30+30,
-// making F3 4.5h total instead of 4h) never reached any ALREADY-COMPLETED
-// F3 tour — they're frozen with whatever duration was computed before the
-// fix. Future/upcoming F3 tours self-correct automatically via the normal
-// sync (already fixed in code); this script only needs to touch the past.
+// One-off fix: force EVERY F3/F3P row to the correct 270min (4h30m) duration,
+// regardless of date. The original version filtered by start_date < today,
+// which should have caught everything but evidently missed at least one row
+// — rather than debug the date-comparison edge case, just fix all of them
+// unconditionally. F3/F3P is always 270min now, full stop.
 //
 // Safe to run multiple times — idempotent.
 //
@@ -15,18 +14,16 @@ const { getDb } = require('../../src/db/schema');
 const db = getDb();
 const F3_DURATION_MINUTES = 270; // 3.5h tour + 30min + 30min buffer
 
-const todayStr = new Date().toISOString().substring(0, 10);
-
 const result = db.prepare(`
   UPDATE guide_tour_hours
   SET duration_minutes = ?
   WHERE feed_id IN ('F3', 'F3P')
-    AND start_date < ?
     AND duration_minutes != ?
-`).run(F3_DURATION_MINUTES, todayStr, F3_DURATION_MINUTES);
+`).run(F3_DURATION_MINUTES, F3_DURATION_MINUTES);
 
-console.log(`Updated ${result.changes} past F3/F3P rows to ${F3_DURATION_MINUTES} minutes (4h30m).`);
+console.log(`Updated ${result.changes} F3/F3P rows to ${F3_DURATION_MINUTES} minutes (4h30m).`);
 
 console.log('\nVerifying — all F3/F3P rows:');
 const check = db.prepare(`SELECT availability_id, guide, feed_id, start_date, duration_minutes FROM guide_tour_hours WHERE feed_id IN ('F3','F3P') ORDER BY start_date`).all();
 check.forEach(r => console.log(JSON.stringify(r)));
+
