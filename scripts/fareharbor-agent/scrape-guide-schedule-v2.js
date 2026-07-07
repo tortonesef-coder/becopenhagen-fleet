@@ -122,7 +122,9 @@ function extractAvailabilities(calendarJson) {
         let guide = null;
         for (const group of av.grouped_crew_members || []) {
           const roleName = (group.role?.short_name || group.role?.unicode || '').toLowerCase();
-          if (roleName !== 'guide') continue; // only trust the actual Guide role, not other crew roles/notes
+          // Match "Guide" and compound roles like "Guide - Spanish tour" (language-tagged
+          // guide roles), but not unrelated roles (mechanic, driver, etc.)
+          if (!roleName.startsWith('guide')) continue;
           for (const cm of group.crew_members || []) {
             const name = resolveGuideName(cm);
             if (name) { guide = name; break; }
