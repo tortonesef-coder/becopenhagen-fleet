@@ -1887,8 +1887,8 @@ async function renderNotifsAdmin(c) {
   }
 
   const notifs = data.notifications || [];
-  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉' };
-  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking' };
+  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉', bug_report: '🐛' };
+  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking', bug_report: 'Bug report' };
 
   c.innerHTML = `
     <div class="detail-section" style="border-top:none;padding-top:0;display:flex;justify-content:space-between;align-items:center">

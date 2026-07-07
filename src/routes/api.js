@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
+const { createNotification } = require('./admin-notifs');
 
 function db() { return getDb(); }
 
@@ -259,8 +260,17 @@ router.post('/bug-report', (req, res) => {
   const actor = req.session?.actor || 'unknown';
   if (!description || !description.trim()) return res.status(400).json({ error: 'Description required' });
 
-  db().prepare(`INSERT INTO bug_reports (reported_by, description, page) VALUES (?,?,?)`)
+  const result = db().prepare(`INSERT INTO bug_reports (reported_by, description, page) VALUES (?,?,?)`)
     .run(actor, description.trim(), page || null);
+
+  const actorName = db().prepare('SELECT name FROM team_members WHERE id=?').get(actor)?.name || actor;
+  createNotification(
+    'bug_report',
+    `New bug reported by ${actorName}`,
+    description.trim().substring(0, 150) + (description.trim().length > 150 ? '…' : ''),
+    result.lastInsertRowid
+  );
+
   res.json({ ok: true });
 });
 
