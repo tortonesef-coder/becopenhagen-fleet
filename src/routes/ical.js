@@ -553,6 +553,12 @@ router.get('/tours', (req, res) => {
 
   let rows = db().prepare(sql).all();
 
+  // Private tours (feed_id ending in 'P') are on-demand, not scheduled —
+  // an availability with 0 bookings is just open capacity, not a real tour.
+  // Group tours run on a fixed schedule regardless of bookings, so those
+  // still show even at 0 bookings (guides need to know about them ahead of time).
+  rows = rows.filter(r => !(r.feed_id?.endsWith('P') && r.booking_count === 0));
+
   // Fuzzy-filter by guide name in JS (handles accents/typos that SQL LIKE can't).
   // Unassigned tours (no guide set) are intentionally excluded here — they
   // should only be visible to admins (who call this endpoint without ?guide=),

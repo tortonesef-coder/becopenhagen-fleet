@@ -408,7 +408,10 @@ async function main() {
              av.guide, av.start_at, av.end_at, av.start_date, startTime, endTime, av.booking_count,
              JSON.stringify(av.bikes_needed), av.total_bikes);
 
-      if (av.guide) {
+      // Private tours with 0 bookings are just open capacity, not a real
+      // scheduled tour — don't count them toward a guide's upcoming hours.
+      const isZeroBookingPrivate = av.item.feed_id.endsWith('P') && av.booking_count === 0;
+      if (av.guide && !isZeroBookingPrivate) {
         db.prepare(`
           INSERT INTO guide_tour_hours
             (availability_id, guide, feed_id, feed_label, start_at, end_at, start_date, duration_minutes, last_synced)
@@ -421,7 +424,8 @@ async function main() {
       }
 
       // Collect assignment for batched digest email (sent once per guide at the end)
-      if (isNewAssignment || isReassignment) {
+      // Skip zero-booking private tours — not a real tour yet, no point emailing about it
+      if ((isNewAssignment || isReassignment) && !isZeroBookingPrivate) {
         const allMembers = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1`).all();
         const member = allMembers.find(m => guideMatches(av.guide, m.name));
         if (member?.email && isNotifEnabled(member.id, 'tour_assigned')) {
