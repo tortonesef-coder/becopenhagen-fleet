@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
-const { createNotification } = require('./admin-notifs');
+const { createNotification, resolveNotification } = require('./admin-notifs');
 
 function db() { return getDb(); }
 
@@ -262,19 +262,25 @@ function syncFeedToDB(feed, events) {
       e.booking_count, JSON.stringify(e.bookings), e.url
     );
 
-    // Dismiss unassigned_tour notification if guide is now assigned
+    // Resolve unassigned_tour notification if guide is now assigned
+    // (distinct from a manual dismiss — this allows the alert to fire again
+    // if the guide is later removed)
     if (feed.type === 'tour' && e.guide) {
-      db().prepare(`UPDATE admin_notifications SET dismissed=1 WHERE type='unassigned_tour' AND ref_id=? AND dismissed=0`).run(e.uid);
+      resolveNotification('unassigned_tour', e.uid);
     }
 
-    // Notify admin if a future tour has no guide assigned
-    if (feed.type === 'tour' && !e.guide && e.booking_count > 0 && e.start_date && e.start_date > new Date().toISOString().substring(0, 10)) {
-      createNotification(
-        'unassigned_tour',
-        `Unassigned tour: ${feed.id} on ${e.start_date}`,
-        `${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''} — no guide assigned yet.`,
-        e.uid
-      );
+    // Notify admin if a tour in the next 14 days has no guide assigned
+    if (feed.type === 'tour' && !e.guide && e.booking_count > 0 && e.start_date) {
+      const todayStr14 = new Date().toISOString().substring(0, 10);
+      const fourteenDaysStr = new Date(Date.now() + 14 * 86400000).toISOString().substring(0, 10);
+      if (e.start_date > todayStr14 && e.start_date <= fourteenDaysStr) {
+        createNotification(
+          'unassigned_tour',
+          `Unassigned tour: ${feed.id} on ${e.start_date}`,
+          `${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''} — no guide assigned yet.`,
+          e.uid
+        );
+      }
     }
     // Notify admin: first booking on a tour happening in the next 7 days
     if (feed.type === 'tour' && (prevCount === 0 || prevCount === null) && e.booking_count >= 1 && e.start_date) {

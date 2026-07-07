@@ -29,12 +29,24 @@ router.post('/dismiss-all', requireAdmin, (req, res) => {
 
 // Internal helper — called by other routes to create notifications
 function createNotification(type, title, body, ref_id) {
-  // Avoid duplicates for the same ref_id + type
+  // Don't recreate if there's already a notification for this ref_id that
+  // hasn't been marked resolved — whether or not the admin dismissed it.
+  // Dismissing an alert means "I've seen this, stop showing it" — it should
+  // only reappear if the underlying issue actually resolved and then broke
+  // again (e.g. a guide was assigned, then unassigned once more).
   if (ref_id) {
-    const existing = db().prepare(`SELECT id FROM admin_notifications WHERE type=? AND ref_id=? AND dismissed=0`).get(type, String(ref_id));
+    const existing = db().prepare(`SELECT id FROM admin_notifications WHERE type=? AND ref_id=? AND resolved_at IS NULL`).get(type, String(ref_id));
     if (existing) return;
   }
   db().prepare(`INSERT INTO admin_notifications (type, title, body, ref_id) VALUES (?,?,?,?)`).run(type, title, body || null, ref_id ? String(ref_id) : null);
 }
 
-module.exports = { router, createNotification };
+// Mark a notification resolved (issue actually went away, e.g. guide assigned).
+// Distinct from dismissing — a resolved+later-recurring issue is allowed to
+// alert again; a merely-dismissed one is not.
+function resolveNotification(type, ref_id) {
+  if (!ref_id) return;
+  db().prepare(`UPDATE admin_notifications SET dismissed=1, resolved_at=datetime('now') WHERE type=? AND ref_id=? AND resolved_at IS NULL`).run(type, String(ref_id));
+}
+
+module.exports = { router, createNotification, resolveNotification };

@@ -324,6 +324,7 @@ function initSchema() {
       body TEXT,
       ref_id TEXT,
       dismissed INTEGER DEFAULT 0,
+      resolved_at TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -371,6 +372,9 @@ function initSchema() {
   if (!teamCols.includes('password_hash')) db.exec("ALTER TABLE team_members ADD COLUMN password_hash TEXT");
   if (!teamCols.includes('password_salt')) db.exec("ALTER TABLE team_members ADD COLUMN password_salt TEXT");
   if (!teamCols.includes('needs_password_setup')) db.exec("ALTER TABLE team_members ADD COLUMN needs_password_setup INTEGER DEFAULT 1");
+
+  const notifCols = db.prepare("PRAGMA table_info(admin_notifications)").all().map(c => c.name);
+  if (!notifCols.includes('resolved_at')) db.exec("ALTER TABLE admin_notifications ADD COLUMN resolved_at TEXT");
 }
 
 module.exports = { getDb };
