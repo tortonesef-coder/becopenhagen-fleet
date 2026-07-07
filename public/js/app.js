@@ -1845,6 +1845,7 @@ async function renderOpsTab() {
 
 // ── Admin Notifications tab ───────────────────────────────────────────────
 let _notifPollInterval = null;
+let _seenNotifIds = null; // null = not yet seeded (first poll after load)
 
 function startNotifPolling() {
   if (_notifPollInterval) return;
@@ -1852,11 +1853,64 @@ function startNotifPolling() {
   _notifPollInterval = setInterval(updateNotifBadge, 30000); // every 30s
 }
 
+// Short synthesized ping — no audio file needed
+function playNotifPing() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.setValueAtTime(660, ctx.currentTime + 0.1);
+    g.gain.setValueAtTime(0.18, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    o.connect(g); g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.35);
+  } catch(e) { /* audio not available */ }
+}
+
+function showDesktopNotification(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(title, { body, icon: '/icons/icon-192.png', tag: 'bc-fleet-alert' });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch(e) { /* ignore */ }
+}
+
+async function requestDesktopNotifPermission() {
+  if (!('Notification' in window)) { toast('Desktop notifications not supported in this browser', 'error'); return; }
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') { toast('Desktop alerts enabled', 'success'); playNotifPing(); }
+  else toast('Desktop alerts not enabled', 'error');
+  if (window._renderNotifsAdminRef) window._renderNotifsAdminRef();
+}
+
 async function updateNotifBadge() {
   if (state.actor?.role !== 'admin') return;
   try {
     const data = await api('/api/admin-notifs');
     const count = data.count || 0;
+    const notifications = data.notifications || [];
+
+    // Detect newly-arrived alerts (by id) and ping for them
+    const currentIds = new Set(notifications.map(n => n.id));
+    if (_seenNotifIds === null) {
+      // First poll after page load — just seed the set, don't ping for pre-existing alerts
+      _seenNotifIds = currentIds;
+    } else {
+      const newOnes = notifications.filter(n => !_seenNotifIds.has(n.id));
+      if (newOnes.length > 0) {
+        playNotifPing();
+        if (newOnes.length === 1) {
+          showDesktopNotification(newOnes[0].title, newOnes[0].body || '');
+        } else {
+          showDesktopNotification(`${newOnes.length} new alerts`, newOnes.map(n => n.title).join(' · '));
+        }
+      }
+      _seenNotifIds = currentIds;
+    }
+
     // Find or create badge on the Alerts tab button
     const btn = document.querySelector('[data-tab="notifs-admin"]');
     if (!btn) return;
@@ -1890,7 +1944,17 @@ async function renderNotifsAdmin(c) {
   const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉', bug_report: '🐛' };
   const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking', bug_report: 'Bug report' };
 
+  const notifPerm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  const permBanner = notifPerm === 'granted' ? '' : notifPerm === 'unsupported' ? '' : `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;padding:0.6rem 0.75rem;margin-bottom:0.75rem;background:var(--blue-bg);border-radius:var(--radius)">
+      <span style="font-size:0.82rem;color:var(--text)">Get a desktop ping when new alerts come in.</span>
+      <button class="btn btn-primary" style="font-size:0.78rem;padding:5px 14px;flex-shrink:0" onclick="requestDesktopNotifPermission()">Enable</button>
+    </div>`;
+
+  window._renderNotifsAdminRef = () => renderNotifsAdmin(c);
+
   c.innerHTML = `
+    ${permBanner}
     <div class="detail-section" style="border-top:none;padding-top:0;display:flex;justify-content:space-between;align-items:center">
       <div class="detail-section-title" style="margin:0">Alerts (${notifs.length})</div>
       ${notifs.length > 0 ? `<button class="btn btn-secondary" style="font-size:0.78rem;padding:4px 12px" onclick="dismissAllNotifs()">Dismiss all</button>` : ''}
