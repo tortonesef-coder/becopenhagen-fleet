@@ -80,17 +80,21 @@ async function fetchMonth(page, year, month) {
   const results = [];
   for (let week = 1; week <= 6; week++) {
     const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/items/${ALL_ITEM_IDS}/calendar/${year}/${String(month).padStart(2, '0')}/?allow_grouped=yes&include_resource_use_summaries=yes&path=2&week_number=${week}`;
-    try {
-      const resp = await page.request.get(url, { timeout: 30000 });
-      if (!resp.ok()) { console.log(`  week ${week}: HTTP ${resp.status()}`); continue; }
-      const json = await resp.json();
-      results.push(json);
-    } catch (e) {
-      console.log(`  week ${week}: ${e.message.substring(0, 60)}`);
+    let ok = false;
+    for (let attempt = 1; attempt <= 2 && !ok; attempt++) {
+      try {
+        const resp = await page.request.get(url, { timeout: 60000 });
+        if (!resp.ok()) { console.log(`  week ${week} attempt ${attempt}: HTTP ${resp.status()}`); continue; }
+        const json = await resp.json();
+        results.push(json);
+        ok = true;
+      } catch (e) {
+        console.log(`  week ${week} attempt ${attempt} failed: ${e.message.substring(0, 60)}`);
+      }
     }
   }
   if (results.length === 0) throw new Error(`No calendar data for ${year}-${month}`);
-  console.log(`  (${results.length} week responses fetched)`);
+  console.log(`  (${results.length}/6 week responses fetched)`);
   return results;
 }
 
