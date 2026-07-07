@@ -39,10 +39,11 @@ const TOUR_ITEMS = {
 // is in the crew note. Guides with their own accounts map directly.
 function resolveGuideName(crewMember) {
   let userName = crewMember?.user?.name || '';
-  // Abbreviated user objects only have a uri like /users/crew1/ — extract username
+  // Abbreviated user objects only have a uri like /users/federico/ — extract
+  // the slug and title-case it for display (e.g. "federico" -> "Federico")
   if (!userName && crewMember?.user?.uri) {
     const m = crewMember.user.uri.match(/\/users\/([^/]+)\//);
-    if (m) userName = m[1];
+    if (m) userName = m[1].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   }
   const note = (crewMember?.note || '').trim();
   if (/^crew\s*\d*$/i.test(userName)) {
@@ -118,14 +119,16 @@ function extractAvailabilities(calendarJson) {
         // they will never run, guides don't need to see them
         if ((av.booking_count ?? 0) === 0 && av.is_bookable === false) continue;
 
-        // Extract guide from crew members (first Guide-role crew member)
+        // Extract guide from crew members (first Guide-role crew member).
+        // NOTE: group.role is often abbreviated to just {cls, uri} by FareHarbor's
+        // payload deduplication (roles repeat across hundreds of availabilities),
+        // so group.role.short_name/unicode is frequently missing. crewMember.unicode
+        // (e.g. "Guide: federico") is reliable and per-entry, so use that instead.
         let guide = null;
         for (const group of av.grouped_crew_members || []) {
-          const roleName = (group.role?.short_name || group.role?.unicode || '').toLowerCase();
-          // Match "Guide" and compound roles like "Guide - Spanish tour" (language-tagged
-          // guide roles), but not unrelated roles (mechanic, driver, etc.)
-          if (!roleName.startsWith('guide')) continue;
           for (const cm of group.crew_members || []) {
+            const roleFromUnicode = (cm.unicode || '').split(':')[0].trim().toLowerCase();
+            if (!roleFromUnicode.startsWith('guide')) continue;
             const name = resolveGuideName(cm);
             if (name) { guide = name; break; }
           }
