@@ -66,17 +66,18 @@ async function login(browser) {
   return page;
 }
 
-// Load one calendar month and capture the big availability JSON
+// Load one calendar month and capture ALL availability JSON responses.
+// FareHarbor loads the calendar one week at a time (week_number=1..6),
+// so we must merge every response, not just the largest.
 async function fetchMonth(page, year, month) {
-  let captured = null;
+  const captured = [];
 
   const handler = async (resp) => {
     const url = resp.url();
     const ct = resp.headers()['content-type'] || '';
     if (ct.includes('json') && /\/api\/v1\/companies\/becopenhagen\/items\/[\d,]+\/calendar\//.test(url)) {
       try {
-        const body = await resp.text();
-        if (!captured || body.length > captured.length) captured = body;
+        captured.push(await resp.text());
       } catch (e) {}
     }
   };
@@ -84,11 +85,18 @@ async function fetchMonth(page, year, month) {
   page.on('response', handler);
   const url = `https://fareharbor.com/${COMPANY_SLUG}/dashboard/bookings/calendar/${year}/${String(month).padStart(2, '0')}/`;
   await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(4000);
+  // Scroll to trigger any lazy-loaded weeks
+  for (let i = 0; i < 4; i++) {
+    await page.mouse.wheel(0, 800).catch(() => {});
+    await page.waitForTimeout(1500);
+  }
+  await page.waitForTimeout(3000);
   page.off('response', handler);
 
-  if (!captured) throw new Error(`No calendar JSON captured for ${year}-${month}`);
-  return JSON.parse(captured);
+  if (captured.length === 0) throw new Error(`No calendar JSON captured for ${year}-${month}`);
+  console.log(`  (${captured.length} week responses captured)`);
+  return captured.map(c => { try { return JSON.parse(c); } catch(e) { return null; } }).filter(Boolean);
 }
 
 function extractAvailabilities(calendarJson) {
@@ -156,10 +164,14 @@ async function main() {
     let all = [];
     for (const [y, m] of months) {
       console.log(`Fetching calendar ${y}-${String(m).padStart(2, '0')}...`);
-      const json = await fetchMonth(page, y, m);
-      const avs = extractAvailabilities(json);
-      console.log(`  ${avs.length} tour availabilities found`);
-      all = all.concat(avs);
+      const jsonResponses = await fetchMonth(page, y, m);
+      let monthCount = 0;
+      for (const json of jsonResponses) {
+        const avs = extractAvailabilities(json);
+        monthCount += avs.length;
+        all = all.concat(avs);
+      }
+      console.log(`  ${monthCount} tour availabilities found (before dedup)`);
     }
 
     // Dedupe (overlapping weeks between months)
