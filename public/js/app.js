@@ -1830,6 +1830,7 @@ async function renderOperations(c) {
 
 async function switchOpsTab(tab) {
   window._opsTab = tab;
+  logPageView(`operations.${tab}`);
   const labels = {tours:'Tours',rentals:'Rentals',bikes:'Bikes',tickets:'Tickets'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderOpsTab();
@@ -2015,6 +2016,7 @@ async function renderGuidesAdmin(c) {
 
 async function switchGuidesAdminTab(tab) {
   window._guidesAdminTab = tab;
+  logPageView(`guides-admin.${tab}`);
   const labels = {'tours-all':'Tours', guides:'Guides', reviews:'Reviews', availability:'Availability'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderGuidesAdminTab();
@@ -2091,6 +2093,7 @@ async function renderAppAdmin(c) {
 
 async function switchAppAdminTab(tab) {
   window._appAdminTab = tab;
+  logPageView(`app-admin.${tab}`);
   const labels = {log:'Log', changes:'Changes', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderAppAdminTab();
@@ -3085,6 +3088,7 @@ async function renderProfile(c) {
 
 async function switchProfileTab(tab) {
   window._profileTab = tab;
+  logPageView(`profile.${tab}`);
   document.querySelectorAll('.subtab').forEach(b => {
     b.classList.toggle('active', b.textContent === {overview:'Overview', invoice:'Invoice', availability:'Availability', notifications:'Notifications'}[tab]);
   });

@@ -111,6 +111,9 @@ startPolling();
 // Start 16h-before tour reminders (runs every hour)
 require('./tour-reminders').startReminders();
 
+// Start log retention cleanup (120 days, runs daily)
+require('./log-retention').startLogRetention();
+
 app.listen(PORT, () => {
   console.log(`BC Fleet running on port ${PORT}`);
   console.log('OpenAI key:', process.env.OPENAI_API_KEY ? 'SET' : 'MISSING');
