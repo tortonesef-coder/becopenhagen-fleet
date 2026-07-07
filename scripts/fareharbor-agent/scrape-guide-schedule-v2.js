@@ -66,45 +66,27 @@ async function login(browser) {
   return page;
 }
 
-// Load one calendar month and capture ALL availability JSON responses.
-// FareHarbor loads the calendar one week at a time (week_number=1..6),
-// so we must merge every response, not just the largest.
+// All item IDs from the discovered API URL (tours + rentals; harmless to request all)
+const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
+
+// Fetch one calendar month by calling the internal API directly (authenticated
+// via the logged-in page's cookies). Deterministic — no response interception.
 async function fetchMonth(page, year, month) {
-  const captured = [];
-
-  const handler = async (resp) => {
-    const url = resp.url();
-    const ct = resp.headers()['content-type'] || '';
-    if (ct.includes('json') && /\/api\/v1\/companies\/becopenhagen\/items\/[\d,]+\/calendar\//.test(url)) {
-      try {
-        captured.push(await resp.text());
-      } catch (e) {}
-    }
-  };
-
-  page.on('response', handler);
-  const url = `https://fareharbor.com/${COMPANY_SLUG}/dashboard/bookings/calendar/${year}/${String(month).padStart(2, '0')}/`;
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-
-  // Keep waiting until no new calendar responses have arrived for 6 seconds
-  // (the calendar loads weeks progressively; a fixed wait misses later weeks)
-  let lastCount = 0;
-  let stableSince = Date.now();
-  const deadline = Date.now() + 90000; // hard cap 90s
-  while (Date.now() < deadline) {
-    await page.waitForTimeout(1000);
-    if (captured.length !== lastCount) {
-      lastCount = captured.length;
-      stableSince = Date.now();
-    } else if (Date.now() - stableSince > 6000 && captured.length > 0) {
-      break;
+  const results = [];
+  for (let week = 1; week <= 6; week++) {
+    const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/items/${ALL_ITEM_IDS}/calendar/${year}/${String(month).padStart(2, '0')}/?allow_grouped=yes&include_resource_use_summaries=yes&path=2&week_number=${week}`;
+    try {
+      const resp = await page.request.get(url, { timeout: 30000 });
+      if (!resp.ok()) { console.log(`  week ${week}: HTTP ${resp.status()}`); continue; }
+      const json = await resp.json();
+      results.push(json);
+    } catch (e) {
+      console.log(`  week ${week}: ${e.message.substring(0, 60)}`);
     }
   }
-  page.off('response', handler);
-
-  if (captured.length === 0) throw new Error(`No calendar JSON captured for ${year}-${month}`);
-  console.log(`  (${captured.length} week responses captured)`);
-  return captured.map(c => { try { return JSON.parse(c); } catch(e) { return null; } }).filter(Boolean);
+  if (results.length === 0) throw new Error(`No calendar data for ${year}-${month}`);
+  console.log(`  (${results.length} week responses fetched)`);
+  return results;
 }
 
 function extractAvailabilities(calendarJson) {
