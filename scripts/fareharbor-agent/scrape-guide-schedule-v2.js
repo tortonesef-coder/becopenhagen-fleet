@@ -272,7 +272,7 @@ async function main() {
       const rows = items.map(i => {
         const dateLabel = new Date(i.start_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
         const tag = i.isReassignment
-          ? `<span style="font-size:0.7rem;font-weight:600;color:#B8860B;background:#FFF6E0;padding:2px 8px;border-radius:10px">time changed</span>`
+          ? `<span style="font-size:0.7rem;font-weight:600;color:#B8860B;background:#FFF6E0;padding:2px 8px;border-radius:10px">updated</span>`
           : `<span style="font-size:0.7rem;font-weight:600;color:#2E7D32;background:#E8F5E9;padding:2px 8px;border-radius:10px">new</span>`;
         return `<tr>
           <td style="padding:7px 14px 7px 0;color:#888;font-size:0.88rem">${dateLabel}</td>
@@ -285,7 +285,7 @@ async function main() {
 
       const intro = items.length === 1
         ? (items[0].isReassignment
-            ? `The time for one of your tours has changed:`
+            ? `One of your tour assignments has been updated:`
             : `You've been assigned to a new tour:`)
         : `You've been assigned to ${items.length} tours:`;
 
