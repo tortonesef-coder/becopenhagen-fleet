@@ -237,6 +237,18 @@ async function main() {
 
     for (const { availabilityId, item } of filtered) {
       await ensureLoggedIn();
+
+      // If we already have this in the DB and it's not in the urgent window (next 3 days),
+      // skip the slow dashboard fetch — we'll get it in a later broader run
+      const existing = db.prepare('SELECT start_date, last_synced FROM tour_availabilities WHERE availability_id=?').get(availabilityId);
+      if (existing?.last_synced) {
+        const syncedMinsAgo = (Date.now() - new Date(existing.last_synced).getTime()) / 60000;
+        if (syncedMinsAgo < 300) { // synced less than 5h ago — skip
+          console.log(`  Skipping ${availabilityId} (${item.feed_id}) — synced ${Math.round(syncedMinsAgo)}min ago`);
+          continue;
+        }
+      }
+
       console.log(`  Fetching ${item.feed_id} availability ${availabilityId}...`);
       const details = await fetchAvailabilityDetails(dashPage, item.id, availabilityId);
       if (!details) { dashPage = null; continue; }
@@ -250,9 +262,9 @@ async function main() {
         const durationMinutes = Math.round(item.duration_h * 60) + 30; // + 15min buffer each side
 
         // Check if this is a new assignment or a guide change
-        const existing = db.prepare(`SELECT guide FROM tour_availabilities WHERE availability_id=?`).get(availabilityId);
-        const isNewAssignment = guide && (!existing || !existing.guide);
-        const isReassignment = guide && existing?.guide && existing.guide !== guide;
+        const prevRecord = db.prepare(`SELECT guide FROM tour_availabilities WHERE availability_id=?`).get(availabilityId);
+        const isNewAssignment = guide && (!prevRecord || !prevRecord.guide);
+        const isReassignment = guide && prevRecord?.guide && prevRecord.guide !== guide;
 
         // Upsert into tour_availabilities
         db.prepare(`
@@ -298,7 +310,7 @@ async function main() {
                 <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
                 <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${startTime}${endTime ? ' – ' + endTime : ''}</td></tr>
                 <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${bookingCount} so far</td></tr>
-                ${isReassignment ? `<tr><td style="padding:3px 12px 3px 0;color:#888">Previously</td><td>${existing.guide}</td></tr>` : ''}
+                ${isReassignment ? `<tr><td style="padding:3px 12px 3px 0;color:#888">Previously</td><td>${prevRecord.guide}</td></tr>` : ''}
               </table>
               <p>You can see all your upcoming tours in the app.</p>
               ${EMAIL_FOOTER}
