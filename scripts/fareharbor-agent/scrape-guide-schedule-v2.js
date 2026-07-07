@@ -54,6 +54,43 @@ function resolveGuideName(crewMember) {
   return userName || note || null;
 }
 
+// Fetch the full, un-abbreviated resource list ONCE per run to build reliable
+// ID-based lookups. Resource objects get abbreviated (name dropped) when
+// they repeat across the huge calendar payload — unpredictably, per request —
+// so name-text matching on THOSE objects is fragile. The dedicated resources
+// endpoint always returns full names, so we resolve guide-resource IDs and
+// the "Guided Tour Bikes" resource ID here, then use ID matching (always
+// present, even on abbreviated objects) everywhere else.
+async function fetchResourceLookup(page, activeGuideNames) {
+  const guideResourceIds = new Map(); // resourcePk -> guide name
+  let guidedTourBikesId = null;
+
+  try {
+    const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/resources/?include-archived=yes`;
+    const resp = await page.request.get(url, { timeout: 30000 });
+    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, guidedTourBikesId }; }
+    const data = await resp.json();
+    const resources = Array.isArray(data) ? data : (data.objects || data.resources || []);
+    for (const r of resources) {
+      const pk = r.pk || (r.uri || '').match(/\/resources\/(\d+)\//)?.[1];
+      if (!pk) continue;
+      const baseName = (r.name || '').replace(/\s*\(.*\)\s*$/, '').trim();
+      const matchedGuide = activeGuideNames.find(gn => guideMatches(baseName, gn));
+      if (matchedGuide) {
+        guideResourceIds.set(String(pk), matchedGuide);
+      }
+      if (/^guided tour bikes$/i.test(baseName)) {
+        guidedTourBikesId = String(pk);
+      }
+    }
+    console.log(`  Resource lookup: ${guideResourceIds.size} guide resources, guided tour bikes id=${guidedTourBikesId || 'not found'}`);
+  } catch (e) {
+    console.log('  Resource lookup fetch failed:', e.message);
+  }
+
+  return { guideResourceIds, guidedTourBikesId };
+}
+
 async function login(browser) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
@@ -102,11 +139,12 @@ async function fetchMonth(page, year, month) {
   return results;
 }
 
-// Map a resource name (from resource_use_summaries) to a bike category.
-// Falls back to 'A' (adult bike) for generic/pooled resources like
-// "Guided Tour Bikes" where FareHarbor doesn't track a finer breakdown.
-function categorizeBikeResource(name) {
+// Map a resource to a bike category. Prefers the known resource ID (reliable,
+// unaffected by name abbreviation) over name-text matching.
+function categorizeBikeResource(name, resourcePk, guidedTourBikesId) {
+  if (guidedTourBikesId && resourcePk === guidedTourBikesId) return 'GT';
   const n = (name || '').toLowerCase();
+  if (/guided tour bike/.test(n)) return 'GT';
   if (/electric|e-bike/.test(n)) return 'E';
   if (/toddler/.test(n)) return 'AT';
   if (/child.*seat|\+.*child/.test(n)) return 'AC';
@@ -115,19 +153,31 @@ function categorizeBikeResource(name) {
 }
 
 // Extract real bike counts from resource_use_summaries, excluding
-// guide-blocking resources (named "GuideName (feed, codes)" — these exist
-// purely to prevent double-booking a guide, they aren't bikes).
-function extractBikesFromResources(av, activeGuideNames) {
-  const bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0 };
+// guide-blocking resources. Guide resources are identified primarily by
+// resource ID (always present, even when the object is abbreviated) with
+// name-text matching as a fallback for guides not yet in the ID lookup.
+function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId) {
+  const bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 };
   let total = 0;
   for (const entry of av.resource_use_summaries || []) {
     const rawName = entry.resource?.name || '';
     const baseName = rawName.replace(/\s*\(.*\)\s*$/, '').trim();
-    const isGuideResource = activeGuideNames.some(gn => guideMatches(baseName, gn));
+    const resourcePk = entry.resource?.pk ? String(entry.resource.pk) : (entry.resource?.uri || '').match(/\/resources\/(\d+)\//)?.[1];
+
+    const isGuideResource = (resourcePk && guideResourceIds.has(resourcePk))
+      || (baseName && activeGuideNames.some(gn => guideMatches(baseName, gn)));
     if (isGuideResource) continue;
+
     const count = entry.total_use_count || 0;
     if (count <= 0) continue;
-    const cat = categorizeBikeResource(rawName);
+    // Guard against any other fractional/non-integer values we haven't
+    // identified a cause for yet — never let a bad number reach the UI
+    if (!Number.isInteger(count)) {
+      console.log(`  WARNING: non-integer resource count (${count}) on resource ${resourcePk || 'unknown'} (${rawName || 'unnamed'}) — skipping`);
+      continue;
+    }
+
+    const cat = categorizeBikeResource(rawName, resourcePk, guidedTourBikesId);
     bikesNeeded[cat] += count;
     total += count;
   }
@@ -139,19 +189,30 @@ function extractBikesFromResources(av, activeGuideNames) {
 // signal for who's guiding — separate from the crew-assignment signal we
 // already use as the authoritative `guide` field. For now this is only used
 // to detect and flag disagreements between the two, not to set the guide.
-function extractGuideFromResources(av, activeGuideNames) {
+function extractGuideFromResources(av, activeGuideNames, guideResourceIds) {
   const matches = [];
   for (const entry of av.resource_use_summaries || []) {
     const rawName = entry.resource?.name || '';
     const baseName = rawName.replace(/\s*\(.*\)\s*$/, '').trim();
-    for (const gn of activeGuideNames) {
-      if (guideMatches(baseName, gn) && !matches.includes(gn)) matches.push(gn);
+    const resourcePk = entry.resource?.pk ? String(entry.resource.pk) : (entry.resource?.uri || '').match(/\/resources\/(\d+)\//)?.[1];
+
+    // Positive ID match works even when name is abbreviated away
+    if (resourcePk && guideResourceIds.has(resourcePk)) {
+      const gn = guideResourceIds.get(resourcePk);
+      if (!matches.includes(gn)) matches.push(gn);
+      continue;
+    }
+    // Fallback: name-text matching when name is present but not in the ID lookup yet
+    if (baseName) {
+      for (const gn of activeGuideNames) {
+        if (guideMatches(baseName, gn) && !matches.includes(gn)) matches.push(gn);
+      }
     }
   }
   return matches;
 }
 
-function extractAvailabilities(calendarJson, activeGuideNames) {
+function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId) {
   const out = [];
   const weeks = calendarJson?.calendar?.weeks || [];
   for (const week of weeks) {
@@ -186,8 +247,8 @@ function extractAvailabilities(calendarJson, activeGuideNames) {
           if (guide) break;
         }
 
-        const { bikesNeeded, total: totalBikes } = extractBikesFromResources(av, activeGuideNames);
-        const resourceGuides = extractGuideFromResources(av, activeGuideNames);
+        const { bikesNeeded, total: totalBikes } = extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId);
+        const resourceGuides = extractGuideFromResources(av, activeGuideNames, guideResourceIds);
 
         out.push({
           availability_id: String(av.pk),
@@ -229,6 +290,9 @@ async function main() {
     console.log(new Date().toISOString(), '— logging in...');
     const page = await login(browser);
 
+    console.log('Fetching resource lookup (guide IDs, guided tour bikes ID)...');
+    const { guideResourceIds, guidedTourBikesId } = await fetchResourceLookup(page, activeGuideNames);
+
     // Current month + next month covers 30+ days ahead
     const now = new Date();
     const months = [
@@ -242,7 +306,7 @@ async function main() {
       const jsonResponses = await fetchMonth(page, y, m);
       let monthCount = 0;
       for (const json of jsonResponses) {
-        const avs = extractAvailabilities(json, activeGuideNames);
+        const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId);
         monthCount += avs.length;
         all = all.concat(avs);
       }

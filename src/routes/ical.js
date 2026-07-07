@@ -127,7 +127,7 @@ function parseIcal(text) {
 
     // Parse bike counts from summary
     // "5 Adults incl. bike rentals, 2 Adults incl. e-bike rentals, 1 Child incl. bike rental"
-    let bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0 };
+    let bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 };
     const summaryLower = summary.toLowerCase();
     const bikeMatches = summaryLower.matchAll(/(\d+)\s+adult[^,]*(e-bike|electric)[^,]*/gi);
     const regularMatches = summaryLower.matchAll(/(\d+)\s+adult[^,]*(?<!e-bike|electric)[^,]*incl\.[^,]*bike/gi);
