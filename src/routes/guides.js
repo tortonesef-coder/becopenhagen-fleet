@@ -5,6 +5,7 @@ const path = require('path');
 const { getDb } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
 const { createNotification } = require('./admin-notifs');
+const { guideMatches } = require('../guide-name-match');
 
 function db() { return getDb(); }
 
@@ -206,28 +207,17 @@ router.post('/unavailability', (req, res) => {
   if (!from_dt || !to_dt) return res.status(400).json({ error: 'from_dt and to_dt required' });
   if (from_dt >= to_dt) return res.status(400).json({ error: 'End must be after start' });
 
-  // Check for assigned tours in this window
+  // Check for assigned tours in this window using fuzzy guide name matching
+  // (handles accents like "Féidhlim" in the app vs "Feidhlim" from FareHarbor crew notes)
   const guide = db().prepare('SELECT name FROM team_members WHERE id=?').get(guide_id);
-  const conflicts = db().prepare(`
-    SELECT feed_id, start_date, start_time, end_time FROM tour_availabilities
-    WHERE guide IS NOT NULL
-      AND datetime(replace(replace(start_at,'T',' '),'Z','')) < datetime(?)
-      AND datetime(replace(replace(end_at,'T',' '),'Z','')) > datetime(?)
-      AND start_at > datetime('now')
-  `).all(to_dt, from_dt).filter(t => {
-    const g = db().prepare('SELECT name FROM team_members WHERE id=?').get(guide_id);
-    return t.guide && g && (t.guide === g.name || t.guide.includes(g.name));
-  });
-
-  // Re-do with guide name match in JS since SQLite can't do fuzzy match easily
   const guideName = guide?.name;
   const allConflicts = db().prepare(`
     SELECT feed_id, start_date, start_time, end_time, guide FROM tour_availabilities
     WHERE guide IS NOT NULL
       AND datetime(replace(replace(start_at,'T',' '),'Z','')) < datetime(?)
       AND datetime(replace(replace(end_at,'T',' '),'Z','')) > datetime(?)
-      AND start_at > datetime('now')
-  `).all(to_dt, from_dt).filter(t => guideName && (t.guide === guideName || t.guide.toLowerCase().includes(guideName.toLowerCase().split(' ')[0])));
+      AND datetime(replace(replace(start_at,'T',' '),'Z','')) > datetime('now')
+  `).all(to_dt, from_dt).filter(t => guideName && guideMatches(t.guide, guideName));
 
   if (allConflicts.length > 0) {
     const list = allConflicts.map(t => `${t.feed_id} on ${t.start_date} at ${t.start_time}`).join(', ');

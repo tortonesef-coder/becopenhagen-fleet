@@ -7,6 +7,7 @@
 
 const { getDb, isNotifEnabled } = require('./db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('./email');
+const { guideMatches } = require('./guide-name-match');
 
 function db() { return getDb(); }
 
@@ -14,17 +15,21 @@ async function sendReminders() {
   try {
     // Find tours starting between 15h and 17h from now with an assigned guide
     // that haven't been reminded yet. Times stored as ISO UTC strings.
-    const tours = db().prepare(`
-      SELECT ta.*, tm.id as guide_id, tm.name as guide_name, tm.email as guide_email
-      FROM tour_availabilities ta
-      JOIN team_members tm ON (tm.name = ta.guide OR tm.name LIKE '%' || ta.guide || '%')
-      WHERE ta.feed_type = 'tour'
-        AND ta.guide IS NOT NULL
-        AND tm.email IS NOT NULL
-        AND tm.active = 1
-        AND datetime(replace(replace(ta.start_at,'T',' '),'Z','')) BETWEEN datetime('now', '+15 hours') AND datetime('now', '+17 hours')
-        AND ta.availability_id NOT IN (SELECT availability_id FROM tour_reminders)
+    const rawTours = db().prepare(`
+      SELECT * FROM tour_availabilities
+      WHERE feed_type = 'tour'
+        AND guide IS NOT NULL
+        AND datetime(replace(replace(start_at,'T',' '),'Z','')) BETWEEN datetime('now', '+15 hours') AND datetime('now', '+17 hours')
+        AND availability_id NOT IN (SELECT availability_id FROM tour_reminders)
     `).all();
+
+    const activeMembers = db().prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND email IS NOT NULL`).all();
+
+    const tours = rawTours.map(t => {
+      const member = activeMembers.find(m => guideMatches(t.guide, m.name));
+      if (!member) return null;
+      return { ...t, guide_id: member.id, guide_name: member.name, guide_email: member.email };
+    }).filter(Boolean);
 
     for (const tour of tours) {
       // Always mark as reminded so we don't retry even if pref is off

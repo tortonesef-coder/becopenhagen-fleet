@@ -18,6 +18,7 @@
 const { chromium } = require('playwright');
 const { getDb, isNotifEnabled } = require('../../src/db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
+const { guideMatches } = require('../../src/guide-name-match');
 
 const COMPANY_SLUG = 'becopenhagen';
 
@@ -232,8 +233,8 @@ async function main() {
 
       // Collect assignment for batched digest email (sent once per guide at the end)
       if (isNewAssignment || isReassignment) {
-        const member = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
-          .get(av.guide, `%${av.guide}%`);
+        const allMembers = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1`).all();
+        const member = allMembers.find(m => guideMatches(av.guide, m.name));
         if (member?.email && isNotifEnabled(member.id, 'tour_assigned')) {
           if (!assignmentDigest.has(member.id)) {
             assignmentDigest.set(member.id, { member, items: [] });
@@ -309,8 +310,8 @@ async function main() {
       console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
 
       if (row.guide) {
-        const member = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
-          .get(row.guide, `%${row.guide}%`);
+        const allMembers = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1`).all();
+        const member = allMembers.find(m => guideMatches(row.guide, m.name));
         if (member?.email && isNotifEnabled(member.id, 'tour_cancelled')) {
           const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
           const htmlContent = `
