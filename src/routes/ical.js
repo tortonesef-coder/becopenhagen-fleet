@@ -262,11 +262,12 @@ function syncFeedToDB(feed, events) {
       e.booking_count, JSON.stringify(e.bookings), e.url
     );
 
-    // Resolve unassigned_tour notification if guide is now assigned
+    // Resolve unassigned_tour notifications if guide is now assigned
     // (distinct from a manual dismiss — this allows the alert to fire again
     // if the guide is later removed)
     if (feed.type === 'tour' && e.guide) {
       resolveNotification('unassigned_tour', e.uid);
+      resolveNotification('unassigned_tour_urgent', e.uid + '-urgent');
     }
 
     // Notify admin if a tour in the next 14 days has no guide assigned
@@ -279,6 +280,19 @@ function syncFeedToDB(feed, events) {
           `Unassigned tour: ${feed.id} on ${e.start_date}`,
           `${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''} — no guide assigned yet.`,
           e.uid
+        );
+      }
+
+      // Urgent reminder: still unassigned within 2 days of the tour.
+      // Fires even if the original alert was dismissed — a dismissal means
+      // "I know, not urgent yet", not "never tell me about this again".
+      const twoDaysStr = new Date(Date.now() + 2 * 86400000).toISOString().substring(0, 10);
+      if (e.start_date > todayStr14 && e.start_date <= twoDaysStr) {
+        createNotification(
+          'unassigned_tour_urgent',
+          `Still unassigned — ${feed.id} on ${e.start_date} (soon!)`,
+          `${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''} — this tour is coming up and still has no guide.`,
+          e.uid + '-urgent'
         );
       }
     }

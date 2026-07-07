@@ -32,6 +32,12 @@ const tests = [
     ref_id: `test-unassigned-${stamp}`,
   },
   {
+    type: 'unassigned_tour_urgent',
+    title: `TEST: Still unassigned — A3 on 2026-07-09 (soon!)`,
+    body: `2 bookings — this tour is coming up and still has no guide.`,
+    ref_id: `test-unassigned-urgent-${stamp}`,
+  },
+  {
     type: 'unavailability',
     title: `TEST: Monica is unavailable: 2026-08-10 → 2026-08-15`,
     body: `Testing unavailability notification`,

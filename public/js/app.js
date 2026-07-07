@@ -1941,8 +1941,8 @@ async function renderNotifsAdmin(c) {
   }
 
   const notifs = data.notifications || [];
-  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉', bug_report: '🐛' };
-  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking', bug_report: 'Bug report' };
+  const typeIcon = { unassigned_tour: '⚠️', unassigned_tour_urgent: '🔥', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉', bug_report: '🐛' };
+  const typeLabel = { unassigned_tour: 'Unassigned tour', unassigned_tour_urgent: 'Urgent — unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking', bug_report: 'Bug report' };
 
   const notifPerm = ('Notification' in window) ? Notification.permission : 'unsupported';
   const permBanner = notifPerm === 'granted' ? '' : notifPerm === 'unsupported' ? '' : `
@@ -1962,7 +1962,7 @@ async function renderNotifsAdmin(c) {
     ${notifs.length === 0
       ? '<div class="empty-state"><p>No alerts — all clear ✅</p></div>'
       : notifs.map(n => `
-        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':n.type==='invoice'?'var(--green)':n.type==='first_booking_soon'?'var(--green)':'var(--blue)'}">
+        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'||n.type==='unassigned_tour_urgent'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':n.type==='invoice'?'var(--green)':n.type==='first_booking_soon'?'var(--green)':'var(--blue)'}">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem">
             <div>
               <div style="font-size:0.72rem;color:var(--text3);margin-bottom:2px">${typeIcon[n.type]||'🔔'} ${typeLabel[n.type]||n.type} · ${fmtDateFull(n.created_at?.substring(0,10))}</div>
