@@ -335,6 +335,7 @@ function syncFeedToDB(feed, events) {
     if (feed.type === 'tour') {
       const toDelete = db().prepare(`SELECT * FROM tour_availabilities
         WHERE feed_id=? AND availability_id NOT IN (${placeholders})
+        AND booking_count > 0
         AND start_at > datetime('now')`).all(feed.id, ...currentIds);
       toDelete.forEach(row => {
         if (!row.guide) return;
@@ -360,6 +361,7 @@ function syncFeedToDB(feed, events) {
     db().prepare(`DELETE FROM tour_availabilities
       WHERE feed_id=?
       AND availability_id NOT IN (${placeholders})
+      AND booking_count > 0
       AND (start_at > datetime('now') OR start_at < datetime('now', '-1 day'))`)
       .run(feed.id, ...currentIds);
   } else {

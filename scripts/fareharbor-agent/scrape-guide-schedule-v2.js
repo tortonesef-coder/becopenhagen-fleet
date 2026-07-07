@@ -257,6 +257,41 @@ async function main() {
     }
 
     console.log(`\nDone. ${upserted} availabilities synced in one pass.`);
+
+    // Deletion pass: any future tour slot in the DB that is NOT in the calendar
+    // anymore has been cancelled/closed in FareHarbor. Delete + notify guide.
+    const seenIds = new Set(all.map(a => a.availability_id));
+    const lastSyncedDate = all.map(a => a.start_date).sort().pop() || todayStr;
+    const dbFuture = db.prepare(`
+      SELECT * FROM tour_availabilities
+      WHERE feed_type='tour' AND start_date > ? AND start_date <= ?
+    `).all(todayStr, lastSyncedDate);
+
+    for (const row of dbFuture) {
+      if (seenIds.has(row.availability_id)) continue;
+      console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
+
+      if (row.guide) {
+        const member = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
+          .get(row.guide, `%${row.guide}%`);
+        if (member?.email && isNotifEnabled(member.id, 'tour_cancelled')) {
+          const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+          const htmlContent = `
+            <p>Hi ${member.name},</p>
+            <p>The following tour has been cancelled:</p>
+            <table style="border-collapse:collapse;margin:0.5rem 0">
+              <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${row.feed_label || row.feed_id}</td></tr>
+              <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
+              <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
+            </table>
+            ${EMAIL_FOOTER}`;
+          await sendEmail({ to: member.email, toName: member.name, subject: `Tour cancelled — ${row.feed_id} on ${dateLabel}`, htmlContent })
+            .catch(e => console.error(`Cancel email failed:`, e.message));
+        }
+      }
+      db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
+      db.prepare('DELETE FROM guide_tour_hours WHERE availability_id=? AND start_at > datetime(\'now\')').run(row.availability_id);
+    }
   } finally {
     await browser.close();
   }
