@@ -64,11 +64,12 @@ function resolveGuideName(crewMember) {
 async function fetchResourceLookup(page, activeGuideNames) {
   const guideResourceIds = new Map(); // resourcePk -> guide name
   let guidedTourBikesId = null;
+  let electricCargoBikeId = null; // single shared prop for the Food Tour — not a per-customer bike, always excluded from counts
 
   try {
     const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/resources/?include-archived=yes`;
     const resp = await page.request.get(url, { timeout: 30000 });
-    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, guidedTourBikesId }; }
+    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, guidedTourBikesId, electricCargoBikeId }; }
     const data = await resp.json();
     const resources = Array.isArray(data) ? data : (data.objects || data.resources || []);
     for (const r of resources) {
@@ -82,13 +83,16 @@ async function fetchResourceLookup(page, activeGuideNames) {
       if (/^guided tour bikes$/i.test(baseName)) {
         guidedTourBikesId = String(pk);
       }
+      if (/^electric cargo bike$/i.test(baseName)) {
+        electricCargoBikeId = String(pk);
+      }
     }
-    console.log(`  Resource lookup: ${guideResourceIds.size} guide resources, guided tour bikes id=${guidedTourBikesId || 'not found'}`);
+    console.log(`  Resource lookup: ${guideResourceIds.size} guide resources, guided tour bikes id=${guidedTourBikesId || 'not found'}, electric cargo bike id=${electricCargoBikeId || 'not found'}`);
   } catch (e) {
     console.log('  Resource lookup fetch failed:', e.message);
   }
 
-  return { guideResourceIds, guidedTourBikesId };
+  return { guideResourceIds, guidedTourBikesId, electricCargoBikeId };
 }
 
 async function login(browser) {
@@ -156,7 +160,7 @@ function categorizeBikeResource(name, resourcePk, guidedTourBikesId) {
 // guide-blocking resources. Guide resources are identified primarily by
 // resource ID (always present, even when the object is abbreviated) with
 // name-text matching as a fallback for guides not yet in the ID lookup.
-function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId) {
+function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, feedIdForAlert, startDateForAlert) {
   const bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 };
   let total = 0;
   for (const entry of av.resource_use_summaries || []) {
@@ -168,12 +172,25 @@ function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guide
       || (baseName && activeGuideNames.some(gn => guideMatches(baseName, gn)));
     if (isGuideResource) continue;
 
+    // Electric Cargo Bike is a single shared prop used only for the Food Tour —
+    // it's not a per-customer bike and its usage figure is expected to be
+    // fractional (shared/prorated). Always exclude it, no warning needed.
+    const isElectricCargoBike = electricCargoBikeId && resourcePk === electricCargoBikeId;
+    if (isElectricCargoBike) continue;
+
     const count = entry.total_use_count || 0;
     if (count <= 0) continue;
-    // Guard against any other fractional/non-integer values we haven't
-    // identified a cause for yet — never let a bad number reach the UI
+
+    // Any OTHER bike resource reporting a fractional count is unexpected —
+    // flag it for review instead of silently guessing
     if (!Number.isInteger(count)) {
       console.log(`  WARNING: non-integer resource count (${count}) on resource ${resourcePk || 'unknown'} (${rawName || 'unnamed'}) — skipping`);
+      createNotification(
+        'bike_data_anomaly',
+        `Unexpected fractional bike count — ${feedIdForAlert || ''} on ${startDateForAlert || ''}`,
+        `Resource "${rawName || resourcePk}" reported ${count} — expected a whole number. Skipped from bike total; worth checking in FareHarbor.`,
+        av.pk + '-' + resourcePk
+      );
       continue;
     }
 
@@ -212,7 +229,7 @@ function extractGuideFromResources(av, activeGuideNames, guideResourceIds) {
   return matches;
 }
 
-function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId) {
+function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId) {
   const out = [];
   const weeks = calendarJson?.calendar?.weeks || [];
   for (const week of weeks) {
@@ -258,7 +275,7 @@ function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds,
         // text-based count entirely.
         const isPrivateTour = TOUR_ITEMS[itemPk].feed_id.endsWith('P');
         const { bikesNeeded, total: totalBikes } = isPrivateTour
-          ? extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId)
+          ? extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at)
           : { bikesNeeded: { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 }, total: 0 };
         const resourceGuides = extractGuideFromResources(av, activeGuideNames, guideResourceIds);
 
@@ -303,7 +320,7 @@ async function main() {
     const page = await login(browser);
 
     console.log('Fetching resource lookup (guide IDs, guided tour bikes ID)...');
-    const { guideResourceIds, guidedTourBikesId } = await fetchResourceLookup(page, activeGuideNames);
+    const { guideResourceIds, guidedTourBikesId, electricCargoBikeId } = await fetchResourceLookup(page, activeGuideNames);
 
     // Current month + next month covers 30+ days ahead
     const now = new Date();
@@ -318,7 +335,7 @@ async function main() {
       const jsonResponses = await fetchMonth(page, y, m);
       let monthCount = 0;
       for (const json of jsonResponses) {
-        const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId);
+        const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId);
         monthCount += avs.length;
         all = all.concat(avs);
       }

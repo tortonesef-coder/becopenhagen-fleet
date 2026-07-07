@@ -1949,8 +1949,8 @@ async function renderNotifsAdmin(c) {
   }
 
   const notifs = data.notifications || [];
-  const typeIcon = { unassigned_tour: '⚠️', unassigned_tour_urgent: '🔥', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉', bug_report: '🐛', guide_mismatch: '🔀' };
-  const typeLabel = { unassigned_tour: 'Unassigned tour', unassigned_tour_urgent: 'Urgent — unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking', bug_report: 'Bug report', guide_mismatch: 'Guide mismatch' };
+  const typeIcon = { unassigned_tour: '⚠️', unassigned_tour_urgent: '🔥', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉', bug_report: '🐛', guide_mismatch: '🔀', bike_data_anomaly: '🚲' };
+  const typeLabel = { unassigned_tour: 'Unassigned tour', unassigned_tour_urgent: 'Urgent — unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking', bug_report: 'Bug report', guide_mismatch: 'Guide mismatch', bike_data_anomaly: 'Bike data anomaly' };
 
   const notifPerm = ('Notification' in window) ? Notification.permission : 'unsupported';
   const permBanner = notifPerm === 'granted' ? '' : notifPerm === 'unsupported' ? '' : `
