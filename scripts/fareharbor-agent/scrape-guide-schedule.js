@@ -201,26 +201,40 @@ async function main() {
     await ensureLoggedIn();
     let totalUpserted = 0;
 
+    // Step 1: Collect ALL availability IDs from the public widget for all items first
+    // This is fast (no login needed) and gives us the full picture
+    console.log('\nCollecting availability IDs from public widget...');
+    const allAvailabilities = []; // { availabilityId, item, date }
+
     for (const item of TOUR_ITEMS) {
-      console.log(`\nScraping ${item.feed_id} (item ${item.id})...`);
+      const avails = await scrapeAvailabilityIds(browser, item.id, DAYS_AHEAD);
+      avails.forEach(a => allAvailabilities.push({ ...a, item }));
+      console.log(`  ${item.feed_id}: ${avails.length} IDs`);
+    }
 
-      // Step 2: Scrape public widget for availability IDs
-      const availabilities = await scrapeAvailabilityIds(browser, item.id, DAYS_AHEAD);
-      console.log(`  Found ${availabilities.length} availability IDs from widget`);
+    // Step 2: Sort by date so we process nearest days first across all tour types
+    // IDs without a date go at the end
+    allAvailabilities.sort((a, b) => {
+      if (!a.date && !b.date) return 0;
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return a.date.localeCompare(b.date);
+    });
 
-      // Step 3: For each, fetch dashboard details
-      for (const { availabilityId } of availabilities) {
-        await ensureLoggedIn();
-        console.log(`  Fetching details for availability ${availabilityId}...`);
-        const details = await fetchAvailabilityDetails(dashPage, item.id, availabilityId);
-        if (!details) { dashPage = null; continue; } // force re-login on next iteration
+    console.log(`\nTotal: ${allAvailabilities.length} availabilities to check (sorted by date)`);
 
-        const { guide, bookingCount, startAt, endAt, startDate, startTime, endTime } = details;
-        if (!startDate) { console.log(`  Skipping ${availabilityId} — could not parse date`); continue; }
+    // Step 3: Hit dashboard for each, nearest dates first
+    for (const { availabilityId, item } of allAvailabilities) {
+      await ensureLoggedIn();
+      console.log(`  Fetching ${item.feed_id} availability ${availabilityId}...`);
+      const details = await fetchAvailabilityDetails(dashPage, item.id, availabilityId);
+      if (!details) { dashPage = null; continue; }
 
-        // Skip slots in the past (use same UTC comparison fix)
-        const endUtc = endAt ? new Date(endAt) : null;
-        if (!startDate || (endUtc && endUtc < new Date())) continue;
+      const { guide, bookingCount, startAt, endAt, startDate, startTime, endTime } = details;
+      if (!startDate) { console.log(`  Skipping ${availabilityId} — could not parse date`); continue; }
+
+      const endUtc = endAt ? new Date(endAt) : null;
+      if (endUtc && endUtc < new Date()) continue;
 
         const durationMinutes = Math.round(item.duration_h * 60) + 30; // + 15min buffer each side
 
@@ -290,7 +304,6 @@ async function main() {
         // Random delay 2-5s to avoid rate limiting
         await delay(2000, 5000);
       }
-    }
 
     console.log(`\nDone. ${totalUpserted} availabilities upserted.`);
   } finally {
