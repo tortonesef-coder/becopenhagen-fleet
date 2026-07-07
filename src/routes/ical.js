@@ -276,6 +276,21 @@ function syncFeedToDB(feed, events) {
         e.uid
       );
     }
+    // Notify admin: first booking on a tour happening in the next 7 days
+    if (feed.type === 'tour' && prevCount === 0 && e.booking_count >= 1 && e.start_date) {
+      const todayStr = new Date().toISOString().substring(0, 10);
+      const sevenDaysStr = new Date(Date.now() + 7 * 86400000).toISOString().substring(0, 10);
+      if (e.start_date >= todayStr && e.start_date <= sevenDaysStr) {
+        const dateLbl = new Date(e.start_date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+        createNotification(
+          'first_booking_soon',
+          `First booking: ${e.feed_id} on ${dateLbl}`,
+          `${e.start_time} — ${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''}${e.guide ? ` — guide: ${e.guide}` : ' — no guide assigned yet'}.`,
+          e.uid
+        );
+      }
+    }
+
     if (feed.type !== 'tour' || !guide || !e.start_date || e.start_date < new Date().toISOString().substring(0, 10)) return;
 
     const member = db().prepare('SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)').get(guide, `%${guide}%`);

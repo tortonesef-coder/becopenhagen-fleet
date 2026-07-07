@@ -1885,8 +1885,8 @@ async function renderNotifsAdmin(c) {
   }
 
   const notifs = data.notifications || [];
-  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾' };
-  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice' };
+  const typeIcon = { unassigned_tour: '⚠️', unavailability: '📅', conflict: '🚨', invoice: '🧾', first_booking_soon: '🎉' };
+  const typeLabel = { unassigned_tour: 'Unassigned tour', unavailability: 'Guide unavailability', conflict: 'Conflict', invoice: 'New invoice', first_booking_soon: 'First booking' };
 
   c.innerHTML = `
     <div class="detail-section" style="border-top:none;padding-top:0;display:flex;justify-content:space-between;align-items:center">
@@ -1896,7 +1896,7 @@ async function renderNotifsAdmin(c) {
     ${notifs.length === 0
       ? '<div class="empty-state"><p>No alerts — all clear ✅</p></div>'
       : notifs.map(n => `
-        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':n.type==='invoice'?'var(--green)':'var(--blue)'}">
+        <div style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--radius);border-left:3px solid ${n.type==='conflict'?'var(--red)':n.type==='unassigned_tour'?'var(--amber)':n.type==='invoice'?'var(--green)':n.type==='first_booking_soon'?'var(--green)':'var(--blue)'}">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem">
             <div>
               <div style="font-size:0.72rem;color:var(--text3);margin-bottom:2px">${typeIcon[n.type]||'🔔'} ${typeLabel[n.type]||n.type} · ${fmtDateFull(n.created_at?.substring(0,10))}</div>
