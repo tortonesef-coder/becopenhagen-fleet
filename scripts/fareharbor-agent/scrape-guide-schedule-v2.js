@@ -189,6 +189,7 @@ async function main() {
 
     const todayStr = new Date().toISOString().substring(0, 10);
     let upserted = 0;
+    const assignmentDigest = new Map(); // member.id -> { member, items: [...] }
 
     for (const av of all) {
       if (av.start_date < todayStr) continue; // skip past
@@ -229,30 +230,23 @@ async function main() {
         `).run(av.availability_id, av.guide, av.item.feed_id, av.item.label, av.start_at, av.end_at, av.start_date, durationMinutes);
       }
 
-      // Assignment email
-      if ((isNewAssignment || isReassignment)) {
+      // Collect assignment for batched digest email (sent once per guide at the end)
+      if (isNewAssignment || isReassignment) {
         const member = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND (name=? OR name LIKE ?)`)
           .get(av.guide, `%${av.guide}%`);
         if (member?.email && isNotifEnabled(member.id, 'tour_assigned')) {
-          const dateLabel = new Date(av.start_date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-          const subject = isReassignment
-            ? `Tour update — ${av.item.feed_id} on ${dateLabel}`
-            : `New tour assigned — ${av.item.feed_id} on ${dateLabel}`;
-          const htmlContent = `
-            <p>Hi ${member.name},</p>
-            <p>${isReassignment ? 'Your assignment has been updated:' : 'You have been assigned to a new tour:'}</p>
-            <table style="border-collapse:collapse;margin:0.5rem 0">
-              <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${av.item.label}</td></tr>
-              <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
-              <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${startTime}${endTime ? ' – ' + endTime : ''}</td></tr>
-              <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${av.booking_count} so far</td></tr>
-              ${isReassignment ? `<tr><td style="padding:3px 12px 3px 0;color:#888">Previously</td><td>${prev.guide}</td></tr>` : ''}
-            </table>
-            <p>You can see all your upcoming tours in the app.</p>
-            ${EMAIL_FOOTER}`;
-          await sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
-            .catch(e => console.error(`Email failed for ${member.name}:`, e.message));
-          console.log(`📧 ${isReassignment ? 'Reassignment' : 'Assignment'} email → ${member.name} (${av.item.feed_id} ${av.start_date})`);
+          if (!assignmentDigest.has(member.id)) {
+            assignmentDigest.set(member.id, { member, items: [] });
+          }
+          assignmentDigest.get(member.id).items.push({
+            feed_id: av.item.feed_id,
+            feed_label: av.item.label,
+            start_date: av.start_date,
+            startTime, endTime,
+            booking_count: av.booking_count,
+            isReassignment,
+            previousGuide: prev?.guide,
+          });
         }
       }
 
@@ -261,6 +255,45 @@ async function main() {
     }
 
     console.log(`\nDone. ${upserted} availabilities synced in one pass.`);
+
+    // Send one digest email per guide with all their new/updated assignments
+    for (const { member, items } of assignmentDigest.values()) {
+      items.sort((a, b) => (a.start_date + a.startTime).localeCompare(b.start_date + b.startTime));
+      const newCount = items.filter(i => !i.isReassignment).length;
+      const updateCount = items.filter(i => i.isReassignment).length;
+
+      let subjectParts = [];
+      if (newCount > 0) subjectParts.push(`${newCount} new tour${newCount !== 1 ? 's' : ''}`);
+      if (updateCount > 0) subjectParts.push(`${updateCount} update${updateCount !== 1 ? 's' : ''}`);
+      const subject = `${subjectParts.join(', ')} assigned to you`;
+
+      const rows = items.map(i => {
+        const dateLabel = new Date(i.start_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        const tag = i.isReassignment
+          ? `<span style="font-size:0.72rem;color:#B8860B">updated${i.previousGuide ? ` (was ${i.previousGuide})` : ''}</span>`
+          : `<span style="font-size:0.72rem;color:#2E7D32">new</span>`;
+        return `<tr>
+          <td style="padding:5px 12px 5px 0;color:#888">${dateLabel}</td>
+          <td style="padding:5px 12px 5px 0;font-weight:600">${i.feed_id}</td>
+          <td style="padding:5px 12px 5px 0">${i.startTime}${i.endTime ? ' – ' + i.endTime : ''}</td>
+          <td style="padding:5px 12px 5px 0;color:#888">${i.booking_count} booking${i.booking_count !== 1 ? 's' : ''}</td>
+          <td style="padding:5px 0">${tag}</td>
+        </tr>`;
+      }).join('');
+
+      const htmlContent = `
+        <p>Hi ${member.name},</p>
+        <p>You have ${items.length} tour${items.length !== 1 ? 's' : ''} assigned or updated:</p>
+        <table style="border-collapse:collapse;margin:0.5rem 0">
+          ${rows}
+        </table>
+        <p>You can see all your upcoming tours in the app.</p>
+        ${EMAIL_FOOTER}`;
+
+      await sendEmail({ to: member.email, toName: member.name, subject, htmlContent })
+        .catch(e => console.error(`Digest email failed for ${member.name}:`, e.message));
+      console.log(`📧 Digest email → ${member.name}: ${items.length} tour(s) (${newCount} new, ${updateCount} updated)`);
+    }
 
     // Deletion pass: any future tour slot in the DB that is NOT in the calendar
     // anymore has been cancelled/closed in FareHarbor. Delete + notify guide.
