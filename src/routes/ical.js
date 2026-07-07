@@ -240,6 +240,7 @@ function parseIcal(text) {
       booking_count: bookings.length,
       url,
       description,
+      _rawBlock: block.substring(0, 4000), // cap size — full VEVENT text for forensic logging
     });
   });
 
@@ -278,8 +279,8 @@ function syncFeedToDB(feed, events) {
     const prevCount = prev?.booking_count ?? null;
     const guide = e.guide || prev?.guide;
 
-    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: e.guide, source: 'ical' });
-    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical' });
+    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: e.guide, source: 'ical', raw_data: e._rawBlock });
+    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical', raw_data: e._rawBlock });
 
     upsert.run(
       e.uid, feed.id, feed.label, feed.type,

@@ -311,6 +311,16 @@ router.get('/page-views', (req, res) => {
   res.json(rows);
 });
 
+// GET /api/webhook-log — admin audit log of raw incoming FareHarbor webhooks
+router.get('/webhook-log', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const hours = parseInt(req.query.hours, 10);
+  const rows = hours
+    ? db().prepare(`SELECT * FROM webhook_log WHERE created_at >= datetime('now', ?) ORDER BY created_at DESC LIMIT 300`).all(`-${hours} hours`)
+    : db().prepare(`SELECT * FROM webhook_log ORDER BY created_at DESC LIMIT 300`).all();
+  res.json(rows);
+});
+
 // GET /api/tour-changes — audit log of tour_availabilities changes (guide, bookings, cancellations)
 router.get('/tour-changes', (req, res) => {
   if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });

@@ -24,6 +24,7 @@ function runCleanup() {
     results.tour_change_log = db().prepare(`DELETE FROM tour_change_log WHERE created_at < datetime('now', ?)`).run(cutoff).changes;
     results.page_views = db().prepare(`DELETE FROM page_views WHERE created_at < datetime('now', ?)`).run(cutoff).changes;
     results.emails_sent = db().prepare(`DELETE FROM emails_sent WHERE sent_at < datetime('now', ?)`).run(cutoff).changes;
+    results.webhook_log = db().prepare(`DELETE FROM webhook_log WHERE created_at < datetime('now', ?)`).run(cutoff).changes;
     // Only clean up admin_notifications that were already dismissed/resolved —
     // never delete something still active and unseen
     results.admin_notifications = db().prepare(`DELETE FROM admin_notifications WHERE dismissed=1 AND created_at < datetime('now', ?)`).run(cutoff).changes;

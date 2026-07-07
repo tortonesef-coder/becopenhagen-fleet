@@ -145,6 +145,7 @@ function extractAvailabilities(calendarJson) {
           booking_count: av.booking_count ?? 0,
           customer_count: av.customer_count ?? 0,
           guide,
+          _raw: JSON.stringify(av).substring(0, 4000), // capped — full record for forensic logging
         });
       }
     }
@@ -217,8 +218,8 @@ async function main() {
       // -> "Federico"), which would otherwise look like a false reassignment
       const isReassignment = av.guide && prev?.guide && !guideMatches(prev.guide, av.guide);
 
-      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide, source: 'v2' });
-      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'booking_count', old_value: prev?.booking_count, new_value: av.booking_count, source: 'v2' });
+      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide, source: 'v2', raw_data: av._raw });
+      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'booking_count', old_value: prev?.booking_count, new_value: av.booking_count, source: 'v2', raw_data: av._raw });
 
       db.prepare(`
         INSERT INTO tour_availabilities
@@ -329,7 +330,7 @@ async function main() {
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
       console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
-      logTourChange(db, { availability_id: row.availability_id, feed_id: row.feed_id, start_date: row.start_date, field: 'status', old_value: 'active', new_value: 'cancelled', source: 'v2' });
+      logTourChange(db, { availability_id: row.availability_id, feed_id: row.feed_id, start_date: row.start_date, field: 'status', old_value: 'active', new_value: 'cancelled', source: 'v2', raw_data: JSON.stringify(row).substring(0, 4000) });
 
       if (row.guide) {
         const allMembers = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1`).all();

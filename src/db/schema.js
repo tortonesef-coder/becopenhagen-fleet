@@ -348,6 +348,14 @@ function initSchema() {
       old_value TEXT,
       new_value TEXT,
       source TEXT,
+      raw_data TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS webhook_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT,
+      raw_body TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -364,6 +372,7 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_page_views_created ON page_views(created_at);
     CREATE INDEX IF NOT EXISTS idx_page_views_actor ON page_views(actor);
     CREATE INDEX IF NOT EXISTS idx_emails_sent_created ON emails_sent(sent_at);
+    CREATE INDEX IF NOT EXISTS idx_webhook_log_created ON webhook_log(created_at);
 
     CREATE TABLE IF NOT EXISTS guide_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -412,6 +421,9 @@ function initSchema() {
 
   const notifCols = db.prepare("PRAGMA table_info(admin_notifications)").all().map(c => c.name);
   if (!notifCols.includes('resolved_at')) db.exec("ALTER TABLE admin_notifications ADD COLUMN resolved_at TEXT");
+
+  const changeCols = db.prepare("PRAGMA table_info(tour_change_log)").all().map(c => c.name);
+  if (!changeCols.includes('raw_data')) db.exec("ALTER TABLE tour_change_log ADD COLUMN raw_data TEXT");
 }
 
 module.exports = { getDb };

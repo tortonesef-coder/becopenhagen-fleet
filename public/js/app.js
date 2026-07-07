@@ -2081,6 +2081,7 @@ async function renderAppAdmin(c) {
     <div class="subtab-row">
       <button class="subtab${window._appAdminTab==='log'?' active':''}" onclick="switchAppAdminTab('log')">Log</button>
       <button class="subtab${window._appAdminTab==='changes'?' active':''}" onclick="switchAppAdminTab('changes')">Changes</button>
+      <button class="subtab${window._appAdminTab==='webhooks'?' active':''}" onclick="switchAppAdminTab('webhooks')">Webhooks</button>
       <button class="subtab${window._appAdminTab==='emails'?' active':''}" onclick="switchAppAdminTab('emails')">Emails</button>
       <button class="subtab${window._appAdminTab==='visits'?' active':''}" onclick="switchAppAdminTab('visits')">Visits</button>
       <button class="subtab${window._appAdminTab==='invoicing'?' active':''}" onclick="switchAppAdminTab('invoicing')">Invoicing</button>
@@ -2094,7 +2095,7 @@ async function renderAppAdmin(c) {
 async function switchAppAdminTab(tab) {
   window._appAdminTab = tab;
   logPageView(`app-admin.${tab}`);
-  const labels = {log:'Log', changes:'Changes', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
+  const labels = {log:'Log', changes:'Changes', webhooks:'Webhooks', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
   document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
   await renderAppAdminTab();
 }
@@ -2106,6 +2107,7 @@ async function renderAppAdminTab() {
   else if (window._appAdminTab === 'bugs') await renderBugReports(el);
   else if (window._appAdminTab === 'emails') await renderSentEmails(el);
   else if (window._appAdminTab === 'changes') await renderTourChanges(el);
+  else if (window._appAdminTab === 'webhooks') await renderWebhookLog(el);
   else if (window._appAdminTab === 'visits') await renderPageVisits(el);
   else if (window._appAdminTab === 'viewas') await renderViewAs(el);
   else await renderAdminLog(el);
@@ -2158,6 +2160,53 @@ async function loadTourChanges(hours) {
             → <strong>${escapeHtml(String(r.new_value ?? '∅'))}</strong>
           </div>
           <div style="font-size:0.7rem;color:var(--text3)">id: ${escapeHtml(r.availability_id)}</div>
+          ${r.raw_data ? `<details style="margin-top:4px"><summary style="font-size:0.72rem;color:var(--blue);cursor:pointer">raw source data</summary><pre style="font-size:0.68rem;background:var(--bg2);padding:6px 8px;border-radius:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;margin-top:4px">${escapeHtml(r.raw_data)}</pre></details>` : ''}
+        </div>`).join('')}
+    </div>
+  `;
+}
+
+async function renderWebhookLog(el) {
+  el.innerHTML = `
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;padding-top:0.5rem">
+      <select class="form-select" id="webhooks-window-select" style="flex:1">
+        <option value="24">Last 24 hours</option>
+        <option value="1">Last hour</option>
+        <option value="72">Last 3 days</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="webhook-log-list"><div class="empty-state"><p>Loading...</p></div></div>
+  `;
+  document.getElementById('webhooks-window-select').addEventListener('change', e => loadWebhookLog(e.target.value));
+  await loadWebhookLog('24');
+}
+
+async function loadWebhookLog(hours) {
+  const listEl = document.getElementById('webhook-log-list');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
+  let rows;
+  try {
+    rows = await api(`/api/webhook-log${hours ? '?hours=' + hours : ''}`);
+  } catch(e) {
+    listEl.innerHTML = `<div class="empty-state"><p>Could not load: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+  if (rows.length === 0) {
+    listEl.innerHTML = `<div class="empty-state"><p>No webhooks received in this window</p></div>`;
+    return;
+  }
+  listEl.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">${rows.length} webhook${rows.length!==1?'s':''} received</div>
+      ${rows.map(r => `
+        <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+            <span style="font-size:0.8rem;font-weight:700">${escapeHtml(r.event_type || 'unknown')}</span>
+            <span style="font-size:0.72rem;color:var(--text3)">${r.created_at}</span>
+          </div>
+          <details style="margin-top:4px"><summary style="font-size:0.72rem;color:var(--blue);cursor:pointer">raw payload</summary><pre style="font-size:0.68rem;background:var(--bg2);padding:6px 8px;border-radius:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;margin-top:4px">${escapeHtml(r.raw_body || '')}</pre></details>
         </div>`).join('')}
     </div>
   `;

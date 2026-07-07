@@ -64,6 +64,15 @@ function formatBikesNeeded(needed) {
 router.post('/fareharbor', express.json({ type: '*/*' }), (req, res) => {
   res.json({ ok: true }); // Always ack immediately
 
+  // Log the full raw payload verbatim, regardless of what we do with it —
+  // webhooks are low-volume and high-value, safe to keep in full
+  try {
+    db().prepare(`INSERT INTO webhook_log (event_type, raw_body) VALUES (?,?)`)
+      .run(req.body?.booking ? 'booking' : 'unknown', JSON.stringify(req.body).substring(0, 20000));
+  } catch (e) {
+    console.error('Failed to log raw webhook:', e.message);
+  }
+
   try {
     const payload = req.body;
     const booking = payload.booking;
