@@ -246,7 +246,6 @@ async function main() {
             startTime, endTime,
             booking_count: av.booking_count,
             isReassignment,
-            previousGuide: prev?.guide,
           });
         }
       }
@@ -266,26 +265,34 @@ async function main() {
       let subjectParts = [];
       if (newCount > 0) subjectParts.push(`${newCount} new tour${newCount !== 1 ? 's' : ''}`);
       if (updateCount > 0) subjectParts.push(`${updateCount} update${updateCount !== 1 ? 's' : ''}`);
-      const subject = `${subjectParts.join(', ')} assigned to you`;
+      const subject = items.length === 1
+        ? `Tour ${items[0].isReassignment ? 'updated' : 'assigned'} — ${items[0].feed_id} on ${new Date(items[0].start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
+        : `${subjectParts.join(' and ')} for you`;
 
       const rows = items.map(i => {
         const dateLabel = new Date(i.start_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
         const tag = i.isReassignment
-          ? `<span style="font-size:0.72rem;color:#B8860B">updated${i.previousGuide ? ` (was ${i.previousGuide})` : ''}</span>`
-          : `<span style="font-size:0.72rem;color:#2E7D32">new</span>`;
+          ? `<span style="font-size:0.7rem;font-weight:600;color:#B8860B;background:#FFF6E0;padding:2px 8px;border-radius:10px">time changed</span>`
+          : `<span style="font-size:0.7rem;font-weight:600;color:#2E7D32;background:#E8F5E9;padding:2px 8px;border-radius:10px">new</span>`;
         return `<tr>
-          <td style="padding:5px 12px 5px 0;color:#888">${dateLabel}</td>
-          <td style="padding:5px 12px 5px 0;font-weight:600">${i.feed_id}</td>
-          <td style="padding:5px 12px 5px 0">${i.startTime}${i.endTime ? ' – ' + i.endTime : ''}</td>
-          <td style="padding:5px 12px 5px 0;color:#888">${i.booking_count} booking${i.booking_count !== 1 ? 's' : ''}</td>
-          <td style="padding:5px 0">${tag}</td>
+          <td style="padding:7px 14px 7px 0;color:#888;font-size:0.88rem">${dateLabel}</td>
+          <td style="padding:7px 14px 7px 0;font-weight:700;font-size:0.9rem">${i.feed_id}</td>
+          <td style="padding:7px 14px 7px 0;font-size:0.88rem">${i.startTime}${i.endTime ? ' – ' + i.endTime : ''}</td>
+          <td style="padding:7px 14px 7px 0;color:#888;font-size:0.82rem">${i.booking_count} booking${i.booking_count !== 1 ? 's' : ''}</td>
+          <td style="padding:7px 0">${tag}</td>
         </tr>`;
       }).join('');
 
+      const intro = items.length === 1
+        ? (items[0].isReassignment
+            ? `The time for one of your tours has changed:`
+            : `You've been assigned to a new tour:`)
+        : `You've been assigned to ${items.length} tours:`;
+
       const htmlContent = `
         <p>Hi ${member.name},</p>
-        <p>You have ${items.length} tour${items.length !== 1 ? 's' : ''} assigned or updated:</p>
-        <table style="border-collapse:collapse;margin:0.5rem 0">
+        <p>${intro}</p>
+        <table style="border-collapse:collapse;margin:0.75rem 0">
           ${rows}
         </table>
         <p>You can see all your upcoming tours in the app.</p>

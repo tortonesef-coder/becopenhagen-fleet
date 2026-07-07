@@ -11,8 +11,6 @@ const EMAIL_FOOTER = `
   </p>
 `;
 
-module.exports.EMAIL_FOOTER = EMAIL_FOOTER;
-
 function getTransporter() {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -82,4 +80,4 @@ async function sendVerificationCodeEmail(toEmail, toName, code) {
   });
 }
 
-module.exports = { sendEmail, sendPasswordResetEmail, sendVerificationCodeEmail };
+module.exports = { sendEmail, sendPasswordResetEmail, sendVerificationCodeEmail, EMAIL_FOOTER };
