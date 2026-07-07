@@ -84,14 +84,22 @@ async function fetchMonth(page, year, month) {
 
   page.on('response', handler);
   const url = `https://fareharbor.com/${COMPANY_SLUG}/dashboard/bookings/calendar/${year}/${String(month).padStart(2, '0')}/`;
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(4000);
-  // Scroll to trigger any lazy-loaded weeks
-  for (let i = 0; i < 4; i++) {
-    await page.mouse.wheel(0, 800).catch(() => {});
-    await page.waitForTimeout(1500);
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+
+  // Keep waiting until no new calendar responses have arrived for 6 seconds
+  // (the calendar loads weeks progressively; a fixed wait misses later weeks)
+  let lastCount = 0;
+  let stableSince = Date.now();
+  const deadline = Date.now() + 90000; // hard cap 90s
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(1000);
+    if (captured.length !== lastCount) {
+      lastCount = captured.length;
+      stableSince = Date.now();
+    } else if (Date.now() - stableSince > 6000 && captured.length > 0) {
+      break;
+    }
   }
-  await page.waitForTimeout(3000);
   page.off('response', handler);
 
   if (captured.length === 0) throw new Error(`No calendar JSON captured for ${year}-${month}`);
