@@ -91,7 +91,12 @@ function parseIcal(text) {
     // tag, a note, anything — never another person's name. Always prefer the
     // real account name; only fall back to the trailing text for placeholder
     // accounts.
+    // `guideConfident` is true only when the guide came from a real account
+    // name (the reliable case). The trailing "Guide - X" text and the bare
+    // location/placeholder fallbacks are guesses — v2 (crew unicode) is the
+    // authority for those, so we mark them not-confident and let v2 own them.
     let guide = null;
+    let guideConfident = false;
     if (location) {
       const prefixMatch = location.match(/^([^(]+)\s*\(Guide/i);
       const prefixName = prefixMatch ? prefixMatch[1].trim() : null;
@@ -99,6 +104,7 @@ function parseIcal(text) {
 
       if (prefixName && !isPlaceholder) {
         guide = prefixName;
+        guideConfident = true;
       } else {
         const noteMatch = location.match(/Guide\s*[-–]\s*([^)]+)\)/i);
         if (noteMatch) guide = noteMatch[1].trim();
@@ -117,6 +123,7 @@ function parseIcal(text) {
 
         if (prefixName && !isPlaceholder) {
           guide = prefixName;
+          guideConfident = true;
         } else {
           const noteMatch = crew.match(/Guide\s*[-–]\s*([^)]+)\)/i);
           if (noteMatch) guide = noteMatch[1].trim();
@@ -229,6 +236,7 @@ function parseIcal(text) {
       summary: summary.replace(/\s*\(.*\)/, '').trim(),
       location,
       guide,
+      guide_confident: guideConfident,
       start: localStart.toISOString(),
       end: localEnd ? localEnd.toISOString() : null,
       start_date: localStart.toISOString().substring(0,10),
@@ -270,7 +278,9 @@ function syncFeedToDB(feed, events) {
        booking_count, bookings_json, url, last_synced)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
     ON CONFLICT(availability_id) DO UPDATE SET
-      guide=excluded.guide, start_at=excluded.start_at, end_at=excluded.end_at,
+      -- Guide: iCal passes NULL unless its parse is confident, so COALESCE
+      -- overwrites with a confident name but keeps v2's value otherwise.
+      guide=COALESCE(excluded.guide, guide), start_at=excluded.start_at, end_at=excluded.end_at,
       start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
       -- iCal owns the non-GT bike categories (parsed from the summary text);
       -- v2 owns GT (from FareHarbor resources). Merge per-key instead of
@@ -297,7 +307,14 @@ function syncFeedToDB(feed, events) {
     // Check previous state for notification triggers
     const prev = db().prepare('SELECT booking_count, guide, total_bikes, bookings_json FROM tour_availabilities WHERE availability_id=?').get(e.uid);
     const prevCount = prev?.booking_count ?? null;
-    const guide = e.guide || prev?.guide;
+    // Guide ownership: v2 (crew unicode) is authoritative. iCal only asserts a
+    // guide when its own parse is confident (a real account name); otherwise it
+    // leaves the stored guide untouched so v2 owns it. `icalGuide` is the value
+    // iCal is willing to write (null when not confident); the upsert uses
+    // COALESCE(excluded.guide, guide) so a confident parse overwrites (keeping
+    // reassignments fast) while a non-confident/blank parse never clobbers v2.
+    const icalGuide = e.guide_confident ? e.guide : null;
+    const guide = icalGuide || prev?.guide; // effective guide after this sync
 
     // The webhook sets booking.created_at when a booking first arrives, but
     // this 90-second iCal sync has no way to parse a creation date from the
@@ -317,7 +334,7 @@ function syncFeedToDB(feed, events) {
       } catch (err) { /* malformed prior JSON, skip merge */ }
     }
 
-    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: e.guide, source: 'ical', raw_data: e._rawBlock });
+    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: guide, source: 'ical', raw_data: e._rawBlock });
     logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical', raw_data: e._rawBlock });
     if (e.total_bikes > 0) {
       logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'total_bikes', old_value: prev?.total_bikes, new_value: e.total_bikes, source: 'ical', raw_data: e._rawBlock });
@@ -325,7 +342,7 @@ function syncFeedToDB(feed, events) {
 
     upsert.run(
       e.uid, feed.id, feed.label, feed.type,
-      e.guide, e.start, e.end,
+      icalGuide, e.start, e.end,
       e.start_date, e.start_time, e.end_time,
       e.summary, JSON.stringify(e.bikes_needed), e.total_bikes,
       e.booking_count, JSON.stringify(e.bookings), e.url
@@ -349,13 +366,13 @@ function syncFeedToDB(feed, events) {
     // Resolve unassigned_tour notifications if guide is now assigned
     // (distinct from a manual dismiss — this allows the alert to fire again
     // if the guide is later removed)
-    if (feed.type === 'tour' && e.guide) {
+    if (feed.type === 'tour' && guide) {
       resolveNotification('unassigned_tour', e.uid);
       resolveNotification('unassigned_tour_urgent', e.uid + '-urgent');
     }
 
     // Notify admin if a tour in the next 14 days has no guide assigned
-    if (feed.type === 'tour' && !e.guide && e.booking_count > 0 && e.start_date) {
+    if (feed.type === 'tour' && !guide && e.booking_count > 0 && e.start_date) {
       const todayStr14 = new Date().toISOString().substring(0, 10);
       const fourteenDaysStr = new Date(Date.now() + 14 * 86400000).toISOString().substring(0, 10);
       if (e.start_date > todayStr14 && e.start_date <= fourteenDaysStr) {
@@ -389,7 +406,7 @@ function syncFeedToDB(feed, events) {
         createNotification(
           'first_booking_soon',
           `First booking: ${feed.id} on ${dateLbl}`,
-          `${e.start_time} — ${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''}${e.guide ? ` — guide: ${e.guide}` : ' — no guide assigned yet'}.`,
+          `${e.start_time} — ${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''}${guide ? ` — guide: ${guide}` : ' — no guide assigned yet'}.`,
           e.uid
         );
       }
@@ -512,8 +529,12 @@ function syncFeedToDB(feed, events) {
         duration_minutes=excluded.duration_minutes, booking_count=excluded.booking_count, last_synced=excluded.last_synced
     `);
     events.forEach(e => {
-      if (!e.guide) return;
-      upsertHours.run(e.uid, e.guide, feed.id, feed.label, e.start, e.end, e.start_date,
+      // Only log hours off a confident iCal guide (a real account name).
+      // Placeholder/fuzzy cases are left to v2, which resolves the real guide
+      // via crew unicode and writes this row itself within the hour.
+      const icalGuide = e.guide_confident ? e.guide : null;
+      if (!icalGuide) return;
+      upsertHours.run(e.uid, icalGuide, feed.id, feed.label, e.start, e.end, e.start_date,
         computeBufferedMinutes(e.start, e.end, feed.id), e.booking_count);
     });
 
