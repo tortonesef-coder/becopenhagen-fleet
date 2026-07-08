@@ -172,23 +172,27 @@ function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guide
       || (baseName && activeGuideNames.some(gn => guideMatches(baseName, gn)));
     if (isGuideResource) continue;
 
-    // Electric Cargo Bike is a single shared prop used only for the Food Tour —
-    // it's not a per-customer bike and its usage figure is expected to be
-    // fractional (shared/prorated). Always exclude it, no warning needed.
-    const isElectricCargoBike = electricCargoBikeId && resourcePk === electricCargoBikeId;
-    if (isElectricCargoBike) continue;
+    // We've only ever confirmed reliable per-booking counts from the
+    // dedicated "Guided Tour Bikes" resource. Every other resource type
+    // has shown unreliable behavior in practice — the Electric Cargo Bike
+    // reports fractional prorated values (expected, single shared prop),
+    // and the generic "Adult Bike" pool has been observed reporting its
+    // total FLEET capacity rather than a per-booking count on at least one
+    // private tour. Rather than guess at each resource's semantics, only
+    // ever trust the one resource we've actually validated; everything
+    // else is ignored (shows as "own bikes" rather than a wrong number).
+    const isGuidedTourBikes = guidedTourBikesId && resourcePk === guidedTourBikesId;
+    if (!isGuidedTourBikes) continue;
 
     const count = entry.total_use_count || 0;
     if (count <= 0) continue;
 
-    // Any OTHER bike resource reporting a fractional count is unexpected —
-    // flag it for review instead of silently guessing
     if (!Number.isInteger(count)) {
-      console.log(`  WARNING: non-integer resource count (${count}) on resource ${resourcePk || 'unknown'} (${rawName || 'unnamed'}) — skipping`);
+      console.log(`  WARNING: non-integer Guided Tour Bikes count (${count}) — skipping`);
       createNotification(
         'bike_data_anomaly',
         `Unexpected fractional bike count — ${feedIdForAlert || ''} on ${startDateForAlert || ''}`,
-        `Resource "${rawName || resourcePk}" reported ${count} — expected a whole number. Skipped from bike total; worth checking in FareHarbor.`,
+        `Guided Tour Bikes reported ${count} — expected a whole number. Skipped from bike total; worth checking in FareHarbor.`,
         av.pk + '-' + resourcePk
       );
       continue;

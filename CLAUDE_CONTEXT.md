@@ -333,7 +333,7 @@ Fede explicitly rejected ad-hoc inline `node -e "..."` one-liners mid-session ("
 - `execFile` (not `exec`) required for passing JSON `--items` arg safely
 - Internal calendar JSON API (used by the v2 guide-schedule scraper) is preferred over page-scraping where available — far faster and more reliable
 - Crew-role detection: use `crewMember.unicode`, not `group.role.short_name` (the latter is frequently abbreviated/empty due to payload deduplication)
-- Bike-count extraction via `resource_use_summaries` is reliable only for private tours; group tours' shared resources (e.g. Electric Cargo Bike) report fractional/unreliable values
+- Bike-count extraction via `resource_use_summaries` is reliable **only** for the specific "Guided Tour Bikes" resource (identified by ID, not name). Every other resource type has shown unreliable behavior in practice: Electric Cargo Bike reports fractional prorated values (expected — single shared prop), and the generic "Adult Bike" pool has been observed reporting total fleet capacity instead of a per-booking count on at least one private tour. Only that one confirmed resource is ever trusted; everything else is ignored rather than guessed at.
 
 ### Private tour types
 `L2P, L3P, A3P, F3P, H3P, CUSTOM`. No "Can keep bikes after tour" flag, no unassigned visibility. Zero-booking private tours in this set are also fully excluded from: Tours list, guide upcoming-hours tracking, and assignment emails.
