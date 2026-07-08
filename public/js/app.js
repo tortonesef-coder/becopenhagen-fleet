@@ -2107,18 +2107,13 @@ async function renderAllToursView(el) {
 
 // ── App tab (Log, Invoicing, Bugs, View as) ───────────────────────────────
 async function renderAppAdmin(c) {
-  if (!window._appAdminTab) window._appAdminTab = 'log';
+  if (!window._appAdminTab) window._appAdminTab = 'bookings-history';
+  // Decluttered: the five diagnostic logs (Action/Changes/Webhooks/Emails/Visits)
+  // now live behind a single "Logs" tab instead of cluttering the top row.
+  const main = [['bookings-history','Bookings'],['invoicing','Invoicing'],['bugs','Bugs'],['logs','Logs'],['viewas','View as']];
   c.innerHTML = `
     <div class="subtab-row">
-      <button class="subtab${window._appAdminTab==='log'?' active':''}" onclick="switchAppAdminTab('log')">Log</button>
-      <button class="subtab${window._appAdminTab==='changes'?' active':''}" onclick="switchAppAdminTab('changes')">Changes</button>
-      <button class="subtab${window._appAdminTab==='bookings-history'?' active':''}" onclick="switchAppAdminTab('bookings-history')">Bookings</button>
-      <button class="subtab${window._appAdminTab==='webhooks'?' active':''}" onclick="switchAppAdminTab('webhooks')">Webhooks</button>
-      <button class="subtab${window._appAdminTab==='emails'?' active':''}" onclick="switchAppAdminTab('emails')">Emails</button>
-      <button class="subtab${window._appAdminTab==='visits'?' active':''}" onclick="switchAppAdminTab('visits')">Visits</button>
-      <button class="subtab${window._appAdminTab==='invoicing'?' active':''}" onclick="switchAppAdminTab('invoicing')">Invoicing</button>
-      <button class="subtab${window._appAdminTab==='bugs'?' active':''}" onclick="switchAppAdminTab('bugs')">Bugs</button>
-      <button class="subtab${window._appAdminTab==='viewas'?' active':''}" onclick="switchAppAdminTab('viewas')">View as</button>
+      ${main.map(([id,label])=>`<button class="subtab${window._appAdminTab===id?' active':''}" data-apptab="${id}" onclick="switchAppAdminTab('${id}')">${label}</button>`).join('')}
     </div>
     <div id="app-admin-content"></div>`;
   await renderAppAdminTab();
@@ -2127,22 +2122,49 @@ async function renderAppAdmin(c) {
 async function switchAppAdminTab(tab) {
   window._appAdminTab = tab;
   logPageView(`app-admin.${tab}`);
-  const labels = {log:'Log', changes:'Changes', 'bookings-history':'Bookings', webhooks:'Webhooks', emails:'Emails', visits:'Visits', invoicing:'Invoicing', bugs:'Bugs', viewas:'View as'};
-  document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
+  document.querySelectorAll('[data-apptab]').forEach(b => b.classList.toggle('active', b.dataset.apptab === tab));
   await renderAppAdminTab();
 }
 
 async function renderAppAdminTab() {
   const el = document.getElementById('app-admin-content');
   if (!el) return;
-  if (window._appAdminTab === 'invoicing') await renderAdminInvoicing(el);
-  else if (window._appAdminTab === 'bookings-history') await renderBookingsHistory(el);
-  else if (window._appAdminTab === 'bugs') await renderBugReports(el);
-  else if (window._appAdminTab === 'emails') await renderSentEmails(el);
-  else if (window._appAdminTab === 'changes') await renderTourChanges(el);
-  else if (window._appAdminTab === 'webhooks') await renderWebhookLog(el);
-  else if (window._appAdminTab === 'visits') await renderPageVisits(el);
-  else if (window._appAdminTab === 'viewas') await renderViewAs(el);
+  const tab = window._appAdminTab;
+  if (tab === 'invoicing') await renderAdminInvoicing(el);
+  else if (tab === 'bugs') await renderBugReports(el);
+  else if (tab === 'viewas') await renderViewAs(el);
+  else if (tab === 'logs') await renderAppLogs(el);
+  else await renderBookingsHistory(el);
+}
+
+// The rarely-needed diagnostic logs, grouped under the "Logs" tab.
+const APP_LOG_TABS = [
+  ['log','Action log'], ['changes','Tour changes'], ['webhooks','Webhooks'],
+  ['emails','Sent emails'], ['visits','Page visits'],
+];
+async function renderAppLogs(el) {
+  if (!window._appLogTab) window._appLogTab = 'log';
+  el.innerHTML = `
+    <div class="chip-row" style="margin:0.6rem 0 0.85rem">
+      ${APP_LOG_TABS.map(([id,label])=>`<button class="chip${window._appLogTab===id?' active':''}" data-logtab="${id}" onclick="switchAppLog('${id}')">${label}</button>`).join('')}
+    </div>
+    <div id="app-log-content"></div>`;
+  await renderCurrentLog();
+}
+async function switchAppLog(id) {
+  window._appLogTab = id;
+  logPageView(`app-admin.logs.${id}`);
+  document.querySelectorAll('[data-logtab]').forEach(b => b.classList.toggle('active', b.dataset.logtab === id));
+  await renderCurrentLog();
+}
+async function renderCurrentLog() {
+  const el = document.getElementById('app-log-content');
+  if (!el) return;
+  const t = window._appLogTab;
+  if (t === 'changes') await renderTourChanges(el);
+  else if (t === 'webhooks') await renderWebhookLog(el);
+  else if (t === 'emails') await renderSentEmails(el);
+  else if (t === 'visits') await renderPageVisits(el);
   else await renderAdminLog(el);
 }
 
@@ -3784,8 +3806,8 @@ function exitViewAs() {
   const banner = document.getElementById('view-as-banner');
   if (banner) banner.remove();
   buildTabbar();
-  renderTab('app-admin');
   window._appAdminTab = 'viewas';
+  renderTab('app-admin');
 }
 
 // ── Shop mode: ask who did this AFTER the action completes ──────────────
