@@ -2422,7 +2422,7 @@ async function renderGuidesMetrics(el) {
   const cycleEnd   = d >= 23 ? `${y+( m===11?1:0)}-${String((m+2)%12||12).padStart(2,'0')}-22` : `${y}-${String(m+1).padStart(2,'0')}-22`;
 
   const team = await api('/api/team').catch(()=>[]);
-  const guides = team.filter(g => g.role === 'guide');
+  const guides = team.filter(g => g.role === 'guide' || g.is_guide);
 
   const data = await Promise.all(guides.map(async g => {
     const [worked, upcoming, reviews] = await Promise.all([

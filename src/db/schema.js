@@ -199,7 +199,8 @@ function initSchema() {
       email TEXT,
       password_hash TEXT,
       password_salt TEXT,
-      needs_password_setup INTEGER DEFAULT 1
+      needs_password_setup INTEGER DEFAULT 1,
+      is_guide INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS password_resets (
@@ -461,6 +462,17 @@ function initSchema() {
     // booking — mark them notified so the new webhook trigger doesn't retro-fire
     // a "first booking" email to guides for every existing booked tour.
     db.exec("UPDATE tour_availabilities SET first_booking_notified=1 WHERE booking_count >= 1");
+  }
+
+  const tmCols2 = db.prepare("PRAGMA table_info(team_members)").all().map(c => c.name);
+  if (!tmCols2.includes('is_guide')) {
+    db.exec("ALTER TABLE team_members ADD COLUMN is_guide INTEGER DEFAULT 0");
+    // Real guides, plus the two admins who also run tours (Federico, Hassan),
+    // count as guides for the Guides & Tours list.
+    db.exec("UPDATE team_members SET is_guide=1 WHERE role='guide' OR id IN ('fede','hassan')");
+    // One-time display-name corrections (runs once, when this column is added).
+    db.exec("UPDATE team_members SET name='Federico' WHERE id='fede'");
+    db.exec("UPDATE team_members SET name='Paloma' WHERE id='pam'");
   }
 }
 

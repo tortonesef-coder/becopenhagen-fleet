@@ -33,12 +33,12 @@ types.forEach(t => insertType.run(...t));
 
 // Team
 const team = [
-  ['fede','Fede','admin'],['hassan','Hassan','admin'],
-  ['zac','Zac','mechanic'],['pam','Pam','guide'],
-  ['feidhlim','Féidhlim','guide'],['ibrahim','Ibrahim','guide'],
-  ['monica','Monica','guide'],['andrew','Andrew','guide'],
+  ['fede','Federico','admin',1],['hassan','Hassan','admin',1],
+  ['zac','Zac','mechanic',0],['pam','Paloma','guide',1],
+  ['feidhlim','Féidhlim','guide',1],['ibrahim','Ibrahim','guide',1],
+  ['monica','Monica','guide',1],['andrew','Andrew','guide',1],
 ];
-const insertTeam = db.prepare(`INSERT OR REPLACE INTO team_members (id,name,role,active) VALUES (?,?,?,1)`);
+const insertTeam = db.prepare(`INSERT OR REPLACE INTO team_members (id,name,role,active,is_guide) VALUES (?,?,?,1,?)`);
 team.forEach(m => insertTeam.run(...m));
 
 // Bikes [id, type_id, name, frame_number, model, frame_size, key_number, gender, notes]

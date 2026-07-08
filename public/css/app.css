@@ -1463,16 +1463,22 @@ details summary::-webkit-details-marker { display: none; }
 #btn-undo.live:active { background: var(--red-light); transform: scale(0.92); }
 
 /* ── Beta badge + bug report button ── */
-.beta-badge {
-  font-size: 0.62rem;
-  font-weight: 700;
-  color: var(--red);
-  background: var(--red-light);
-  border: 1px solid var(--red-mid);
-  padding: 1px 6px;
-  border-radius: 10px;
-  letter-spacing: 0.04em;
+.report-bug-btn {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text2);
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 3px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
   flex-shrink: 0;
+}
+.report-bug-btn:hover {
+  color: var(--text);
+  border-color: var(--red-mid);
+  background: var(--red-light);
 }
 
 .topbar-left {
