@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/schema');
+const { notifyFirstBooking } = require('../notify-first-booking');
 
 function db() { return getDb(); }
 
@@ -187,6 +188,11 @@ router.post('/fareharbor', express.json({ type: '*/*' }), (req, res) => {
         else bookings.push(bookingRecord);
         db().prepare('UPDATE tour_availabilities SET bookings_json=?, booking_count=? WHERE availability_id=?')
           .run(JSON.stringify(bookings), bookings.length, availId);
+        // The webhook is the real-time booking event — fire the first-booking
+        // notification here (claimed atomically, so it sends exactly once even
+        // if the iCal sync also tries). This fixes the old race where the
+        // webhook bumped the count before the 90s sync could see the 0->1 jump.
+        notifyFirstBooking(availId);
       }
     } catch(e) { console.error('Could not update tour_availabilities from webhook:', e.message); }
 

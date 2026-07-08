@@ -5,6 +5,7 @@ const { sendEmail, EMAIL_FOOTER } = require('../email');
 const { createNotification, resolveNotification } = require('./admin-notifs');
 const { logTourChange } = require('../tour-change-log');
 const { computeBufferedMinutes } = require('../tour-duration');
+const { notifyFirstBooking } = require('../notify-first-booking');
 
 function db() { return getDb(); }
 
@@ -395,19 +396,16 @@ function syncFeedToDB(feed, events) {
         );
       }
     }
-    // Notify admin: first booking on a tour happening in the next 7 days
-    if (feed.type === 'tour' && (prevCount === 0 || prevCount === null) && e.booking_count >= 1 && e.start_date) {
-      const todayStr = new Date().toISOString().substring(0, 10);
-      const sevenDaysStr = new Date(Date.now() + 7 * 86400000).toISOString().substring(0, 10);
-      if (e.start_date >= todayStr && e.start_date <= sevenDaysStr) {
-        const dateLbl = new Date(e.start_date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-        createNotification(
-          'first_booking_soon',
-          `First booking: ${feed.id} on ${dateLbl}`,
-          `${e.start_time} — ${e.booking_count} booking${e.booking_count !== 1 ? 's' : ''}${guide ? ` — guide: ${guide}` : ' — no guide assigned yet'}.`,
-          e.uid
-        );
-      }
+    // First booking on this slot — fire once via the shared notifier. The
+    // webhook covers everything that fires a webhook (direct/GYG/Viator); this
+    // covers Airbnb, which never fires our webhook. The atomic claim inside
+    // means the two never double-send. Handles the admin alert + guide email.
+    if (feed.type === 'tour' && e.booking_count >= 1) {
+      notifyFirstBooking(e.uid);
+    } else if (feed.type === 'tour' && e.booking_count === 0) {
+      // Slot emptied (all bookings cancelled) — re-arm so a future first
+      // booking notifies again.
+      db().prepare("UPDATE tour_availabilities SET first_booking_notified=0 WHERE availability_id=? AND first_booking_notified=1").run(e.uid);
     }
 
     if (feed.type !== 'tour' || !guide || !e.start_date || e.start_date < new Date().toISOString().substring(0, 10)) return;
@@ -419,22 +417,8 @@ function syncFeedToDB(feed, events) {
 
     const dateLabel = new Date(e.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
-    // First booking arrived
-    if ((prevCount === 0 || prevCount === null) && e.booking_count >= 1 && isNotifEnabled(member.id || memberId, 'first_booking')) {
-      const subject = `First booking — ${e.feed_id} on ${dateLabel}`;
-      const htmlContent = `
-        <p>Hi ${member.name},</p>
-        <p>Your first booking just came in for:</p>
-        <table style="border-collapse:collapse;margin:0.5rem 0">
-          <tr><td style="padding:3px 12px 3px 0;color:#888">Tour</td><td>${e.feed_label || e.feed_id}</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#888">Date</td><td>${dateLabel}</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${e.start_time}${e.end_time ? ' – ' + e.end_time : ''}</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#888">Bookings</td><td>${e.booking_count}</td></tr>
-        </table>
-        ${EMAIL_FOOTER}`;
-      sendEmail({ to: member.email, toName: member.name, subject, htmlContent, category: 'first_booking' })
-        .catch(err => console.error('Email error (first booking):', err.message));
-    }
+    // First-booking guide email is now sent by notifyFirstBooking (above),
+    // shared with the webhook. Only the zero-bookings email remains here.
 
     // Last booking lost, slot still open
     if (prevCount >= 1 && e.booking_count === 0 && isNotifEnabled(member.id || memberId, 'zero_bookings')) {

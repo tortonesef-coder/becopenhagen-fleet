@@ -262,7 +262,8 @@ function initSchema() {
       booking_count INTEGER DEFAULT 0,
       bookings_json TEXT DEFAULT '[]',
       url TEXT,
-      last_synced TEXT
+      last_synced TEXT,
+      first_booking_notified INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS guide_tour_hours (
@@ -447,6 +448,15 @@ function initSchema() {
 
   const gthCols = db.prepare("PRAGMA table_info(guide_tour_hours)").all().map(c => c.name);
   if (!gthCols.includes('booking_count')) db.exec("ALTER TABLE guide_tour_hours ADD COLUMN booking_count INTEGER DEFAULT 0");
+
+  const taCols = db.prepare("PRAGMA table_info(tour_availabilities)").all().map(c => c.name);
+  if (!taCols.includes('first_booking_notified')) {
+    db.exec("ALTER TABLE tour_availabilities ADD COLUMN first_booking_notified INTEGER DEFAULT 0");
+    // Critical: tours that ALREADY have bookings have already had their first
+    // booking — mark them notified so the new webhook trigger doesn't retro-fire
+    // a "first booking" email to guides for every existing booked tour.
+    db.exec("UPDATE tour_availabilities SET first_booking_notified=1 WHERE booking_count >= 1");
+  }
 }
 
 module.exports = { getDb };
