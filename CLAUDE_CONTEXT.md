@@ -3,13 +3,16 @@
 # Last updated: 2026-07-08
 
 > **MAINTENANCE RULE — READ FIRST:** This file must be kept up to date with
-> every change made to this codebase. Any time a file is added, a schema is
-> altered, a route is created or removed, a feature ships or changes status,
-> or an open item is resolved — update the relevant section of this document
-> **in the same commit** as the change itself, not as an afterthought or a
-> separate later pass. If you are Claude working in this repo and you just
-> shipped something, updating this file is part of finishing the task, not
-> optional cleanup.
+> every change made to this codebase, AND it must be actively referred to
+> before making changes — not just written to after the fact. Any time a
+> file is added, a schema is altered, a route is created or removed, a
+> feature ships or changes status, or an open item is resolved — update the
+> relevant section of this document **in the same commit** as the change
+> itself, not as an afterthought or a separate later pass. If you are Claude
+> working in this repo and you just shipped something, updating this file is
+> part of finishing the task, not optional cleanup. Before starting
+> nontrivial work, read the relevant sections of this file first — it exists
+> to make you smarter about this codebase, not just to record history.
 
 ---
 
@@ -301,6 +304,8 @@ Fede explicitly rejected ad-hoc inline `node -e "..."` one-liners mid-session ("
 - **Syntax-check before every push:** `node --check public/js/app.js` (and server files)
 - **One commit per logical change** with a clear, direct commit message
 - **Never guess at live state** — if unsure what's actually in the DB or on the server, ask Fede to run a query rather than assume; Claude refines based on real pasted output, never assumes/guesses when real output is available
+- **Never generalize from a single example** — one data point (one booking, one resource, one tour) proved wrong twice this session (Airbnb "never" fires the webhook — false; a private tour's bike resource behaves like the validated one — false). When a pattern seems to hold from one observation, check `CLAUDE_CONTEXT.md` for prior documented findings before asserting it as a rule, and be explicit that it's provisional until confirmed on more than one instance
+- **Refer to `CLAUDE_CONTEXT.md` before acting, not just after** — read the relevant sections before starting nontrivial work in this repo, not only to record what happened afterward
 - **Update `CLAUDE_CONTEXT.md` in the same commit as the change** — new files, schema changes, new/removed routes, feature status changes, and resolved open items all get reflected here immediately, not batched up for later
 
 ### GitHub workflow
