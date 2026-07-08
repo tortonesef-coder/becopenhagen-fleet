@@ -119,8 +119,10 @@ async function sendInvoiceReminders() {
       console.log(`Invoice reminder sent to ${guide.name}`);
     }
 
-    // Mark as sent
-    db().prepare(`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, datetime('now'), datetime('now'))`).run(reminderKey, '1');
+    // Mark as sent (value defaults to the timestamp; presence of the row is
+    // what the check above reads). Previously passed an extra bind param that
+    // threw here, so it never got marked -> re-sent every hour on the 20th.
+    db().prepare(`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, datetime('now'), datetime('now'))`).run(reminderKey);
   } catch (e) {
     console.error('Invoice reminder error:', e.message);
   }

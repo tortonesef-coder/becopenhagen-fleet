@@ -303,6 +303,11 @@ function initSchema() {
       sent_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS tour_cancel_notified (
+      availability_id TEXT PRIMARY KEY,
+      notified_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS notification_prefs (
       member_id TEXT NOT NULL REFERENCES team_members(id),
       notification_type TEXT NOT NULL,

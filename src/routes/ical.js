@@ -462,6 +462,10 @@ function syncFeedToDB(feed, events) {
         const member = allMembers.find(m => guideMatches(row.guide, m.name));
         if (!member?.email) return;
         if (!isNotifEnabled(member.id, 'tour_cancelled')) return;
+        // Claim this cancellation so v2 (which also detects removed slots)
+        // can't send a second email for it. Whoever claims first, sends.
+        const claimed = db().prepare('INSERT OR IGNORE INTO tour_cancel_notified (availability_id) VALUES (?)').run(row.availability_id).changes;
+        if (!claimed) return;
         const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
         const subject = `Tour cancelled — ${row.feed_id} on ${dateLabel}`;
         const htmlContent = `

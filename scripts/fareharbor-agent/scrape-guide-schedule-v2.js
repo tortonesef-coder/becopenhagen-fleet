@@ -532,6 +532,10 @@ async function main() {
         const allMembers = db.prepare(`SELECT id, name, email FROM team_members WHERE active=1`).all();
         const member = allMembers.find(m => guideMatches(row.guide, m.name));
         if (member?.email && isNotifEnabled(member.id, 'tour_cancelled')) {
+          // Claim once — iCal's 90s sync also emails cancellations; whoever
+          // claims first sends, so the guide never gets two.
+          const claimed = db.prepare('INSERT OR IGNORE INTO tour_cancel_notified (availability_id) VALUES (?)').run(row.availability_id).changes;
+          if (claimed) {
           const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
           const htmlContent = `
             <p>Hi ${member.name},</p>
@@ -544,6 +548,7 @@ async function main() {
             ${EMAIL_FOOTER}`;
           await sendEmail({ to: member.email, toName: member.name, subject: `Tour cancelled — ${row.feed_id} on ${dateLabel}`, htmlContent, category: 'tour_cancelled' })
             .catch(e => console.error(`Cancel email failed:`, e.message));
+          }
         }
       }
       db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
