@@ -280,9 +280,27 @@ function syncFeedToDB(feed, events) {
 
   events.forEach(e => {
     // Check previous state for notification triggers
-    const prev = db().prepare('SELECT booking_count, guide, total_bikes FROM tour_availabilities WHERE availability_id=?').get(e.uid);
+    const prev = db().prepare('SELECT booking_count, guide, total_bikes, bookings_json FROM tour_availabilities WHERE availability_id=?').get(e.uid);
     const prevCount = prev?.booking_count ?? null;
     const guide = e.guide || prev?.guide;
+
+    // The webhook sets booking.created_at when a booking first arrives, but
+    // this 90-second iCal sync has no way to parse a creation date from the
+    // iCal text (it's simply not present there) — so without this merge,
+    // every sync cycle would silently wipe out the created_at the webhook
+    // set, breaking any "booked before X" logic within ~90 seconds of every
+    // booking. Carry forward created_at (and any other webhook-only field)
+    // per booking ref from whatever was already stored.
+    if (prev?.bookings_json) {
+      try {
+        const prevBookingsByRef = {};
+        JSON.parse(prev.bookings_json).forEach(b => { if (b.ref) prevBookingsByRef[b.ref] = b; });
+        e.bookings.forEach(b => {
+          const old = prevBookingsByRef[b.ref];
+          if (old?.created_at && !b.created_at) b.created_at = old.created_at;
+        });
+      } catch (err) { /* malformed prior JSON, skip merge */ }
+    }
 
     logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: e.guide, source: 'ical', raw_data: e._rawBlock });
     logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical', raw_data: e._rawBlock });
