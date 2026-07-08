@@ -3639,6 +3639,7 @@ async function openTourDetail(availId) {
           + (b.phone ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>📞 "+b.phone+"</div>" : "")
           + (b.email ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")
           + "<div style='font-size:0.75rem;color:var(--text3);margin-top:2px'>#"+b.ref+(canSeePayments && b.total ? " · "+b.total : "")+"</div>"
+          + (b.created_at ? "<div style='font-size:0.7rem;color:var(--text3);margin-top:1px'>Booked "+fmtBookingCreatedAt(b.created_at)+"</div>" : "")
           + (b.what ? "<div style='font-size:0.8rem;color:var(--text2);margin-top:4px;font-weight:500'>"+b.what+"</div>" : "")
           + (b.heights ? "<div style='font-size:0.75rem;color:var(--blue);margin-top:3px'>📏 "+b.heights+"</div>" : "")
           + (b.comments ? "<div style='font-size:0.75rem;color:var(--amber);margin-top:3px;font-style:italic'>💬 "+b.comments+"</div>" : "")
@@ -3677,6 +3678,14 @@ function goCheckoutForTour(tourId, guide) {
   state.action = { type: 'tour', bikes: [], searchQ: '', preloaded: null };
   renderTab('action');
   setTimeout(() => selectActionType('tour'), 100);
+}
+
+function fmtBookingCreatedAt(iso) {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' });
+  } catch (e) { return iso; }
 }
 
 function fmtDateFull(d) {
