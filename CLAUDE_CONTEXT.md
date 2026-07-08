@@ -144,6 +144,7 @@ pm2 does NOT inherit `/etc/environment` automatically — server.js reads it man
 │   │   ├── restore-manual-guide-hours.js
 │   │   ├── fix-past-f3-duration.js
 │   │   ├── backfill-booking-created-at.js
+│   │   ├── backfill-real-created-at-from-fareharbor.js  ← NEW: pulls TRUE created_at from FareHarbor's per-availability bookings API for bookings missing it (predate the webhook); dry-run by default, --commit to write. Uses earlier of created_at/original_created_at so pre-1-July bookings that were later rescheduled still count
 │   │   └── reset-tour-bike-data.js
 │   └── fareharbor-agent/
 │       ├── create-booking.js         ← Playwright booking automation (PROVEN WORKING, 7 scenarios tested)
@@ -344,6 +345,7 @@ Fede explicitly rejected ad-hoc inline `node -e "..."` one-liners mid-session ("
 - Booking ref appears on confirmation page as text "Booking #NNNNNNNNN"
 - `execFile` (not `exec`) required for passing JSON `--items` arg safely
 - Internal calendar JSON API (used by the v2 guide-schedule scraper) is preferred over page-scraping where available — far faster and more reliable
+- Per-availability bookings API (returns full booking objects incl. real `created_at`, `original_created_at`, `modified_at`, `contact`, etc.): `https://fareharbor.com/api/v1/companies/becopenhagen/items/{item_id}/availabilities/{availability_id}/bookings/` — authenticated via the logged-in Playwright page's cookies (`page.request.get`), confirmed directly usable (HTTP 200), no page-scraping/interception needed. This is the source for backfilling the true booking-creation date on bookings that predate our webhook (which otherwise fall back to `first_seen_at`)
 - Crew-role detection: use `crewMember.unicode`, not `group.role.short_name` (the latter is frequently abbreviated/empty due to payload deduplication)
 - Bike-count extraction via `resource_use_summaries` is reliable **only** for the specific "Guided Tour Bikes" resource (identified by ID, not name). Every other resource type has shown unreliable behavior in practice: Electric Cargo Bike reports fractional prorated values (expected — single shared prop), and the generic "Adult Bike" pool has been observed reporting total fleet capacity instead of a per-booking count on at least one private tour. Only that one confirmed resource is ever trusted; everything else is ignored rather than guessed at.
 
