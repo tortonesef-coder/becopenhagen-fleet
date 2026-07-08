@@ -4,6 +4,7 @@ const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
 const { createNotification, resolveNotification } = require('./admin-notifs');
 const { logTourChange } = require('../tour-change-log');
+const { computeBufferedMinutes } = require('../tour-duration');
 
 function db() { return getDb(); }
 
@@ -255,20 +256,6 @@ function parseIcal(text) {
   return events;
 }
 
-// Tour length + 15 min before + 15 min after, in minutes. Used for guide
-// worked-hours calculations.
-function computeBufferedMinutes(startIso, endIso, feedId) {
-  if (!startIso || !endIso) return 0;
-  const start = new Date(startIso);
-  const end = new Date(endIso);
-  const raw = Math.round((end - start) / 60000);
-  if (raw <= 0) return 0;
-  // Food Tour (F3, F3P) needs 30min prep before and after, not the usual 15 —
-  // everything else keeps the standard 15+15 buffer.
-  const buffer = (feedId === 'F3' || feedId === 'F3P') ? 60 : 30;
-  return raw + buffer;
-}
-
 // ── DB sync ──────────────────────────────────────────────────────────────
 function syncFeedToDB(feed, events) {
   const upsert = db().prepare(`
@@ -316,6 +303,15 @@ function syncFeedToDB(feed, events) {
     const icalGuide = e.guide_confident ? e.guide : null;
     const guide = icalGuide || prev?.guide; // effective guide after this sync
 
+    // Freeze finished tours: once a tour's day has passed, its stored record is
+    // immutable — iCal stops recomputing it (v2 already skips past days). This
+    // is what stops a later formula change from silently rewriting old tours;
+    // changing a past tour now requires a deliberate migration under
+    // scripts/fixes/. A tour first seen only after it's over (no prev row) is
+    // still snapshotted once, so nothing is lost.
+    const todayStr = new Date().toISOString().substring(0, 10);
+    const frozen = !!prev && e.start_date && e.start_date < todayStr;
+
     // The webhook sets booking.created_at when a booking first arrives, but
     // this 90-second iCal sync has no way to parse a creation date from the
     // iCal text (it's simply not present there) — so without this merge,
@@ -334,19 +330,21 @@ function syncFeedToDB(feed, events) {
       } catch (err) { /* malformed prior JSON, skip merge */ }
     }
 
-    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: guide, source: 'ical', raw_data: e._rawBlock });
-    logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical', raw_data: e._rawBlock });
-    if (e.total_bikes > 0) {
-      logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'total_bikes', old_value: prev?.total_bikes, new_value: e.total_bikes, source: 'ical', raw_data: e._rawBlock });
-    }
+    if (!frozen) {
+      logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'guide', old_value: prev?.guide, new_value: guide, source: 'ical', raw_data: e._rawBlock });
+      logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'booking_count', old_value: prevCount, new_value: e.booking_count, source: 'ical', raw_data: e._rawBlock });
+      if (e.total_bikes > 0) {
+        logTourChange(db(), { availability_id: e.uid, feed_id: feed.id, start_date: e.start_date, field: 'total_bikes', old_value: prev?.total_bikes, new_value: e.total_bikes, source: 'ical', raw_data: e._rawBlock });
+      }
 
-    upsert.run(
-      e.uid, feed.id, feed.label, feed.type,
-      icalGuide, e.start, e.end,
-      e.start_date, e.start_time, e.end_time,
-      e.summary, JSON.stringify(e.bikes_needed), e.total_bikes,
-      e.booking_count, JSON.stringify(e.bookings), e.url
-    );
+      upsert.run(
+        e.uid, feed.id, feed.label, feed.type,
+        icalGuide, e.start, e.end,
+        e.start_date, e.start_time, e.end_time,
+        e.summary, JSON.stringify(e.bikes_needed), e.total_bikes,
+        e.booking_count, JSON.stringify(e.bookings), e.url
+      );
+    }
 
     // Permanent bookings ledger — tour_availabilities/bookings_json is a
     // rolling cache (gets purged), so this is the only place we can answer
@@ -528,12 +526,20 @@ function syncFeedToDB(feed, events) {
         start_at=excluded.start_at, end_at=excluded.end_at, start_date=excluded.start_date,
         duration_minutes=excluded.duration_minutes, booking_count=excluded.booking_count, last_synced=excluded.last_synced
     `);
+    const todayStrHours = new Date().toISOString().substring(0, 10);
     events.forEach(e => {
       // Only log hours off a confident iCal guide (a real account name).
       // Placeholder/fuzzy cases are left to v2, which resolves the real guide
       // via crew unicode and writes this row itself within the hour.
       const icalGuide = e.guide_confident ? e.guide : null;
       if (!icalGuide) return;
+      // Freeze finished tours: once the day has passed, don't recompute an
+      // existing hours row (that's what makes past pay immutable). A past tour
+      // with no row yet is still snapshotted once.
+      if (e.start_date && e.start_date < todayStrHours) {
+        const existsGth = db().prepare('SELECT 1 FROM guide_tour_hours WHERE availability_id=?').get(e.uid);
+        if (existsGth) return;
+      }
       upsertHours.run(e.uid, icalGuide, feed.id, feed.label, e.start, e.end, e.start_date,
         computeBufferedMinutes(e.start, e.end, feed.id), e.booking_count);
     });

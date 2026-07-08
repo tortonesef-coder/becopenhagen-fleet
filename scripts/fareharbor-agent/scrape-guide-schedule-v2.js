@@ -20,6 +20,7 @@ const { getDb, isNotifEnabled } = require('../../src/db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../../src/email');
 const { guideMatches } = require('../../src/guide-name-match');
 const { logTourChange } = require('../../src/tour-change-log');
+const { computeBufferedMinutes } = require('../../src/tour-duration');
 const { createNotification, resolveNotification } = require('../../src/routes/admin-notifs');
 
 const COMPANY_SLUG = 'becopenhagen';
@@ -359,13 +360,7 @@ async function main() {
 
       const startTime = hhmm(av.start_at);
       const endTime = hhmm(av.end_at);
-      // Food Tour (F3, F3P) needs 30min prep before and after, not the usual
-      // 15 — everything else keeps the standard 15+15 buffer.
-      const isFoodTour = av.item.feed_id === 'F3' || av.item.feed_id === 'F3P';
-      const buffer = isFoodTour ? 60 : 30;
-      const durationMinutes = av.start_at && av.end_at
-        ? Math.round((new Date(av.end_at) - new Date(av.start_at)) / 60000) + buffer
-        : (isFoodTour ? 240 : 210);
+      const durationMinutes = computeBufferedMinutes(av.start_at, av.end_at, av.item.feed_id);
 
       // Previous state for notification triggers
       const prevRow = db.prepare('SELECT guide, booking_count, total_bikes FROM tour_availabilities WHERE availability_id=?').get(av.availability_id);
