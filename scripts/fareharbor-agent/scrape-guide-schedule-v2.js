@@ -410,8 +410,23 @@ async function main() {
           start_at=excluded.start_at, end_at=excluded.end_at,
           start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
           booking_count=excluded.booking_count, last_synced=excluded.last_synced,
-          bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN excluded.bikes_needed ELSE bikes_needed END,
-          total_bikes=CASE WHEN excluded.total_bikes > 0 THEN excluded.total_bikes ELSE total_bikes END
+          -- v2 owns GT (from FareHarbor resources); iCal owns the non-GT
+          -- categories (from summary text). Merge only GT here, preserving
+          -- iCal's keys, so the two sources stop erasing each other. Combined
+          -- total is v2's GT plus the existing non-GT counts. Atomic — no
+          -- read/write race with the 90s iCal process.
+          bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN json_set(
+              json(COALESCE(bikes_needed,'{}')),
+              '$.GT', COALESCE(json_extract(excluded.bikes_needed,'$.GT'),0)
+            ) ELSE bikes_needed END,
+          total_bikes=CASE WHEN excluded.total_bikes > 0 THEN (
+              excluded.total_bikes
+              + COALESCE(json_extract(bikes_needed,'$.A'),0)
+              + COALESCE(json_extract(bikes_needed,'$.E'),0)
+              + COALESCE(json_extract(bikes_needed,'$.B'),0)
+              + COALESCE(json_extract(bikes_needed,'$.AC'),0)
+              + COALESCE(json_extract(bikes_needed,'$.AT'),0)
+            ) ELSE total_bikes END
       `).run(av.availability_id, av.item.feed_id, av.item.label, 'tour',
              av.guide, av.start_at, av.end_at, av.start_date, startTime, endTime, av.booking_count,
              JSON.stringify(av.bikes_needed), av.total_bikes);

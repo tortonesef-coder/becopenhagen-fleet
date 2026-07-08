@@ -272,8 +272,23 @@ function syncFeedToDB(feed, events) {
     ON CONFLICT(availability_id) DO UPDATE SET
       guide=excluded.guide, start_at=excluded.start_at, end_at=excluded.end_at,
       start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
-      bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN excluded.bikes_needed ELSE bikes_needed END,
-      total_bikes=CASE WHEN excluded.total_bikes > 0 THEN excluded.total_bikes ELSE total_bikes END,
+      -- iCal owns the non-GT bike categories (parsed from the summary text);
+      -- v2 owns GT (from FareHarbor resources). Merge per-key instead of
+      -- replacing the whole object, so the two sources stop erasing each
+      -- other. GT is left untouched here; the combined total is existing GT
+      -- plus iCal's non-GT count. Atomic (single statement) — no read/write
+      -- race with the hourly v2 process.
+      bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN json_set(
+          json(COALESCE(bikes_needed,'{}')),
+          '$.A',  COALESCE(json_extract(excluded.bikes_needed,'$.A'),0),
+          '$.E',  COALESCE(json_extract(excluded.bikes_needed,'$.E'),0),
+          '$.B',  COALESCE(json_extract(excluded.bikes_needed,'$.B'),0),
+          '$.AC', COALESCE(json_extract(excluded.bikes_needed,'$.AC'),0),
+          '$.AT', COALESCE(json_extract(excluded.bikes_needed,'$.AT'),0)
+        ) ELSE bikes_needed END,
+      total_bikes=CASE WHEN excluded.total_bikes > 0
+        THEN COALESCE(json_extract(bikes_needed,'$.GT'),0) + excluded.total_bikes
+        ELSE total_bikes END,
       booking_count=excluded.booking_count, bookings_json=excluded.bookings_json,
       last_synced=excluded.last_synced, summary=excluded.summary
   `);
