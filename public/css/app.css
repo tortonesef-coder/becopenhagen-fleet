@@ -495,7 +495,7 @@ html, body {
   display: flex;
   align-items: flex-end;
 }
-.modal-overlay.hidden { display: none; }
+.modal-overlay.hidden { opacity: 0; pointer-events: none; }
 
 .modal-box {
   background: var(--bg2);
@@ -1495,4 +1495,61 @@ details summary::-webkit-details-marker { display: none; }
 
 #btn-report-bug {
   flex-shrink: 0;
+}
+
+/* ── Motion & polish ─────────────────────────────────────────────────────
+   All animation here uses only transform/opacity (GPU-composited — no layout
+   work), stays under ~250ms, and is fully disabled for users with
+   prefers-reduced-motion. Pure presentation: removing this block changes
+   nothing functionally. */
+
+/* Tactile press feedback on everything tappable */
+.btn, .icon-btn, .subtab, .tab-btn, .report-bug-btn, .type-card, .toast-undo-btn, .modal-close {
+  transition: transform .12s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease;
+}
+.btn:active, .icon-btn:active:not(:disabled), .subtab:active, .tab-btn:active,
+.report-bug-btn:active, .type-card:active, .toast-undo-btn:active, .modal-close:active {
+  transform: scale(0.96);
+}
+
+/* Toast: animate its appearance (layout slot unchanged — same cost as before) */
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.toast:not(.hidden) { animation: toast-in .18s ease-out; }
+
+/* Success checkmark that draws itself inside the toast */
+.toast-check { width: 16px; height: 16px; flex-shrink: 0; }
+.toast-check path {
+  stroke: #fff; stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 24; stroke-dashoffset: 24;
+  animation: check-draw .3s .05s ease-out forwards;
+}
+@keyframes check-draw { to { stroke-dashoffset: 0; } }
+
+/* Modal bottom sheet: overlay fades, sheet slides up */
+.modal-overlay { transition: opacity .2s ease; }
+.modal-box { transition: transform .24s cubic-bezier(.2, .8, .25, 1); }
+.modal-overlay.hidden .modal-box { transform: translateY(102%); }
+
+/* Tab switch: content fades in gently */
+@keyframes content-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.content.tab-enter { animation: content-in .18s ease-out; }
+
+/* Loading skeletons (shimmer is a transform sweep — no layout work) */
+.skel { background: var(--bg3); border-radius: var(--radius); position: relative; overflow: hidden; }
+.skel::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+  animation: skel-shimmer 1.1s infinite;
+}
+@keyframes skel-shimmer { to { transform: translateX(100%); } }
+.skel-block { height: 84px; margin-bottom: 0.75rem; }
+.skel-row { height: 44px; margin-bottom: 0.6rem; }
+
+/* Respect the device's reduce-motion setting */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

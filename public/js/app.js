@@ -64,7 +64,10 @@ function toast(msg, type="") {
   const el = document.getElementById("toast");
   if (!el) return;
   clearTimeout(toast._timer);
-  el.innerHTML = `<span>${msg}</span>`;
+  const check = type.includes('success')
+    ? '<svg class="toast-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>'
+    : '';
+  el.innerHTML = check + `<span>${msg}</span>`;
   el.className = "toast " + type;
   el.classList.remove("hidden");
   toast._timer = setTimeout(dismissToast, 1800);
@@ -114,12 +117,16 @@ async function triggerUndo() {
 document.getElementById('btn-undo')?.addEventListener('click', triggerUndo);
 // ── Modal ─────────────────────────────────────────────────────────────────
 function openModal(html) {
+  clearTimeout(closeModal._clearTimer); // reopening fast? cancel pending content wipe
   document.getElementById('modal-content').innerHTML=html;
   document.getElementById('modal-overlay').classList.remove('hidden');
 }
 function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
-  document.getElementById('modal-content').innerHTML='';
+  // Let the slide-out (240ms) finish before emptying, so it doesn't visibly blank
+  closeModal._clearTimer = setTimeout(() => {
+    document.getElementById('modal-content').innerHTML='';
+  }, 260);
 }
 document.getElementById('modal-close').addEventListener('click',closeModal);
 document.getElementById('modal-overlay').addEventListener('click',e=>{
@@ -620,12 +627,33 @@ function setActiveTab(id) {
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));
 }
 
+function skeletonHTML() {
+  return '<div class="skel skel-block"></div><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-block"></div>';
+}
+
+// Tick visible counters (fleet availability numbers) up from 0 — quick, subtle
+function animateCounts(root) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.querySelectorAll('.tc-avail').forEach(el => {
+    const target = parseInt(el.textContent, 10);
+    if (!Number.isFinite(target) || target <= 0) return;
+    const t0 = performance.now(), dur = 300;
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      el.textContent = Math.round(target * (p * (2 - p))); // ease-out
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
 async function renderTab(id) {
   setActiveTab(id);
   logPageView(id);
   const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
+  if(id!=='action') c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
   if(id==='bikes') await renderBikes(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
@@ -638,6 +666,9 @@ async function renderTab(id) {
   else if(id==='guides-admin') await renderGuidesAdmin(c);
   else if(id==='notifs-admin') await renderNotifsAdmin(c);
   else if(id==='app-admin') await renderAppAdmin(c);
+  c.classList.remove('tab-enter'); void c.offsetWidth; // restart the enter animation
+  c.classList.add('tab-enter');
+  animateCounts(c);
 }
 
 function openMoreMenu() {
