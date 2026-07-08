@@ -1710,6 +1710,20 @@ function fmtTime(dt) {
   catch{return dt;}
 }
 
+// Relative "x ago" for UTC timestamps (SQLite stores "YYYY-MM-DD HH:MM:SS", no Z)
+function timeAgo(dt) {
+  if (!dt) return '';
+  const iso = dt.includes('T') ? dt : dt.replace(' ', 'T');
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (isNaN(s)) return '';
+  if (s < 45) return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  if (s < 604800) return Math.floor(s/86400) + 'd ago';
+  return d.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+}
+
 // ── Icons ─────────────────────────────────────────────────────────────────
 function iconHome(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;}
 function iconBike(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 0 0-1-1h-1V4a1 1 0 0 0-2 0v1H9l3 6h3l1.6-3.2A1 1 0 0 0 15 6z"/><path d="m5.5 17.5 4-8.5"/></svg>`;}
@@ -2378,24 +2392,56 @@ async function loadPageVisits(hours) {
     listEl.innerHTML = `<div class="empty-state"><p>No visits in this window</p></div>`;
     return;
   }
-  // Group by actor, then by tab, for a quick "who's using what" summary
+  // Aggregate: per-person totals + last-active, plus overall tab totals.
+  // Rows arrive newest-first (API orders created_at DESC).
   const byActor = {};
+  const tabTotals = {};
   rows.forEach(r => {
     const name = r.actor_name || r.actor || 'Unknown';
-    if (!byActor[name]) byActor[name] = {};
-    byActor[name][r.tab] = (byActor[name][r.tab] || 0) + 1;
+    const a = byActor[name] || (byActor[name] = { count: 0, last: r.created_at, first: r.created_at, tabs: {} });
+    a.count++;
+    a.tabs[r.tab] = (a.tabs[r.tab] || 0) + 1;
+    if (r.created_at > a.last) a.last = r.created_at;
+    if (r.created_at < a.first) a.first = r.created_at;
+    tabTotals[r.tab] = (tabTotals[r.tab] || 0) + 1;
   });
+  const people = Object.keys(byActor).length;
+  const busiest = Object.entries(tabTotals).sort((a, b) => b[1] - a[1])[0];
+  const actors = Object.entries(byActor).sort((a, b) => (a[1].last < b[1].last ? 1 : -1));
+  const feed = rows.slice(0, 50);
+
+  const stat = (n, label) => `<div style="text-align:center"><div style="font-size:1.3rem;font-weight:800;line-height:1.1">${n}</div><div style="font-size:0.68rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.03em">${label}</div></div>`;
 
   listEl.innerHTML = `
+    <div style="display:flex;justify-content:space-around;align-items:center;background:var(--bg3);border-radius:var(--radius);padding:0.75rem;margin-bottom:1rem">
+      ${stat(rows.length, 'Visits')}
+      ${stat(people, people === 1 ? 'Person' : 'People')}
+      ${stat(busiest ? escapeHtml(busiest[0]) : '—', 'Busiest tab')}
+    </div>
+
     <div class="detail-section" style="border-top:none;padding-top:0">
-      <div class="detail-section-title">${rows.length} visit${rows.length!==1?'s':''} · by person</div>
-      ${Object.entries(byActor).map(([name, tabs]) => `
-        <div style="margin-bottom:0.6rem">
-          <div style="font-weight:700;font-size:0.88rem;margin-bottom:0.2rem">${escapeHtml(name)}</div>
-          <div style="font-size:0.78rem;color:var(--text2)">
-            ${Object.entries(tabs).sort((a,b)=>b[1]-a[1]).map(([tab,count]) => `${escapeHtml(tab)} (${count})`).join(' · ')}
+      <div class="detail-section-title">By person · most recent first</div>
+      ${actors.map(([name, a]) => `
+        <div style="padding:0.55rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+            <span style="font-weight:700;font-size:0.9rem">${escapeHtml(name)}</span>
+            <span style="font-size:0.72rem;color:var(--text3)">last active ${timeAgo(a.last)}</span>
+          </div>
+          <div style="font-size:0.78rem;color:var(--text2);margin-top:0.15rem">
+            <span style="color:var(--text)">${a.count}</span> visit${a.count !== 1 ? 's' : ''} · ${Object.entries(a.tabs).sort((x, y) => y[1] - x[1]).map(([tab, c]) => `${escapeHtml(tab)} (${c})`).join(' · ')}
           </div>
         </div>`).join('')}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Recent activity</div>
+      ${feed.map(r => `
+        <div style="display:flex;align-items:baseline;gap:0.6rem;padding:0.32rem 0;font-size:0.8rem">
+          <span style="color:var(--text3);white-space:nowrap;min-width:64px">${timeAgo(r.created_at)}</span>
+          <span style="font-weight:600;min-width:74px">${escapeHtml(r.actor_name || r.actor || 'Unknown')}</span>
+          <span style="color:var(--text2)">${escapeHtml(r.tab)}</span>
+        </div>`).join('')}
+      ${rows.length > feed.length ? `<div style="font-size:0.72rem;color:var(--text3);padding-top:0.4rem">Showing the ${feed.length} most recent of ${rows.length}.</div>` : ''}
     </div>
   `;
 }
