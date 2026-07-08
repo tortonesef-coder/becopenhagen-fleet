@@ -3639,7 +3639,9 @@ async function openTourDetail(availId) {
           + (b.phone ? "<div style='font-size:0.78rem;color:var(--text2);margin-top:3px'>📞 "+b.phone+"</div>" : "")
           + (b.email ? "<div style='font-size:0.72rem;color:var(--text3)'>"+b.email+"</div>" : "")
           + "<div style='font-size:0.75rem;color:var(--text3);margin-top:2px'>#"+b.ref+(canSeePayments && b.total ? " · "+b.total : "")+"</div>"
-          + (b.created_at ? "<div style='font-size:0.7rem;color:var(--text3);margin-top:1px'>Booked "+fmtBookingCreatedAt(b.created_at)+"</div>" : "")
+          + (b.created_at ? "<div style='font-size:0.7rem;color:var(--text3);margin-top:1px'>Booked "+fmtBookingCreatedAt(b.created_at)+"</div>"
+              : b.first_seen_at ? "<div style='font-size:0.7rem;color:var(--text3);margin-top:1px'>First seen "+fmtBookingCreatedAt(b.first_seen_at)+" <span style='opacity:0.7'>(approx.)</span></div>"
+              : "")
           + (b.what ? "<div style='font-size:0.8rem;color:var(--text2);margin-top:4px;font-weight:500'>"+b.what+"</div>" : "")
           + (b.heights ? "<div style='font-size:0.75rem;color:var(--blue);margin-top:3px'>📏 "+b.heights+"</div>" : "")
           + (b.comments ? "<div style='font-size:0.75rem;color:var(--amber);margin-top:3px;font-style:italic'>💬 "+b.comments+"</div>" : "")

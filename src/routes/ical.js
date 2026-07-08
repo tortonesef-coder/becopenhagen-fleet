@@ -604,11 +604,29 @@ router.get('/tours', (req, res) => {
     rows = rows.filter(r => r.guide && guideMatches(r.guide, guide));
   }
 
-  res.json(rows.map(r => ({
+  const results = rows.map(r => ({
     ...r,
     bikes_needed: JSON.parse(r.bikes_needed || '{}'),
     bookings: JSON.parse(r.bookings_json || '[]'),
-  })));
+  }));
+
+  // Fallback: for any booking with no created_at (mainly Airbnb, which
+  // doesn't fire our webhook), use when we first spotted it via sync as an
+  // approximation — usually within 90s of the real booking time.
+  const missingRefs = [];
+  results.forEach(t => t.bookings.forEach(b => { if (!b.created_at && b.ref) missingRefs.push(b.ref); }));
+  if (missingRefs.length > 0) {
+    const placeholders = missingRefs.map(() => '?').join(',');
+    const seenRows = db().prepare(`SELECT ref, first_seen_at FROM bookings WHERE ref IN (${placeholders})`).all(...missingRefs);
+    const seenByRef = Object.fromEntries(seenRows.map(r => [r.ref, r.first_seen_at]));
+    results.forEach(t => t.bookings.forEach(b => {
+      if (!b.created_at && seenByRef[b.ref]) {
+        b.first_seen_at = seenByRef[b.ref];
+      }
+    }));
+  }
+
+  res.json(results);
 });
 
 // GET /api/ical/rentals — upcoming rental bookings
