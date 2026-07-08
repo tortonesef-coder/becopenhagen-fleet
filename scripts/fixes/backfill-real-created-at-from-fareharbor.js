@@ -17,7 +17,11 @@
 //   node scripts/fixes/backfill-real-created-at-from-fareharbor.js            (dry run)
 //   node scripts/fixes/backfill-real-created-at-from-fareharbor.js --commit   (writes)
 
-const { chromium } = require('playwright');
+// playwright is installed for scripts in scripts/fareharbor-agent/, not for
+// scripts/fixes/. Resolve it from that directory's perspective so this works
+// regardless of exactly where the module is hoisted.
+const path = require('path');
+const { chromium } = require(require.resolve('playwright', { paths: [path.join(__dirname, '..', 'fareharbor-agent')] }));
 const { getDb } = require('../../src/db/schema');
 
 const COMMIT = process.argv.includes('--commit');
