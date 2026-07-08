@@ -36,6 +36,8 @@ async function sendEmail({ to, toName, subject, htmlContent, attachments, catego
   const t = getTransporter();
   if (!t) return { ok: false, error: 'Email not configured' };
 
+  try { maybeAlertDuplicate(to, subject, category); } catch (e) { console.error('dup-check error:', e.message); }
+
   try {
     await t.sendMail({
       from: '"BeCopenhagen Fleet" <' + process.env.SMTP_USER + '>',
@@ -60,6 +62,45 @@ function logEmail(to, toName, subject, category, ok, error) {
   } catch (e) {
     console.error('Failed to log sent email:', e.message);
   }
+}
+
+// Duplicate-send guard. Automated notifications (first_booking, tour_reminder,
+// tour_cancelled, etc.) are all once-only by design — the identical email
+// (same recipient + subject) should never go out twice. If it does, it's almost
+// always a trigger bug where an hourly/90s job re-fires it, so alert Fede.
+// Transactional emails (verification/reset) carry no category and can be legit-
+// imately re-requested, so they're not monitored; the alert itself is excluded
+// to avoid loops.
+const DUP_ALERT_TO = 'federico@becopenhagen.dk';
+function maybeAlertDuplicate(to, subject, category) {
+  if (!category || category === 'duplicate_alert') return;
+  const db = getDb();
+  const prior = db.prepare(
+    `SELECT COUNT(*) n, MAX(sent_at) last FROM emails_sent
+       WHERE to_email=? AND subject=? AND ok=1 AND sent_at >= datetime('now','-70 minutes')`
+  ).get(to, subject);
+  if (!prior || prior.n < 1) return; // no recent identical send — normal
+
+  const alertSubject = `⚠️ Duplicate email — "${subject}" → ${to}`;
+  // Alert at most once per incident per 12h so a persistent bug doesn't spam.
+  const already = db.prepare(
+    `SELECT 1 FROM emails_sent WHERE category='duplicate_alert' AND to_email=? AND subject=? AND sent_at >= datetime('now','-12 hours')`
+  ).get(DUP_ALERT_TO, alertSubject);
+  if (already) return;
+
+  const html = `
+    <p><strong>The identical email below was sent to the same person more than once within about an hour.</strong></p>
+    <p>These notifications are meant to fire once, so a repeat almost always means an automated job (the hourly scraper or the 90-second sync) is re-firing it — i.e. a bug worth checking.</p>
+    <table style="border-collapse:collapse;margin:0.5rem 0">
+      <tr><td style="padding:3px 12px 3px 0;color:#888">Recipient</td><td>${to}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#888">Subject</td><td>${subject}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#888">Category</td><td>${category}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#888">Repeats in last 70 min</td><td>${prior.n + 1} (last at ${prior.last} UTC)</td></tr>
+    </table>
+    ${EMAIL_FOOTER}`;
+  // Fire-and-forget; its 'duplicate_alert' category means it won't re-trigger this check.
+  sendEmail({ to: DUP_ALERT_TO, toName: 'Federico', subject: alertSubject, htmlContent: html, category: 'duplicate_alert' })
+    .catch(e => console.error('Duplicate-alert send failed:', e.message));
 }
 
 async function sendPasswordResetEmail(toEmail, toName, resetUrl) {
