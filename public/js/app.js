@@ -1861,13 +1861,11 @@ function guideMatches(availGuide, personName) {
 
 // ── Operations tab (Tours, Rentals, Bikes, Tickets sub-tabs) ─────
 async function renderOperations(c) {
-  if (!window._opsTab) window._opsTab = 'tours';
+  if (!window._opsTab) window._opsTab = 'actions';
+  const tabs = [['actions','Actions'],['tours','Tours'],['rentals','Rentals'],['bikes','Bikes'],['tickets','Tickets']];
   c.innerHTML = `
     <div class="subtab-row">
-      <button class="subtab${window._opsTab==='tours'?' active':''}" onclick="switchOpsTab('tours')">Tours</button>
-      <button class="subtab${window._opsTab==='rentals'?' active':''}" onclick="switchOpsTab('rentals')">Rentals</button>
-      <button class="subtab${window._opsTab==='bikes'?' active':''}" onclick="switchOpsTab('bikes')">Bikes</button>
-      <button class="subtab${window._opsTab==='tickets'?' active':''}" onclick="switchOpsTab('tickets')">Tickets</button>
+      ${tabs.map(([id,label])=>`<button class="subtab${window._opsTab===id?' active':''}" data-opstab="${id}" onclick="switchOpsTab('${id}')">${label}</button>`).join('')}
     </div>
     <div id="ops-tab-content"></div>`;
   await renderOpsTab();
@@ -1876,15 +1874,15 @@ async function renderOperations(c) {
 async function switchOpsTab(tab) {
   window._opsTab = tab;
   logPageView(`operations.${tab}`);
-  const labels = {tours:'Tours',rentals:'Rentals',bikes:'Bikes',tickets:'Tickets'};
-  document.querySelectorAll('.subtab').forEach(b => b.classList.toggle('active', b.textContent === labels[tab]));
+  document.querySelectorAll('[data-opstab]').forEach(b => b.classList.toggle('active', b.dataset.opstab === tab));
   await renderOpsTab();
 }
 
 async function renderOpsTab() {
   const el = document.getElementById('ops-tab-content');
   if (!el) return;
-  if (window._opsTab === 'tours') {
+  if (window._opsTab === 'actions') renderAction(el);
+  else if (window._opsTab === 'tours') {
     // Operations shows only the admin's own tours (as a guide)
     const name = state.actor?.name;
     const all = await api('/api/ical/tours');
