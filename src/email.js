@@ -3,6 +3,7 @@
 // hosts the team's mailboxes, so this consolidates onto one provider.
 
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 const { getDb } = require('./db/schema');
 
 const EMAIL_FOOTER = `
@@ -36,7 +37,8 @@ async function sendEmail({ to, toName, subject, htmlContent, attachments, catego
   const t = getTransporter();
   if (!t) return { ok: false, error: 'Email not configured' };
 
-  try { maybeAlertDuplicate(to, subject, category); } catch (e) { console.error('dup-check error:', e.message); }
+  const cHash = crypto.createHash('sha1').update(htmlContent || '').digest('hex').substring(0, 16);
+  try { maybeAlertDuplicate(to, subject, category, cHash); } catch (e) { console.error('dup-check error:', e.message); }
 
   try {
     await t.sendMail({
@@ -46,40 +48,41 @@ async function sendEmail({ to, toName, subject, htmlContent, attachments, catego
       html: htmlContent,
       attachments: attachments || [],
     });
-    logEmail(to, toName, subject, category, true, null);
+    logEmail(to, toName, subject, category, true, null, cHash);
     return { ok: true };
   } catch (e) {
     console.error('SMTP send error:', e.message);
-    logEmail(to, toName, subject, category, false, e.message);
+    logEmail(to, toName, subject, category, false, e.message, cHash);
     return { ok: false, error: e.message };
   }
 }
 
-function logEmail(to, toName, subject, category, ok, error) {
+function logEmail(to, toName, subject, category, ok, error, contentHash) {
   try {
-    getDb().prepare(`INSERT INTO emails_sent (to_email, to_name, subject, category, ok, error) VALUES (?,?,?,?,?,?)`)
-      .run(to, toName || null, subject, category || null, ok ? 1 : 0, error || null);
+    getDb().prepare(`INSERT INTO emails_sent (to_email, to_name, subject, category, ok, error, content_hash) VALUES (?,?,?,?,?,?,?)`)
+      .run(to, toName || null, subject, category || null, ok ? 1 : 0, error || null, contentHash || null);
   } catch (e) {
     console.error('Failed to log sent email:', e.message);
   }
 }
 
 // Duplicate-send guard. Automated notifications (first_booking, tour_reminder,
-// tour_cancelled, etc.) are all once-only by design — the identical email
-// (same recipient + subject) should never go out twice. If it does, it's almost
-// always a trigger bug where an hourly/90s job re-fires it, so alert Fede.
-// Transactional emails (verification/reset) carry no category and can be legit-
-// imately re-requested, so they're not monitored; the alert itself is excluded
-// to avoid loops.
+// tour_cancelled, etc.) are once-only by design, so the SAME email — same
+// recipient, same subject, AND same body content — should never go out twice
+// within the hour. If it does, it's almost always a trigger bug (an hourly/90s
+// job re-firing), so alert Fede. Comparing the content hash means two genuinely
+// different emails that happen to share a subject (e.g. two different reviews)
+// don't false-trigger. Transactional emails carry no category (not monitored);
+// the alert itself is excluded to avoid loops.
 const DUP_ALERT_TO = 'federico@becopenhagen.dk';
-function maybeAlertDuplicate(to, subject, category) {
+function maybeAlertDuplicate(to, subject, category, contentHash) {
   if (!category || category === 'duplicate_alert') return;
   const db = getDb();
   const prior = db.prepare(
     `SELECT COUNT(*) n, MAX(sent_at) last FROM emails_sent
-       WHERE to_email=? AND subject=? AND ok=1 AND sent_at >= datetime('now','-70 minutes')`
-  ).get(to, subject);
-  if (!prior || prior.n < 1) return; // no recent identical send — normal
+       WHERE to_email=? AND subject=? AND content_hash=? AND ok=1 AND sent_at >= datetime('now','-70 minutes')`
+  ).get(to, subject, contentHash || '');
+  if (!prior || prior.n < 1) return; // no recent identical send (same subject AND body) — normal
 
   const alertSubject = `⚠️ Duplicate email — "${subject}" → ${to}`;
   // Alert at most once per incident per 12h so a persistent bug doesn't spam.

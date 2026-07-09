@@ -344,7 +344,8 @@ function initSchema() {
       category TEXT,
       ok INTEGER DEFAULT 1,
       error TEXT,
-      sent_at TEXT DEFAULT (datetime('now'))
+      sent_at TEXT DEFAULT (datetime('now')),
+      content_hash TEXT
     );
 
     CREATE TABLE IF NOT EXISTS tour_change_log (
@@ -463,6 +464,9 @@ function initSchema() {
     // a "first booking" email to guides for every existing booked tour.
     db.exec("UPDATE tour_availabilities SET first_booking_notified=1 WHERE booking_count >= 1");
   }
+
+  const emCols = db.prepare("PRAGMA table_info(emails_sent)").all().map(c => c.name);
+  if (!emCols.includes('content_hash')) db.exec("ALTER TABLE emails_sent ADD COLUMN content_hash TEXT");
 
   const tmCols2 = db.prepare("PRAGMA table_info(team_members)").all().map(c => c.name);
   if (!tmCols2.includes('is_guide')) {
