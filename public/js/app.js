@@ -2080,13 +2080,22 @@ async function renderAllToursView(el) {
     api('/api/ical/tours'),
     api('/api/team').catch(()=>[]),
   ]);
-  const guides = [...new Set(tours.map(t => t.guide).filter(Boolean))].sort();
+  // Collapse guide names to their canonical team member, so a guide who appears
+  // under multiple raw names (e.g. "Pam" and "Paloma Lopez Garcia-Pelayo") shows
+  // once, under the team display name. Guides not in the team keep their raw name.
+  const guideMembers = team.filter(m => m.role === 'guide' || m.is_guide);
+  const guideLabels = new Set();
+  tours.map(t => t.guide).filter(Boolean).forEach(rg => {
+    const m = guideMembers.find(mm => guideMatches(rg, mm.name));
+    guideLabels.add(m ? m.name : rg);
+  });
+  const guides = [...guideLabels].sort();
   const feedIds = [...new Set(tours.map(t => t.feed_id))].sort();
 
   if (!window._toursFilter) window._toursFilter = { guide: '', feed: '' };
 
   const filtered = tours.filter(t =>
-    (!window._toursFilter.guide || t.guide === window._toursFilter.guide) &&
+    (!window._toursFilter.guide || guideMatches(t.guide, window._toursFilter.guide)) &&
     (!window._toursFilter.feed || t.feed_id === window._toursFilter.feed)
   );
 
@@ -2575,12 +2584,10 @@ async function renderAdminReviews(el) {
   const _pc = {'Google Maps':{bg:'#E8F0FE',fg:'#1A73E8'},'GetYourGuide':{bg:'#FFE8E2',fg:'#CC3D1F'},'Viator':{bg:'#D6F5EC',fg:'#00754A'},'TripAdvisor':{bg:'#D6F5EC',fg:'#00754A'},'Airbnb':{bg:'#FFE2E3',fg:'#D9363E'}};
   const adminPlatformBadge = p => { const c=_pc[p]||{bg:'var(--surface2)',fg:'var(--text2)'}; return `<span style="font-size:0.7rem;font-weight:700;background:${c.bg};color:${c.fg};padding:2px 8px;border-radius:10px">${p}</span>`; };
 
-  // Group reviews by guide for summary
-  const byGuide = {};
-  reviews.forEach(r => {
-    if (!byGuide[r.guide_id]) byGuide[r.guide_id] = { name: r.guide_name, reviews: [] };
-    byGuide[r.guide_id].reviews.push(r);
-  });
+  // Show all reviews chronologically, latest first (not grouped by guide).
+  const sorted = [...reviews].sort((a, b) =>
+    (b.review_date || '').localeCompare(a.review_date || '') || (b.id || 0) - (a.id || 0)
+  );
 
   el.innerHTML = `
     <div class="detail-section" style="border-top:none;padding-top:0">
@@ -2610,20 +2617,20 @@ async function renderAdminReviews(el) {
 
     <div class="detail-section">
       <div class="detail-section-title">All reviews (${reviews.length})</div>
-      ${Object.entries(byGuide).length === 0
+      ${sorted.length === 0
         ? '<div style="font-size:0.85rem;color:var(--text3)">No reviews logged yet</div>'
-        : Object.entries(byGuide).map(([gid, g]) => `
-          <div style="margin-bottom:1rem">
-            <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.35rem">${g.name} <span style="font-weight:400;color:var(--text3);font-size:0.8rem">${g.reviews.length} review${g.reviews.length!==1?'s':''}</span></div>
-            ${g.reviews.map(r => `
-              <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding:0.4rem 0;border-bottom:1px solid var(--border)">
-                <div style="display:flex;width:100%;justify-content:space-between;align-items:center;gap:0.4rem;flex-wrap:wrap">
-                  <span style="display:flex;align-items:center;gap:0.4rem">${adminPlatformBadge(r.platform)}<span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span></span>
-                  <button onclick="deleteReview(${r.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0">Delete</button>
-                </div>
-                ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${escapeHtml(r.reviewer_name)}</span>` : ''}
-                ${r.review_text ? `<div style="font-size:0.78rem;color:var(--text3);margin-top:3px;font-style:italic;line-height:1.4">"${escapeHtml(r.review_text)}"</div>` : ''}
-              </div>`).join('')}
+        : sorted.map(r => `
+          <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;width:100%;justify-content:space-between;align-items:center;gap:0.4rem;flex-wrap:wrap">
+              <span style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">
+                <span style="font-weight:700;font-size:0.82rem">${escapeHtml(r.guide_name || '—')}</span>
+                ${adminPlatformBadge(r.platform)}
+                <span style="font-size:0.78rem;color:var(--text3)">${r.review_date} · ${r.booking_type}</span>
+              </span>
+              <button onclick="deleteReview(${r.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0">Delete</button>
+            </div>
+            ${r.reviewer_name ? `<span style="font-size:0.78rem;color:var(--text2)">${escapeHtml(r.reviewer_name)}</span>` : ''}
+            ${r.review_text ? `<div style="font-size:0.78rem;color:var(--text3);margin-top:3px;font-style:italic;line-height:1.4">"${escapeHtml(r.review_text)}"</div>` : ''}
           </div>`).join('')}
     </div>
   `;
