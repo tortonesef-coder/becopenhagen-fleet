@@ -146,7 +146,6 @@ pm2 does NOT inherit `/etc/environment` automatically — server.js reads it man
 │   │   ├── fix-past-f3-duration.js
 │   │   ├── backfill-booking-created-at.js
 │   │   ├── backfill-real-created-at-from-fareharbor.js  ← NEW: pulls TRUE created_at from FareHarbor's per-availability bookings API for bookings missing it (predate the webhook); dry-run by default, --commit to write. Uses earlier of created_at/original_created_at so pre-1-July bookings that were later rescheduled still count
-│   │   ├── diag-first-booking-email.js  ← NEW: read-only trace of why a first-booking email did/didn't fire for a given ref
 │   │   ├── test-first-booking-email.js  ← NEW: sends a REAL first-booking email to ONLY the address you pass (notifier test mode); safe, repeatable, never emails a guide
 │   │   ├── test-all-emails.js  ← NEW: sends one of EVERY email notification type to ONLY the address you pass (real first-booking template + representative samples of the rest); for verifying the whole email set
 │   │   └── reset-tour-bike-data.js
@@ -384,6 +383,8 @@ Identified by `b.source === 'Airbnb'` — excluded from "Can keep bikes" flag, s
 ---
 
 ## 8. Session Log
+
+- **2026-07-09 (housekeeping):** Convention going forward — **clean as we go**: one-off `diag-*` / `capture-*` investigation scripts are removed once the question is answered; only reusable tools (`test-*`) and historical data migrations (`backfill-*`, `fix-*`, `reset-*`, `restore-*`, `split-*`) stay in `scripts/fixes/`. Removed six spent diagnostics: `diag-cancellations.js`, `diag-first-booking-email.js`, `diag-guide-hours.js`, `diag-tour-cancel-dupe.js`, `scripts/fareharbor-agent/diag-real-booking-dates.js`, `scripts/fareharbor-agent/capture-bookings-response.js`. (Their findings are preserved in the session-log entries above.)
 
 - **2026-07-09 (worked-hours bug: today's tours never counted):** Féidhlim showed 0 worked despite a completed L3 that morning. Root cause: the `/api/ical/guide-hours` worked/upcoming split compared the raw ISO `start_at` (e.g. `2026-07-09T10:30:00Z`, with a 'T') as a plain string against SQLite `datetime('now')` (space-separated). Since 'T' sorts after a space, ANY tour dated today sorted as future, so today's completed tours never counted as "worked" until the date rolled over. Fixed by wrapping both comparisons in `datetime(start_at)` so SQLite parses the timestamp before comparing. Affected every guide's same-day completed tours, not just Féidhlim (his only completed tour was today's). Note: a residual ~2h skew remains because iCal stores start_at as local-time-labelled-Z while v2 stores it with a real offset — minor for whole-tour "has it started" and pre-existing. `scripts/fixes/diag-guide-hours.js` added/fixed to use `new Date()` parsing.
 
