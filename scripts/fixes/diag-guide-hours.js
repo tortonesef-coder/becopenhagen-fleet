@@ -47,6 +47,21 @@ console.log(`  reviews this cycle: ${reviewCount}`);
 const ratio = workedCycleBookings > 0 && reviewCount > 0 ? Math.round((reviewCount / workedCycleBookings) * 100) : null;
 console.log(`  review rate (reviews / bookings): ${ratio === null ? '—' : ratio + '%'}   <- this is what the card shows`);
 
+// For each worked-this-cycle tour, compare the hours booking_count against the
+// actual reservations still on tour_availabilities (if the row hasn't been purged).
+console.log(`\nWorked-this-cycle tours — hours booking_count vs actual reservations:`);
+mine.filter(r => r.start_at && new Date(r.start_at) <= now && r.start_date >= cycleStart && r.start_date <= cycleEnd).forEach(r => {
+  const ta = db.prepare(`SELECT booking_count, bookings_json FROM tour_availabilities WHERE availability_id=?`).get(r.availability_id);
+  let resv = '(row purged — not in tour_availabilities anymore)';
+  if (ta) {
+    let list = [];
+    try { list = JSON.parse(ta.bookings_json || '[]'); } catch {}
+    resv = `tour_availabilities.booking_count=${ta.booking_count}, reservations=${list.length} [${list.map(b => `${b.name || '?'}: ${b.what || ''}`).join(' | ')}]`;
+  }
+  console.log(`  ${r.start_date} ${r.feed_id} (avail ${r.availability_id}): hours.booking_count=${r.booking_count}`);
+  console.log(`    ${resv}`);
+});
+
 // Are there started tours THIS CYCLE whose guide does NOT match (mismatch/missing)?
 console.log(`\nStarted tours in this cycle whose guide does NOT match "${who}" (possible mis-recorded guide):`);
 const cycleStarted = all.filter(r => r.start_at && new Date(r.start_at) <= now && r.start_date >= cycleStart && r.start_date <= cycleEnd && !guideMatches(r.guide, who));
