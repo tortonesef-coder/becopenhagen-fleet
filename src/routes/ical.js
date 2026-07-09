@@ -696,13 +696,15 @@ router.get('/guide-hours', (req, res) => {
 
   let rows;
   if (upcoming === '1' || upcoming === 'true') {
-    rows = db().prepare(`SELECT * FROM guide_tour_hours WHERE start_at > datetime('now') ORDER BY start_at`).all();
+    // datetime() parses the ISO start_at (with 'T'/'Z') so it compares correctly
+    // against datetime('now'); without it, same-day tours always sort as future.
+    rows = db().prepare(`SELECT * FROM guide_tour_hours WHERE datetime(start_at) > datetime('now') ORDER BY start_at`).all();
   } else {
     const fromDate = from || '1970-01-01';
     const toDate = to || '2999-12-31';
     rows = db().prepare(`
       SELECT * FROM guide_tour_hours
-      WHERE start_at <= datetime('now') AND start_date >= ? AND start_date <= ?
+      WHERE datetime(start_at) <= datetime('now') AND start_date >= ? AND start_date <= ?
       ORDER BY start_at
     `).all(fromDate, toDate);
   }

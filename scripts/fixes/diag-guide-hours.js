@@ -24,7 +24,7 @@ const mine = all.filter(r => guideMatches(r.guide, who));
 console.log(`guide_tour_hours rows matching "${who}": ${mine.length}`);
 let workedAll = 0, workedCycle = 0, upcoming = 0;
 mine.forEach(r => {
-  const started = r.start_at && r.start_at <= nowIso;
+  const started = r.start_at && new Date(r.start_at) <= now;
   const inCycle = r.start_date >= cycleStart && r.start_date <= cycleEnd;
   if (started) { workedAll += r.duration_minutes || 0; if (inCycle) workedCycle += r.duration_minutes || 0; }
   else upcoming += r.duration_minutes || 0;
@@ -38,7 +38,7 @@ console.log(`  upcoming:          ${(upcoming/60).toFixed(1)}h`);
 
 // Are there started tours THIS CYCLE whose guide does NOT match (mismatch/missing)?
 console.log(`\nStarted tours in this cycle whose guide does NOT match "${who}" (possible mis-recorded guide):`);
-const cycleStarted = all.filter(r => r.start_at && r.start_at <= nowIso && r.start_date >= cycleStart && r.start_date <= cycleEnd && !guideMatches(r.guide, who));
+const cycleStarted = all.filter(r => r.start_at && new Date(r.start_at) <= now && r.start_date >= cycleStart && r.start_date <= cycleEnd && !guideMatches(r.guide, who));
 if (!cycleStarted.length) console.log('  none');
 else cycleStarted.slice(0, 25).forEach(r => console.log(`  ${r.start_date}  ${r.feed_id}  ${r.duration_minutes}min  guide="${r.guide || '(null)'}"`));
 
