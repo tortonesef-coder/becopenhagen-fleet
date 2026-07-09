@@ -15,8 +15,9 @@
 const { chromium } = require('playwright');
 const COMPANY_SLUG = 'becopenhagen';
 
+// Uses the real saved Sales-by-item report so the test reflects production.
 const BUILDER_URL =
-  'https://fareharbor.com/becopenhagen/dashboard/reports/advanced/payments-and-refunds/?suggested=sales-by-item';
+  'https://fareharbor.com/becopenhagen/dashboard/reports/advanced/payments-and-refunds/?saved=159190';
 
 async function login(browser) {
   const ctx = await browser.newContext({ acceptDownloads: true });
@@ -61,6 +62,26 @@ async function login(browser) {
     await page.goto(BUILDER_URL, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForTimeout(3000);
     console.log('  builder URL now:', page.url());
+
+    // Read what the date range shows BEFORE generating — this tells us
+    // whether the saved report keeps a relative preset ("Last 7 Days") or a
+    // frozen custom range. Decides whether reports 1 & 2 need date-setting.
+    const dateState = await page.evaluate(() => {
+      const out = { selects: [], dateInputs: [] };
+      document.querySelectorAll('select').forEach(s => {
+        const opt = s.options[s.selectedIndex];
+        if (opt && /last|this|next|custom|week|day|month/i.test(opt.textContent)) {
+          out.selects.push(opt.textContent.trim());
+        }
+      });
+      document.querySelectorAll('input').forEach(i => {
+        const v = i.value || '';
+        if (/\d{2}\/\d{2}\/\d{4}/.test(v)) out.dateInputs.push(v);
+      });
+      return out;
+    });
+    console.log('  date preset(s) shown:', JSON.stringify(dateState.selects));
+    console.log('  date input value(s):', JSON.stringify(dateState.dateInputs));
 
     // Click Generate.
     const gen = page.locator('button:has-text("Generate"), a:has-text("Generate")').first();
