@@ -20,15 +20,19 @@ emails.forEach(e => L(`  ${e.sent_at}  ${e.to_email}  ${e.subject}`));
 L(`\n=== tours DETECTED cancelled by v2 (status->cancelled, last ${days}d) ===`);
 L('  (note: iCal-deleted cancellations are NOT logged here, so this can undercount)');
 const cancels = db.prepare(`
-  SELECT availability_id, feed_id, start_date, created_at
+  SELECT availability_id, feed_id, start_date, created_at, raw_data
   FROM tour_change_log
   WHERE field='status' AND new_value='cancelled' AND created_at >= datetime('now',?)
   ORDER BY created_at DESC`).all(since);
 
-// last-known guide per availability (most recent guide entry in the log)
-const guideFor = (availId) => {
-  const r = db.prepare(`SELECT new_value FROM tour_change_log WHERE availability_id=? AND field='guide' AND new_value IS NOT NULL AND new_value != '' ORDER BY created_at DESC LIMIT 1`).get(availId);
-  return r?.new_value || null;
+// The guide that was actually on the tour at cancellation is captured in the
+// status entry's raw_data snapshot (the deleted row). Read it from there — the
+// change-log guide-history is incomplete for some tours.
+const guideFor = (row) => {
+  if (!row.raw_data) return null;
+  try { const g = JSON.parse(row.raw_data).guide; return g || null; } catch {}
+  const m = row.raw_data.match(/"guide":\s*"([^"]*)"/); // truncated JSON fallback
+  return m ? (m[1] || null) : null;
 };
 const claimed = (availId) => {
   try { return !!db.prepare('SELECT 1 FROM tour_cancel_notified WHERE availability_id=?').get(availId); }
@@ -38,7 +42,7 @@ const claimed = (availId) => {
 let withGuide = 0, withoutGuide = 0, missed = [];
 L(`  count: ${cancels.length}`);
 cancels.forEach(c => {
-  const g = guideFor(c.availability_id);
+  const g = guideFor(c);
   const cl = claimed(c.availability_id);
   if (g) withGuide++; else withoutGuide++;
   const flag = (g && !cl) ? '  <-- had a guide but NOT emailed (possible miss)' : '';
