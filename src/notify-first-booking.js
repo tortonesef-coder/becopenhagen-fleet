@@ -65,7 +65,7 @@ function notifyFirstBooking(availabilityId, opts = {}) {
     if (!test && !isNotifEnabled(member.id, 'first_booking')) return true;
 
     const to = test || member.email;
-    const subject = `${test ? '[TEST] ' : ''}First booking — ${t.feed_id} on ${dateLbl}`;
+    const subject = `${test ? '[TEST] ' : ''}First booking — ${t.feed_id} on ${dateLbl}${t.start_time ? ' at ' + t.start_time : ''}`;
     const htmlContent = `
       <p>Hi ${member.name}${test ? ' (test copy sent to your address)' : ''},</p>
       <p>Your first booking just came in for:</p>

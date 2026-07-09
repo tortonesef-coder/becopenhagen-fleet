@@ -546,7 +546,7 @@ async function main() {
               <tr><td style="padding:3px 12px 3px 0;color:#888">Time</td><td>${row.start_time}${row.end_time ? ' – ' + row.end_time : ''}</td></tr>
             </table>
             ${EMAIL_FOOTER}`;
-          await sendEmail({ to: member.email, toName: member.name, subject: `Tour cancelled — ${row.feed_id} on ${dateLabel}`, htmlContent, category: 'tour_cancelled' })
+          await sendEmail({ to: member.email, toName: member.name, subject: `Tour cancelled — ${row.feed_id} on ${dateLabel}${row.start_time ? ' at ' + row.start_time : ''}`, htmlContent, category: 'tour_cancelled' })
             .catch(e => console.error(`Cancel email failed:`, e.message));
           }
         }

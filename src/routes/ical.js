@@ -422,7 +422,7 @@ function syncFeedToDB(feed, events) {
 
     // Last booking lost, slot still open
     if (prevCount >= 1 && e.booking_count === 0 && isNotifEnabled(member.id || memberId, 'zero_bookings')) {
-      const subject = `No more bookings — ${e.feed_id} on ${dateLabel}`;
+      const subject = `No more bookings — ${e.feed_id} on ${dateLabel}${e.start_time ? ' at ' + e.start_time : ''}`;
       const htmlContent = `
         <p>Hi ${member.name},</p>
         <p>All bookings have been cancelled or rebooked for your tour. The slot is still open and may get new bookings.</p>
@@ -467,7 +467,7 @@ function syncFeedToDB(feed, events) {
         const claimed = db().prepare('INSERT OR IGNORE INTO tour_cancel_notified (availability_id) VALUES (?)').run(row.availability_id).changes;
         if (!claimed) return;
         const dateLabel = new Date(row.start_date).toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-        const subject = `Tour cancelled — ${row.feed_id} on ${dateLabel}`;
+        const subject = `Tour cancelled — ${row.feed_id} on ${dateLabel}${row.start_time ? ' at ' + row.start_time : ''}`;
         const htmlContent = `
           <p>Hi ${member.name},</p>
           <p>The following tour has been cancelled:</p>
