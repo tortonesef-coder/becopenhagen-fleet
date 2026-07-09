@@ -607,7 +607,7 @@ function buildTabbar() {
   const role=state.actor?.role;
   document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
   const tabs = role==='mechanic'
-    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'profile',label:'Profile',icon:iconProfile()}]
+    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
     ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
     : role==='guide'
