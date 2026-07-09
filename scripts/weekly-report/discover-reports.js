@@ -14,15 +14,10 @@
 //
 // Reuses the exact login flow from scrape-guide-schedule-v2.js.
 
-// Playwright is installed under scripts/fareharbor-agent/node_modules (same
-// place the existing FH agent resolves it). Try root first, fall back to
-// the agent folder so this runs regardless of cwd.
-let chromium;
-try {
-  ({ chromium } = require('playwright'));
-} catch (_) {
-  ({ chromium } = require('../fareharbor-agent/node_modules/playwright'));
-}
+// Playwright is this module's own dependency (scripts/weekly-report/
+// node_modules), installed via `npm install` in this folder — so the module
+// is self-contained and can be split into its own repo later.
+const { chromium } = require('playwright');
 
 const COMPANY_SLUG = 'becopenhagen';
 const HEADED = !!process.env.HEADED;
