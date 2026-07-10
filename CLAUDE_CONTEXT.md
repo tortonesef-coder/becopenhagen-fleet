@@ -146,6 +146,7 @@ pm2 does NOT inherit `/etc/environment` automatically — server.js reads it man
 │   │   ├── fix-past-f3-duration.js
 │   │   ├── backfill-booking-created-at.js
 │   │   ├── backfill-real-created-at-from-fareharbor.js  ← NEW: pulls TRUE created_at from FareHarbor's per-availability bookings API for bookings missing it (predate the webhook); dry-run by default, --commit to write. Uses earlier of created_at/original_created_at so pre-1-July bookings that were later rescheduled still count
+│   │   ├── recode-guided-bikes.js  ← NEW: renames guided bike IDs GTn->Gn (Guided Bike) and GTn->GSn (Guided Bike Small), updating all 6 referencing tables atomically (FK off during swap); dry-run by default, --commit to apply
 │   │   ├── test-first-booking-email.js  ← NEW: sends a REAL first-booking email to ONLY the address you pass (notifier test mode); safe, repeatable, never emails a guide
 │   │   ├── test-all-emails.js  ← NEW: sends one of EVERY email notification type to ONLY the address you pass (real first-booking template + representative samples of the rest); for verifying the whole email set
 │   │   └── reset-tour-bike-data.js
@@ -383,6 +384,8 @@ Identified by `b.source === 'Airbnb'` — excluded from "Can keep bikes" flag, s
 ---
 
 ## 8. Session Log
+
+- **2026-07-09 (recode guided bike IDs):** `scripts/fixes/recode-guided-bikes.js` renames guided-tour bike primary keys — "Guided Bike" `GTn -> Gn` (keeps number), "Guided Bike Small" `GTn -> GSn` (renumbered GS1, GS2 by current id). Because the bike id is a PK referenced by six tables (`bike_status`, `bike_configurations`, `batteries.paired_bike_id`, `action_log`, `repair_tickets`, `assignment_bikes`) and `foreign_keys=ON`, the swap runs with FK temporarily off inside one transaction, updating the bike and all references together, then verifies no dangling refs. Dry-run by default (prints the full old->new mapping + per-table ref counts); `--commit` applies. Mapping is driven by bike type, so it also confirms whether the earlier Guided-Bike-Small split/reassignment actually happened.
 
 - **2026-07-09 (rental checkout: simpler for existing bookings):** When "Check out bikes" is used on an existing FareHarbor rental booking, `goCheckoutForRental` now sets `state.action.fromBooking`, and the rental form (`renderActionDetails('rental')`) adapts: it shows a compact header (customer name · #ref) with the pre-filled fields tucked under an openable "Booking & payment details" toggle, and the "Create booking in FareHarbor" toggle defaults **off** (the booking already exists, so no duplicate). Walk-in rentals are unchanged — full form, FareHarbor toggle on. `fromBooking` is cleared by the existing state.action resets on Back/submit, so the next walk-in shows the full form.
 
