@@ -953,8 +953,9 @@ function renderActionDetails(actionId) {
       </div>
     </div>`;
 
-  if(actionId==='rental') return `
-    <div class="action-details-card">
+  if(actionId==='rental') {
+    const fb = state.action.fromBooking; // set when checking out an existing booking
+    const fields = `
       <div class="form-group">
         <label class="form-label">Customer name</label>
         <input class="form-input" id="af-name" placeholder="Name"/>
@@ -995,13 +996,30 @@ function renderActionDetails(actionId) {
       </div>
       <div class="toggle-row" style="padding-top:0.5rem">
         <span class="toggle-label">Create booking in FareHarbor</span>
-        <label class="toggle"><input type="checkbox" id="af-create-fh" checked/><span class="toggle-track"></span></label>
+        <label class="toggle"><input type="checkbox" id="af-create-fh" ${fb ? '' : 'checked'}/><span class="toggle-track"></span></label>
       </div>
       <div class="form-group" style="margin-top:0.5rem;margin-bottom:0">
         <label class="form-label">Return due (optional)</label>
         <input class="form-input" id="af-due" type="datetime-local"/>
-      </div>
-    </div>`;
+      </div>`;
+
+    // Existing booking: the customer is already known and the booking already
+    // lives in FareHarbor — show a compact header and tuck the form under a
+    // toggle so the shop can just pick the bike. Walk-in: show the full form.
+    if (fb) return `
+      <div class="action-details-card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+          <span style="font-weight:700;font-size:0.95rem">${escapeHtml(fb.name || 'Booking')}</span>
+          ${fb.ref ? `<span style="font-size:0.75rem;color:var(--text3)">#${fb.ref}</span>` : ''}
+        </div>
+        <details style="margin-top:0.4rem">
+          <summary style="font-size:0.8rem;color:var(--text2);cursor:pointer;padding:0.3rem 0;list-style:none;display:flex;align-items:center;gap:0.4rem"><span>▶</span> Booking &amp; payment details</summary>
+          <div style="padding-top:0.5rem">${fields}</div>
+        </details>
+      </div>`;
+
+    return `<div class="action-details-card">${fields}</div>`;
+  }
 
   if(actionId==='tour') return `
     <div class="action-details-card">
@@ -3798,6 +3816,7 @@ function goCheckoutForRental(b) {
   state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
   renderTab('action');
   setTimeout(async () => {
+    state.action.fromBooking = b; // existing FareHarbor booking → simplified form
     await selectActionType('rental');
     const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
     set('af-name', b.name);
