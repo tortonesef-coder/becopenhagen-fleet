@@ -1008,6 +1008,7 @@ function renderActionDetails(actionId) {
     // toggle so the shop can just pick the bike. Walk-in: show the full form.
     if (fb) return `
       <div class="action-details-card">
+        <input type="hidden" id="af-ref" value="${fb.ref || ''}"/>
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
           <span style="font-weight:700;font-size:0.95rem">${escapeHtml(fb.name || 'Booking')}</span>
           ${fb.ref ? `<span style="font-size:0.75rem;color:var(--text3)">#${fb.ref}</span>` : ''}
@@ -3163,8 +3164,16 @@ async function renderTours(c) {
 
 async function renderRentals(c) {
   c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
-  const rentals = await api('/api/ical/rentals');
-  renderRentalsList(c, rentals);
+  const [rentals, bikes] = await Promise.all([
+    api('/api/ical/rentals'),
+    api('/api/bikes').catch(() => []),
+  ]);
+  // A booking is "handled" if a bike is currently out against its FareHarbor ref.
+  const checkedOutRefs = new Set(
+    bikes.filter(b => b.status === 'out' && b.fareharbor_booking_ref)
+         .map(b => String(b.fareharbor_booking_ref))
+  );
+  renderRentalsList(c, rentals, checkedOutRefs);
 }
 
 function renderToursList(el, tours, isGuideView) {
@@ -3206,7 +3215,7 @@ function renderToursList(el, tours, isGuideView) {
   `).join('');
 }
 
-function renderRentalsList(el, rentals) {
+function renderRentalsList(el, rentals, checkedOutRefs = new Set()) {
   if (rentals.length === 0) {
     el.innerHTML = '<div class="empty-state"><p>No upcoming rentals</p></div>';
     return;
@@ -3218,7 +3227,7 @@ function renderRentalsList(el, rentals) {
     const bookings = r.bookings || [];
     if (bookings.length === 0) return;
     bookings.forEach(b => {
-      allBookings.push({ ...b, _feed_id: r.feed_id, _start_date: r.start_date, _start_time: r.start_time, _end_time: r.end_time, _avail_id: r.availability_id });
+      allBookings.push({ ...b, _feed_id: r.feed_id, _start_date: r.start_date, _start_time: r.start_time, _end_time: r.end_time, _avail_id: r.availability_id, _done: checkedOutRefs.has(String(b.ref)) });
     });
   });
 
@@ -3229,6 +3238,8 @@ function renderRentalsList(el, rentals) {
     if (!byDate[d]) byDate[d] = [];
     byDate[d].push(b);
   });
+  // Within each day, sink already-handed-out bookings to the bottom.
+  Object.values(byDate).forEach(list => list.sort((a, b) => (a._done ? 1 : 0) - (b._done ? 1 : 0)));
 
   const sourceColors = {
     'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
@@ -3244,13 +3255,16 @@ function renderRentalsList(el, rentals) {
       const sourceBadge = (b.source && b.source !== 'direct' && sc)
         ? `<span style="font-size:0.68rem;font-weight:700;background:${sc.bg};color:${sc.fg};padding:2px 7px;border-radius:10px">${b.source}</span>`
         : '';
+      const doneBadge = b._done
+        ? `<span style="font-size:0.68rem;font-weight:700;background:var(--bg3);color:var(--text3);padding:2px 7px;border-radius:10px">✓ bikes out</span>`
+        : '';
       const comment = b.comments ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);line-height:1.45;white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : '';
       const bikes = b.what ? `<div style="margin-top:0.35rem;font-size:0.82rem;font-weight:600;color:var(--blue)">${escapeHtml(b.what)}</div>` : '';
-      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}','${b.ref}')">
+      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}','${b.ref}')" style="${b._done ? 'opacity:0.5' : ''}">
         <div class="rental-card-top">
           <span class="rental-duration-badge">${b._feed_id}</span>
           <span class="rental-time">${b._start_time || ''}${b._end_time ? ' – ' + b._end_time : ''}</span>
-          ${sourceBadge ? `<span style="margin-left:auto">${sourceBadge}</span>` : ''}
+          ${sourceBadge || doneBadge ? `<span style="margin-left:auto;display:flex;gap:0.3rem">${sourceBadge}${doneBadge}</span>` : ''}
         </div>
         <div style="font-size:0.97rem;font-weight:700;color:var(--text)">${escapeHtml(b.name || 'Unknown')}</div>
         ${bikes}
