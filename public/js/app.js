@@ -607,7 +607,7 @@ function buildTabbar() {
   const role=state.actor?.role;
   document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
   const tabs = role==='mechanic'
-    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
+    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
     ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
     : role==='guide'
@@ -650,11 +650,12 @@ function animateCounts(root) {
 async function renderTab(id) {
   setActiveTab(id);
   logPageView(id);
-  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App'};
+  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App',today:'Today'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id!=='action') c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
   if(id==='bikes') await renderBikes(c);
+  else if(id==='today') await renderTodayBoard(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
   else if(id==='tickets') await renderTickets(c);
@@ -1880,8 +1881,8 @@ function guideMatches(availGuide, personName) {
 
 // ── Operations tab (Tours, Rentals, Bikes, Tickets sub-tabs) ─────
 async function renderOperations(c) {
-  if (!window._opsTab) window._opsTab = 'actions';
-  const tabs = [['actions','Actions'],['tours','Tours'],['rentals','Rentals'],['bikes','Bikes'],['tickets','Tickets']];
+  if (!window._opsTab) window._opsTab = 'today';
+  const tabs = [['today','Today'],['actions','Actions'],['tours','Tours'],['rentals','Rentals'],['bikes','Bikes'],['tickets','Tickets']];
   c.innerHTML = `
     <div class="subtab-row">
       ${tabs.map(([id,label])=>`<button class="subtab${window._opsTab===id?' active':''}" data-opstab="${id}" onclick="switchOpsTab('${id}')">${label}</button>`).join('')}
@@ -1900,7 +1901,8 @@ async function switchOpsTab(tab) {
 async function renderOpsTab() {
   const el = document.getElementById('ops-tab-content');
   if (!el) return;
-  if (window._opsTab === 'actions') renderAction(el);
+  if (window._opsTab === 'today') await renderTodayBoard(el);
+  else if (window._opsTab === 'actions') renderAction(el);
   else if (window._opsTab === 'tours') {
     // Operations shows only the admin's own tours (as a guide)
     const name = state.actor?.name;
@@ -3055,6 +3057,7 @@ async function retireBike(id, reactivate) {
 
 function iconRentals(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8h-3V4H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1m17-9-2-3h-9l-2 3m13 0v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8m13 0H7"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>`;}
 function iconTours(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;}
+function iconToday(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="7" y="14" width="4" height="4" rx="1" fill="currentColor" stroke="none"/></svg>`;}
 function iconAdmin(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><path d="M12 12v9"/><path d="m15 15-3 3-3-3"/></svg>`;}
 
 // ── PENDING ASSIGNMENTS ───────────────────────────────────────────────────
@@ -3160,6 +3163,115 @@ async function renderTours(c) {
   const isGuide = role === 'guide';
   const tours = await api('/api/ical/tours' + (isGuide ? `?guide=${encodeURIComponent(name)}` : ''));
   renderToursList(c, tours, isGuide);
+}
+
+// ── TODAY BOARD (shop manifest) ──────────────────────────────────────────
+const CAT_LABELS = { A:'Touring', E:'E-bike', GT:'Guided', B:'Bike', AC:'Child-seat', AT:'Toddler-seat', SA:'Small' };
+const catLabel = (k) => CAT_LABELS[k] || k;
+function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+
+async function renderTodayBoard(c) {
+  const today = new Date().toISOString().substring(0, 10);
+  const [tours, rentals, bikes] = await Promise.all([
+    api('/api/ical/tours').catch(() => []),
+    api('/api/ical/rentals').catch(() => []),
+    api('/api/bikes').catch(() => []),
+  ]);
+  const todayTours = tours.filter(t => (t.start_date || '') === today);
+  const todayRentals = rentals.filter(r => (r.start_date || '') === today);
+
+  // bikes currently out, indexed by the booking ref they're linked to
+  const outByRef = {};
+  bikes.filter(b => b.status === 'out' && b.fareharbor_booking_ref).forEach(b => {
+    const k = String(b.fareharbor_booking_ref); (outByRef[k] = outByRef[k] || []).push(b);
+  });
+
+  // ---- Peak "bikes needed today" per category ----
+  // Tours hold their bikes from (start-10min) to (end+20min); the number for a
+  // category is the MOST needed at any one moment (peak), so two non-overlapping
+  // tours share bikes. Rentals are multi-day → they occupy bikes all day, so
+  // they add as a flat baseline (they overlap every tour window).
+  const cats = new Set();
+  todayTours.forEach(t => Object.entries(t.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
+  todayRentals.forEach(r => (r.bookings || []).length && Object.entries(r.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
+
+  const needed = {};
+  cats.forEach(cat => {
+    const evs = [];
+    todayTours.forEach(t => {
+      const n = (t.bikes_needed || {})[cat] || 0; if (n <= 0) return;
+      const s = hhmmToMin(t.start_time), e = hhmmToMin(t.end_time);
+      if (s == null || e == null) return;
+      evs.push([s - 10, n]); evs.push([e + 20, -n]);
+    });
+    evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // at same minute, release before acquire
+    let cur = 0, peak = 0; evs.forEach(([, d]) => { cur += d; if (cur > peak) peak = cur; });
+    let rentalN = 0;
+    todayRentals.forEach(r => { if ((r.bookings || []).length) rentalN += (r.bikes_needed || {})[cat] || 0; });
+    if (peak + rentalN > 0) needed[cat] = { total: peak + rentalN, tourPeak: peak, rental: rentalN };
+  });
+
+  // ---- Timeline: tour departures + rental pickups, by time ----
+  const events = [];
+  todayTours.forEach(t => events.push({
+    sort: hhmmToMin(t.start_time) ?? 9999, kind: 'tour', time: t.start_time, end: t.end_time,
+    label: t.feed_id, who: t.guide || 'No guide yet', pax: t.booking_count, bikes: t.bikes_needed || {}, availId: t.availability_id,
+  }));
+  todayRentals.forEach(r => (r.bookings || []).forEach(b => {
+    const out = outByRef[String(b.ref)] || [];
+    events.push({ sort: hhmmToMin(r.start_time) ?? 9999, kind: 'rental', time: r.start_time, who: b.name || 'Unknown', what: b.what, ref: b.ref, availId: r.availability_id, done: out.length > 0, outBikes: out });
+  }));
+  events.sort((a, b) => a.sort - b.sort);
+
+  // ---- Bikes due back today ----
+  const returns = bikes.filter(b => b.status === 'out' && b.return_due && String(b.return_due).substring(0, 10) === today)
+    .sort((a, b) => String(a.return_due).localeCompare(String(b.return_due)));
+
+  // ---- Render ----
+  const neededHtml = Object.keys(needed).length
+    ? Object.entries(needed).sort((a, b) => b[1].total - a[1].total).map(([cat, v]) =>
+        `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.35rem 0;border-bottom:1px solid var(--border)">
+           <span style="font-weight:600">${catLabel(cat)}</span>
+           <span><strong style="font-size:1.05rem">${v.total}</strong> <span style="font-size:0.72rem;color:var(--text3)">${v.rental ? `${v.tourPeak} tour-peak + ${v.rental} rental` : 'at peak'}</span></span>
+         </div>`).join('')
+    : '<div style="color:var(--text3);font-size:0.85rem">No bikes needed today</div>';
+
+  const eventsHtml = events.length ? events.map(e => {
+    if (e.kind === 'tour') {
+      const bikeStr = Object.entries(e.bikes).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${catLabel(k)}`).join(', ');
+      return `<div class="rental-card" onclick="openTourDetail('${e.availId}')">
+        <div class="rental-card-top"><span class="rental-duration-badge">${e.label}</span><span class="rental-time">${e.time || ''}${e.end ? ' – ' + e.end : ''}</span><span style="margin-left:auto;font-size:0.7rem;color:var(--text3)">TOUR</span></div>
+        <div style="font-weight:700;color:var(--text)">${guideEmojiByName(e.who)} ${escapeHtml(e.who)}</div>
+        <div style="font-size:0.8rem;color:var(--text2)">${e.pax} guest${e.pax !== 1 ? 's' : ''}${bikeStr ? ' · ' + bikeStr : ''}</div>
+      </div>`;
+    }
+    const doneTag = e.done
+      ? `<span style="margin-left:auto;font-size:0.66rem;font-weight:700;background:var(--bg3);color:var(--text3);padding:2px 7px;border-radius:10px">✓ ${e.outBikes.map(x => x.id).join(', ')}</span>`
+      : `<span style="margin-left:auto;font-size:0.7rem;color:var(--text3)">RENTAL</span>`;
+    return `<div class="rental-card" onclick="openRentalDetail('${e.availId}','${e.ref}')" style="${e.done ? 'opacity:0.6' : ''}">
+      <div class="rental-card-top"><span class="rental-duration-badge">Rental</span><span class="rental-time">${e.time || ''}</span>${doneTag}</div>
+      <div style="font-weight:700;color:var(--text)">${escapeHtml(e.who)}</div>
+      ${e.what ? `<div style="font-size:0.8rem;color:var(--blue);font-weight:600">${escapeHtml(e.what)}</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="empty-state" style="padding:1rem 0"><p>Nothing scheduled today</p></div>';
+
+  const returnsHtml = returns.length ? returns.map(b =>
+    `<div class="detail-row"><span class="dr-key">${b.id}</span><span class="dr-val">${escapeHtml(b.customer_name || b.assigned_to || '')} · due ${fmtTime(b.return_due)}</span></div>`
+  ).join('') : '<div style="color:var(--text3);font-size:0.85rem">Nothing due back today</div>';
+
+  c.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Bikes needed today</div>
+      ${neededHtml}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Schedule · ${events.length} today</div>
+      ${eventsHtml}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Due back today · ${returns.length}</div>
+      ${returnsHtml}
+    </div>`;
 }
 
 async function renderRentals(c) {
