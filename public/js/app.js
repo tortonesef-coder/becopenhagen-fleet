@@ -858,6 +858,14 @@ function renderAction(c) {
     </div>`;
 }
 
+// Add a borrowed "lifesaver" bike from across the street to the current checkout.
+async function addExternalBike() {
+  const bikes = await api('/api/bikes').catch(() => []);
+  const ext = bikes.filter(b => (b.type_id === 'EXT' || b.type_label === 'External') && b.status === 'available' && !state.action.bikes.includes(b.id));
+  if (!ext.length) { toast('No external bikes free — add more in Fleet', 'error'); return; }
+  toggleBike(ext[0].id, ext[0].name || 'External', 'available');
+}
+
 async function selectActionType(actionId) {
   state.action.type = actionId;
   // Apply preloaded bike if not already selected
@@ -891,6 +899,7 @@ async function selectActionType(actionId) {
         <input class="form-input" id="bike-adder-input" placeholder="Type bike ID..." autocapitalize="characters" autocomplete="off"/>
         <button class="btn btn-secondary btn-sm" onclick="addBikeById()">Add</button>
       </div>
+      ${['rental','tour','city','borrowed'].includes(actionId) ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.4rem;width:100%" onclick="addExternalBike()">+ External bike (borrowed)</button>` : ''}
       <button class="voice-btn" id="voice-btn" onclick="startVoiceRecording(state.action.type)">
         🎤 <span>Tap to speak bike IDs</span>
       </button>
@@ -3166,7 +3175,7 @@ async function renderTours(c) {
 }
 
 // ── TODAY BOARD (shop manifest) ──────────────────────────────────────────
-const CAT_LABELS = { A:'Touring', E:'E-bike', GT:'Guided', B:'Bike', AC:'Child-seat', AT:'Toddler-seat', SA:'Small' };
+const CAT_LABELS = { A:'Regular', E:'E-bike', GT:'Guided', B:'Bike', AC:'Child-seat', AT:'Toddler-seat', SA:'Small' };
 const catLabel = (k) => CAT_LABELS[k] || k;
 function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
 
@@ -3186,17 +3195,14 @@ async function renderTodayBoard(c) {
     const k = String(b.fareharbor_booking_ref); (outByRef[k] = outByRef[k] || []).push(b);
   });
 
-  // ---- Peak "bikes needed today" per category ----
-  // Tours hold their bikes from (start-10min) to (end+20min); the number for a
-  // category is the MOST needed at any one moment (peak), so two non-overlapping
-  // tours share bikes. Rentals are multi-day → they occupy bikes all day, so
-  // they add as a flat baseline (they overlap every tour window).
-  const cats = new Set();
-  todayTours.forEach(t => Object.entries(t.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
-  todayRentals.forEach(r => (r.bookings || []).length && Object.entries(r.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
-
-  const needed = {};
-  cats.forEach(cat => {
+  // ---- "Bikes needed today", split by TOURS vs RENTALS (that's how the shop
+  // thinks about it). Tours use a PEAK: each tour holds its bikes from
+  // start-10min to end+20min, so two non-overlapping tours share the same bikes.
+  // Rentals are summed (multi-day → each ties up its bikes all day anyway).
+  const tourCats = new Set();
+  todayTours.forEach(t => Object.entries(t.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) tourCats.add(k); }));
+  const tourNeeded = {};
+  tourCats.forEach(cat => {
     const evs = [];
     todayTours.forEach(t => {
       const n = (t.bikes_needed || {})[cat] || 0; if (n <= 0) return;
@@ -3206,10 +3212,10 @@ async function renderTodayBoard(c) {
     });
     evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // at same minute, release before acquire
     let cur = 0, peak = 0; evs.forEach(([, d]) => { cur += d; if (cur > peak) peak = cur; });
-    let rentalN = 0;
-    todayRentals.forEach(r => { if ((r.bookings || []).length) rentalN += (r.bikes_needed || {})[cat] || 0; });
-    if (peak + rentalN > 0) needed[cat] = { total: peak + rentalN, tourPeak: peak, rental: rentalN };
+    if (peak > 0) tourNeeded[cat] = peak;
   });
+  const rentalNeeded = {};
+  todayRentals.forEach(r => { if ((r.bookings || []).length) Object.entries(r.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) rentalNeeded[k] = (rentalNeeded[k] || 0) + n; }); });
 
   // ---- Timeline: tour departures + rental pickups, by time ----
   const events = [];
@@ -3228,13 +3234,17 @@ async function renderTodayBoard(c) {
     .sort((a, b) => String(a.return_due).localeCompare(String(b.return_due)));
 
   // ---- Render ----
-  const neededHtml = Object.keys(needed).length
-    ? Object.entries(needed).sort((a, b) => b[1].total - a[1].total).map(([cat, v]) =>
-        `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.35rem 0;border-bottom:1px solid var(--border)">
-           <span style="font-weight:600">${catLabel(cat)}</span>
-           <span><strong style="font-size:1.05rem">${v.total}</strong> <span style="font-size:0.72rem;color:var(--text3)">${v.rental ? `${v.tourPeak} tour-peak + ${v.rental} rental` : 'at peak'}</span></span>
-         </div>`).join('')
-    : '<div style="color:var(--text3);font-size:0.85rem">No bikes needed today</div>';
+  const needGroup = (title, obj) => {
+    const keys = Object.keys(obj).filter(k => obj[k] > 0).sort((a, b) => obj[b] - obj[a]);
+    if (!keys.length) return '';
+    return `<div style="margin-bottom:0.65rem">
+      <div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:0.15rem">${title}</div>
+      ${keys.map(k => `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.25rem 0;border-bottom:1px solid var(--border)"><span style="font-weight:600">${catLabel(k)}</span><strong style="font-size:1.05rem">${obj[k]}</strong></div>`).join('')}
+    </div>`;
+  };
+  const neededHtml = (Object.keys(tourNeeded).length || Object.keys(rentalNeeded).length)
+    ? needGroup('For tours (peak at once)', tourNeeded) + needGroup('For rentals', rentalNeeded)
+    : '<div style="color:var(--text3);font-size:0.85rem">Nothing needed today</div>';
 
   const eventsHtml = events.length ? events.map(e => {
     if (e.kind === 'tour') {
