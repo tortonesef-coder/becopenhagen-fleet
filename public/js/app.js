@@ -3798,13 +3798,19 @@ async function openTourDetail(availId) {
 }
 
 async function openRentalDetail(availId, ref) {
-  const rentals = await api('/api/ical/rentals');
+  const [rentals, bikes] = await Promise.all([
+    api('/api/ical/rentals'),
+    api('/api/bikes').catch(() => []),
+  ]);
   const r = rentals.find(x=>x.availability_id===availId);
   if (!r) return;
   const bookings = r.bookings || [];
   // Show ONLY the booking that was clicked (a slot can hold several bookings).
   const b = (ref ? bookings.find(x => String(x.ref) === String(ref)) : null) || bookings[0];
   if (!b) return;
+
+  // Bikes currently out against this booking (linked at checkout by ref).
+  const outBikes = bikes.filter(x => x.status === 'out' && String(x.fareharbor_booking_ref) === String(b.ref));
 
   openModal(`
     <div class="modal-title">${escapeHtml(b.name || 'Unknown')}</div>
@@ -3817,10 +3823,29 @@ async function openRentalDetail(availId, ref) {
       ${b.what ? `<div class="detail-row"><span class="dr-key">Booked</span><span class="dr-val">${escapeHtml(b.what)}</span></div>` : ''}
       ${b.comments ? `<div style="margin-top:0.5rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : ''}
     </div>
-    <button class="btn btn-primary btn-full" style="margin-top:0.5rem" id="rental-checkout-btn">Check out bikes</button>
+    ${outBikes.length ? `
+      <div class="detail-section">
+        <div class="detail-section-title">Bikes checked out (${outBikes.length})</div>
+        ${outBikes.map(x => `<div class="detail-row"><span class="dr-key">${x.id}</span><span class="dr-val">${escapeHtml(x.name || x.type_label || '')}${x.return_due ? ' · due ' + fmtTime(x.return_due) : ''}</span></div>`).join('')}
+      </div>
+      <button class="btn btn-secondary btn-full" id="rental-return-btn" style="margin-top:0.5rem">Return these bikes</button>
+      <button class="btn btn-primary btn-full" id="rental-checkout-btn" style="margin-top:0.5rem">Check out more bikes</button>
+    ` : `
+      <button class="btn btn-primary btn-full" id="rental-checkout-btn" style="margin-top:0.5rem">Check out bikes</button>
+    `}
   `);
-  const btn = document.getElementById('rental-checkout-btn');
-  if (btn) btn.onclick = () => goCheckoutForRental(b);
+  const cb = document.getElementById('rental-checkout-btn');
+  if (cb) cb.onclick = () => goCheckoutForRental(b);
+  const rb = document.getElementById('rental-return-btn');
+  if (rb) rb.onclick = () => goReturnForRental(outBikes.map(x => x.id));
+}
+
+// Open the Action screen straight into a return, pre-loaded with these bikes.
+function goReturnForRental(bikeIds) {
+  closeModal();
+  state.action = { type: null, bikes: [...bikeIds], searchQ: '', preloaded: null };
+  renderTab('action');
+  setTimeout(() => selectActionType('return'), 120);
 }
 
 // Open the Action screen straight into a rental checkout, pre-filled with this
