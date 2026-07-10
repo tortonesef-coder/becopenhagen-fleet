@@ -3228,7 +3228,7 @@ function renderRentalsList(el, rentals) {
         : '';
       const comment = b.comments ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);line-height:1.45;white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : '';
       const bikes = b.what ? `<div style="margin-top:0.35rem;font-size:0.82rem;font-weight:600;color:var(--blue)">${escapeHtml(b.what)}</div>` : '';
-      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}')">
+      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}','${b.ref}')">
         <div class="rental-card-top">
           <span class="rental-duration-badge">${b._feed_id}</span>
           <span class="rental-time">${b._start_time || ''}${b._end_time ? ' – ' + b._end_time : ''}</span>
@@ -3765,24 +3765,45 @@ async function openTourDetail(availId) {
   `);
 }
 
-async function openRentalDetail(availId) {
+async function openRentalDetail(availId, ref) {
   const rentals = await api('/api/ical/rentals');
   const r = rentals.find(x=>x.availability_id===availId);
   if (!r) return;
   const bookings = r.bookings || [];
+  // Show ONLY the booking that was clicked (a slot can hold several bookings).
+  const b = (ref ? bookings.find(x => String(x.ref) === String(ref)) : null) || bookings[0];
+  if (!b) return;
 
   openModal(`
-    <div class="modal-title">${r.feed_label} · ${fmtDateFull(r.start_date)}</div>
+    <div class="modal-title">${escapeHtml(b.name || 'Unknown')}</div>
     <div class="detail-section" style="border-top:none;padding-top:0">
-      ${bookings.map(b=>`
-        <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:1px;padding:0.4rem 0">
-          <span style="font-weight:600;font-size:0.88rem">${b.name||'Unknown'}</span>
-          <span style="font-size:0.75rem;color:var(--text3)">#${b.ref}${b.phone?' · '+b.phone:''}</span>
-          ${b.email?`<span style="font-size:0.72rem;color:var(--text3)">${b.email}</span>`:''}
-        </div>`).join('')}
+      <div class="detail-row"><span class="dr-key">Rental</span><span class="dr-val">${r.feed_label} · ${fmtDateFull(r.start_date)}</span></div>
+      <div class="detail-row"><span class="dr-key">Time</span><span class="dr-val">${r.start_time || ''}${r.end_time ? ' – ' + r.end_time : ''}</span></div>
+      <div class="detail-row"><span class="dr-key">Booking</span><span class="dr-val">#${b.ref}</span></div>
+      ${b.phone ? `<div class="detail-row"><span class="dr-key">Phone</span><span class="dr-val">${escapeHtml(b.phone)}</span></div>` : ''}
+      ${b.email ? `<div class="detail-row"><span class="dr-key">Email</span><span class="dr-val">${escapeHtml(b.email)}</span></div>` : ''}
+      ${b.what ? `<div class="detail-row"><span class="dr-key">Booked</span><span class="dr-val">${escapeHtml(b.what)}</span></div>` : ''}
+      ${b.comments ? `<div style="margin-top:0.5rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : ''}
     </div>
-    <button class="btn btn-primary btn-full" style="margin-top:0.5rem" onclick="closeModal();renderTab('action')">Check out bikes</button>
+    <button class="btn btn-primary btn-full" style="margin-top:0.5rem" id="rental-checkout-btn">Check out bikes</button>
   `);
+  const btn = document.getElementById('rental-checkout-btn');
+  if (btn) btn.onclick = () => goCheckoutForRental(b);
+}
+
+// Open the Action screen straight into a rental checkout, pre-filled with this
+// booking's customer, so the user just picks the bike(s) that were handed over.
+function goCheckoutForRental(b) {
+  closeModal();
+  state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
+  renderTab('action');
+  setTimeout(async () => {
+    await selectActionType('rental');
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    set('af-name', b.name);
+    set('af-phone', b.phone);
+    set('af-email', b.email);
+  }, 120);
 }
 
 function goCheckoutForTour(tourId, guide) {
