@@ -607,7 +607,7 @@ function buildTabbar() {
   const role=state.actor?.role;
   document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
   const tabs = role==='mechanic'
-    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
+    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
     : role==='admin'
     ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
     : role==='guide'
@@ -650,11 +650,12 @@ function animateCounts(root) {
 async function renderTab(id) {
   setActiveTab(id);
   logPageView(id);
-  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App'};
+  const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App',today:'Today'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id!=='action') c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
   if(id==='bikes') await renderBikes(c);
+  else if(id==='today') await renderTodayBoard(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
   else if(id==='tickets') await renderTickets(c);
@@ -857,6 +858,14 @@ function renderAction(c) {
     </div>`;
 }
 
+// Add a borrowed "lifesaver" bike from across the street to the current checkout.
+async function addExternalBike() {
+  const bikes = await api('/api/bikes').catch(() => []);
+  const ext = bikes.filter(b => (b.type_id === 'EXT' || b.type_label === 'External') && b.status === 'available' && !state.action.bikes.includes(b.id));
+  if (!ext.length) { toast('No external bikes free — add more in Fleet', 'error'); return; }
+  toggleBike(ext[0].id, ext[0].name || 'External', 'available');
+}
+
 async function selectActionType(actionId) {
   state.action.type = actionId;
   // Apply preloaded bike if not already selected
@@ -890,6 +899,7 @@ async function selectActionType(actionId) {
         <input class="form-input" id="bike-adder-input" placeholder="Type bike ID..." autocapitalize="characters" autocomplete="off"/>
         <button class="btn btn-secondary btn-sm" onclick="addBikeById()">Add</button>
       </div>
+      ${['rental','tour','city','borrowed'].includes(actionId) ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.4rem;width:100%" onclick="addExternalBike()">+ External bike (borrowed)</button>` : ''}
       <button class="voice-btn" id="voice-btn" onclick="startVoiceRecording(state.action.type)">
         🎤 <span>Tap to speak bike IDs</span>
       </button>
@@ -953,8 +963,9 @@ function renderActionDetails(actionId) {
       </div>
     </div>`;
 
-  if(actionId==='rental') return `
-    <div class="action-details-card">
+  if(actionId==='rental') {
+    const fb = state.action.fromBooking; // set when checking out an existing booking
+    const fields = `
       <div class="form-group">
         <label class="form-label">Customer name</label>
         <input class="form-input" id="af-name" placeholder="Name"/>
@@ -995,13 +1006,31 @@ function renderActionDetails(actionId) {
       </div>
       <div class="toggle-row" style="padding-top:0.5rem">
         <span class="toggle-label">Create booking in FareHarbor</span>
-        <label class="toggle"><input type="checkbox" id="af-create-fh" checked/><span class="toggle-track"></span></label>
+        <label class="toggle"><input type="checkbox" id="af-create-fh" ${fb ? '' : 'checked'}/><span class="toggle-track"></span></label>
       </div>
       <div class="form-group" style="margin-top:0.5rem;margin-bottom:0">
         <label class="form-label">Return due (optional)</label>
         <input class="form-input" id="af-due" type="datetime-local"/>
-      </div>
-    </div>`;
+      </div>`;
+
+    // Existing booking: the customer is already known and the booking already
+    // lives in FareHarbor — show a compact header and tuck the form under a
+    // toggle so the shop can just pick the bike. Walk-in: show the full form.
+    if (fb) return `
+      <div class="action-details-card">
+        <input type="hidden" id="af-ref" value="${fb.ref || ''}"/>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+          <span style="font-weight:700;font-size:0.95rem">${escapeHtml(fb.name || 'Booking')}</span>
+          ${fb.ref ? `<span style="font-size:0.75rem;color:var(--text3)">#${fb.ref}</span>` : ''}
+        </div>
+        <details style="margin-top:0.4rem">
+          <summary style="font-size:0.8rem;color:var(--text2);cursor:pointer;padding:0.3rem 0;list-style:none;display:flex;align-items:center;gap:0.4rem"><span>▶</span> Booking &amp; payment details</summary>
+          <div style="padding-top:0.5rem">${fields}</div>
+        </details>
+      </div>`;
+
+    return `<div class="action-details-card">${fields}</div>`;
+  }
 
   if(actionId==='tour') return `
     <div class="action-details-card">
@@ -1861,8 +1890,8 @@ function guideMatches(availGuide, personName) {
 
 // ── Operations tab (Tours, Rentals, Bikes, Tickets sub-tabs) ─────
 async function renderOperations(c) {
-  if (!window._opsTab) window._opsTab = 'actions';
-  const tabs = [['actions','Actions'],['tours','Tours'],['rentals','Rentals'],['bikes','Bikes'],['tickets','Tickets']];
+  if (!window._opsTab) window._opsTab = 'today';
+  const tabs = [['today','Today'],['actions','Actions'],['tours','Tours'],['rentals','Rentals'],['bikes','Bikes'],['tickets','Tickets']];
   c.innerHTML = `
     <div class="subtab-row">
       ${tabs.map(([id,label])=>`<button class="subtab${window._opsTab===id?' active':''}" data-opstab="${id}" onclick="switchOpsTab('${id}')">${label}</button>`).join('')}
@@ -1881,7 +1910,8 @@ async function switchOpsTab(tab) {
 async function renderOpsTab() {
   const el = document.getElementById('ops-tab-content');
   if (!el) return;
-  if (window._opsTab === 'actions') renderAction(el);
+  if (window._opsTab === 'today') await renderTodayBoard(el);
+  else if (window._opsTab === 'actions') renderAction(el);
   else if (window._opsTab === 'tours') {
     // Operations shows only the admin's own tours (as a guide)
     const name = state.actor?.name;
@@ -3036,6 +3066,7 @@ async function retireBike(id, reactivate) {
 
 function iconRentals(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8h-3V4H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1m17-9-2-3h-9l-2 3m13 0v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8m13 0H7"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>`;}
 function iconTours(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;}
+function iconToday(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="7" y="14" width="4" height="4" rx="1" fill="currentColor" stroke="none"/></svg>`;}
 function iconAdmin(){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><path d="M12 12v9"/><path d="m15 15-3 3-3-3"/></svg>`;}
 
 // ── PENDING ASSIGNMENTS ───────────────────────────────────────────────────
@@ -3143,10 +3174,128 @@ async function renderTours(c) {
   renderToursList(c, tours, isGuide);
 }
 
+// ── TODAY BOARD (shop manifest) ──────────────────────────────────────────
+const CAT_LABELS = { A:'Regular', E:'E-bike', GT:'Guided', B:'Bike', AC:'Child-seat', AT:'Toddler-seat', SA:'Small' };
+const catLabel = (k) => CAT_LABELS[k] || k;
+function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+
+async function renderTodayBoard(c) {
+  const today = new Date().toISOString().substring(0, 10);
+  const [tours, rentals, bikes] = await Promise.all([
+    api('/api/ical/tours').catch(() => []),
+    api('/api/ical/rentals').catch(() => []),
+    api('/api/bikes').catch(() => []),
+  ]);
+  const todayTours = tours.filter(t => (t.start_date || '') === today);
+  const todayRentals = rentals.filter(r => (r.start_date || '') === today);
+
+  // bikes currently out, indexed by the booking ref they're linked to
+  const outByRef = {};
+  bikes.filter(b => b.status === 'out' && b.fareharbor_booking_ref).forEach(b => {
+    const k = String(b.fareharbor_booking_ref); (outByRef[k] = outByRef[k] || []).push(b);
+  });
+
+  // ---- "Bikes needed today", split by TOURS vs RENTALS (that's how the shop
+  // thinks about it). Tours use a PEAK: each tour holds its bikes from
+  // start-10min to end+20min, so two non-overlapping tours share the same bikes.
+  // Rentals are summed (multi-day → each ties up its bikes all day anyway).
+  const tourCats = new Set();
+  todayTours.forEach(t => Object.entries(t.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) tourCats.add(k); }));
+  const tourNeeded = {};
+  tourCats.forEach(cat => {
+    const evs = [];
+    todayTours.forEach(t => {
+      const n = (t.bikes_needed || {})[cat] || 0; if (n <= 0) return;
+      const s = hhmmToMin(t.start_time), e = hhmmToMin(t.end_time);
+      if (s == null || e == null) return;
+      evs.push([s - 10, n]); evs.push([e + 20, -n]);
+    });
+    evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // at same minute, release before acquire
+    let cur = 0, peak = 0; evs.forEach(([, d]) => { cur += d; if (cur > peak) peak = cur; });
+    if (peak > 0) tourNeeded[cat] = peak;
+  });
+  const rentalNeeded = {};
+  todayRentals.forEach(r => { if ((r.bookings || []).length) Object.entries(r.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) rentalNeeded[k] = (rentalNeeded[k] || 0) + n; }); });
+
+  // ---- Timeline: tour departures + rental pickups, by time ----
+  const events = [];
+  todayTours.forEach(t => events.push({
+    sort: hhmmToMin(t.start_time) ?? 9999, kind: 'tour', time: t.start_time, end: t.end_time,
+    label: t.feed_id, who: t.guide || 'No guide yet', pax: t.booking_count, bikes: t.bikes_needed || {}, availId: t.availability_id,
+  }));
+  todayRentals.forEach(r => (r.bookings || []).forEach(b => {
+    const out = outByRef[String(b.ref)] || [];
+    events.push({ sort: hhmmToMin(r.start_time) ?? 9999, kind: 'rental', time: r.start_time, who: b.name || 'Unknown', what: b.what, ref: b.ref, availId: r.availability_id, done: out.length > 0, outBikes: out });
+  }));
+  events.sort((a, b) => a.sort - b.sort);
+
+  // ---- Bikes due back today ----
+  const returns = bikes.filter(b => b.status === 'out' && b.return_due && String(b.return_due).substring(0, 10) === today)
+    .sort((a, b) => String(a.return_due).localeCompare(String(b.return_due)));
+
+  // ---- Render ----
+  const needGroup = (title, obj) => {
+    const keys = Object.keys(obj).filter(k => obj[k] > 0).sort((a, b) => obj[b] - obj[a]);
+    if (!keys.length) return '';
+    return `<div style="margin-bottom:0.65rem">
+      <div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:0.15rem">${title}</div>
+      ${keys.map(k => `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.25rem 0;border-bottom:1px solid var(--border)"><span style="font-weight:600">${catLabel(k)}</span><strong style="font-size:1.05rem">${obj[k]}</strong></div>`).join('')}
+    </div>`;
+  };
+  const neededHtml = (Object.keys(tourNeeded).length || Object.keys(rentalNeeded).length)
+    ? needGroup('For tours (peak at once)', tourNeeded) + needGroup('For rentals', rentalNeeded)
+    : '<div style="color:var(--text3);font-size:0.85rem">Nothing needed today</div>';
+
+  const eventsHtml = events.length ? events.map(e => {
+    if (e.kind === 'tour') {
+      const bikeStr = Object.entries(e.bikes).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${catLabel(k)}`).join(', ');
+      return `<div class="rental-card" onclick="openTourDetail('${e.availId}')">
+        <div class="rental-card-top"><span class="rental-duration-badge">${e.label}</span><span class="rental-time">${e.time || ''}${e.end ? ' – ' + e.end : ''}</span><span style="margin-left:auto;font-size:0.7rem;color:var(--text3)">TOUR</span></div>
+        <div style="font-weight:700;color:var(--text)">${guideEmojiByName(e.who)} ${escapeHtml(e.who)}</div>
+        <div style="font-size:0.8rem;color:var(--text2)">${e.pax} guest${e.pax !== 1 ? 's' : ''}${bikeStr ? ' · ' + bikeStr : ''}</div>
+      </div>`;
+    }
+    const doneTag = e.done
+      ? `<span style="margin-left:auto;font-size:0.66rem;font-weight:700;background:var(--bg3);color:var(--text3);padding:2px 7px;border-radius:10px">✓ ${e.outBikes.map(x => x.id).join(', ')}</span>`
+      : `<span style="margin-left:auto;font-size:0.7rem;color:var(--text3)">RENTAL</span>`;
+    return `<div class="rental-card" onclick="openRentalDetail('${e.availId}','${e.ref}')" style="${e.done ? 'opacity:0.6' : ''}">
+      <div class="rental-card-top"><span class="rental-duration-badge">Rental</span><span class="rental-time">${e.time || ''}</span>${doneTag}</div>
+      <div style="font-weight:700;color:var(--text)">${escapeHtml(e.who)}</div>
+      ${e.what ? `<div style="font-size:0.8rem;color:var(--blue);font-weight:600">${escapeHtml(e.what)}</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="empty-state" style="padding:1rem 0"><p>Nothing scheduled today</p></div>';
+
+  const returnsHtml = returns.length ? returns.map(b =>
+    `<div class="detail-row"><span class="dr-key">${b.id}</span><span class="dr-val">${escapeHtml(b.customer_name || b.assigned_to || '')} · due ${fmtTime(b.return_due)}</span></div>`
+  ).join('') : '<div style="color:var(--text3);font-size:0.85rem">Nothing due back today</div>';
+
+  c.innerHTML = `
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-section-title">Bikes needed today</div>
+      ${neededHtml}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Schedule · ${events.length} today</div>
+      ${eventsHtml}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Due back today · ${returns.length}</div>
+      ${returnsHtml}
+    </div>`;
+}
+
 async function renderRentals(c) {
   c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
-  const rentals = await api('/api/ical/rentals');
-  renderRentalsList(c, rentals);
+  const [rentals, bikes] = await Promise.all([
+    api('/api/ical/rentals'),
+    api('/api/bikes').catch(() => []),
+  ]);
+  // A booking is "handled" if a bike is currently out against its FareHarbor ref.
+  const checkedOutRefs = new Set(
+    bikes.filter(b => b.status === 'out' && b.fareharbor_booking_ref)
+         .map(b => String(b.fareharbor_booking_ref))
+  );
+  renderRentalsList(c, rentals, checkedOutRefs);
 }
 
 function renderToursList(el, tours, isGuideView) {
@@ -3188,7 +3337,7 @@ function renderToursList(el, tours, isGuideView) {
   `).join('');
 }
 
-function renderRentalsList(el, rentals) {
+function renderRentalsList(el, rentals, checkedOutRefs = new Set()) {
   if (rentals.length === 0) {
     el.innerHTML = '<div class="empty-state"><p>No upcoming rentals</p></div>';
     return;
@@ -3200,7 +3349,7 @@ function renderRentalsList(el, rentals) {
     const bookings = r.bookings || [];
     if (bookings.length === 0) return;
     bookings.forEach(b => {
-      allBookings.push({ ...b, _feed_id: r.feed_id, _start_date: r.start_date, _start_time: r.start_time, _end_time: r.end_time, _avail_id: r.availability_id });
+      allBookings.push({ ...b, _feed_id: r.feed_id, _start_date: r.start_date, _start_time: r.start_time, _end_time: r.end_time, _avail_id: r.availability_id, _done: checkedOutRefs.has(String(b.ref)) });
     });
   });
 
@@ -3211,6 +3360,8 @@ function renderRentalsList(el, rentals) {
     if (!byDate[d]) byDate[d] = [];
     byDate[d].push(b);
   });
+  // Within each day, sink already-handed-out bookings to the bottom.
+  Object.values(byDate).forEach(list => list.sort((a, b) => (a._done ? 1 : 0) - (b._done ? 1 : 0)));
 
   const sourceColors = {
     'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
@@ -3226,13 +3377,16 @@ function renderRentalsList(el, rentals) {
       const sourceBadge = (b.source && b.source !== 'direct' && sc)
         ? `<span style="font-size:0.68rem;font-weight:700;background:${sc.bg};color:${sc.fg};padding:2px 7px;border-radius:10px">${b.source}</span>`
         : '';
+      const doneBadge = b._done
+        ? `<span style="font-size:0.68rem;font-weight:700;background:var(--bg3);color:var(--text3);padding:2px 7px;border-radius:10px">✓ bikes out</span>`
+        : '';
       const comment = b.comments ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);line-height:1.45;white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : '';
       const bikes = b.what ? `<div style="margin-top:0.35rem;font-size:0.82rem;font-weight:600;color:var(--blue)">${escapeHtml(b.what)}</div>` : '';
-      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}')">
+      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}','${b.ref}')" style="${b._done ? 'opacity:0.5' : ''}">
         <div class="rental-card-top">
           <span class="rental-duration-badge">${b._feed_id}</span>
           <span class="rental-time">${b._start_time || ''}${b._end_time ? ' – ' + b._end_time : ''}</span>
-          ${sourceBadge ? `<span style="margin-left:auto">${sourceBadge}</span>` : ''}
+          ${sourceBadge || doneBadge ? `<span style="margin-left:auto;display:flex;gap:0.3rem">${sourceBadge}${doneBadge}</span>` : ''}
         </div>
         <div style="font-size:0.97rem;font-weight:700;color:var(--text)">${escapeHtml(b.name || 'Unknown')}</div>
         ${bikes}
@@ -3765,24 +3919,71 @@ async function openTourDetail(availId) {
   `);
 }
 
-async function openRentalDetail(availId) {
-  const rentals = await api('/api/ical/rentals');
+async function openRentalDetail(availId, ref) {
+  const [rentals, bikes] = await Promise.all([
+    api('/api/ical/rentals'),
+    api('/api/bikes').catch(() => []),
+  ]);
   const r = rentals.find(x=>x.availability_id===availId);
   if (!r) return;
   const bookings = r.bookings || [];
+  // Show ONLY the booking that was clicked (a slot can hold several bookings).
+  const b = (ref ? bookings.find(x => String(x.ref) === String(ref)) : null) || bookings[0];
+  if (!b) return;
+
+  // Bikes currently out against this booking (linked at checkout by ref).
+  const outBikes = bikes.filter(x => x.status === 'out' && String(x.fareharbor_booking_ref) === String(b.ref));
 
   openModal(`
-    <div class="modal-title">${r.feed_label} · ${fmtDateFull(r.start_date)}</div>
+    <div class="modal-title">${escapeHtml(b.name || 'Unknown')}</div>
     <div class="detail-section" style="border-top:none;padding-top:0">
-      ${bookings.map(b=>`
-        <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:1px;padding:0.4rem 0">
-          <span style="font-weight:600;font-size:0.88rem">${b.name||'Unknown'}</span>
-          <span style="font-size:0.75rem;color:var(--text3)">#${b.ref}${b.phone?' · '+b.phone:''}</span>
-          ${b.email?`<span style="font-size:0.72rem;color:var(--text3)">${b.email}</span>`:''}
-        </div>`).join('')}
+      <div class="detail-row"><span class="dr-key">Rental</span><span class="dr-val">${r.feed_label} · ${fmtDateFull(r.start_date)}</span></div>
+      <div class="detail-row"><span class="dr-key">Time</span><span class="dr-val">${r.start_time || ''}${r.end_time ? ' – ' + r.end_time : ''}</span></div>
+      <div class="detail-row"><span class="dr-key">Booking</span><span class="dr-val">#${b.ref}</span></div>
+      ${b.phone ? `<div class="detail-row"><span class="dr-key">Phone</span><span class="dr-val">${escapeHtml(b.phone)}</span></div>` : ''}
+      ${b.email ? `<div class="detail-row"><span class="dr-key">Email</span><span class="dr-val">${escapeHtml(b.email)}</span></div>` : ''}
+      ${b.what ? `<div class="detail-row"><span class="dr-key">Booked</span><span class="dr-val">${escapeHtml(b.what)}</span></div>` : ''}
+      ${b.comments ? `<div style="margin-top:0.5rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : ''}
     </div>
-    <button class="btn btn-primary btn-full" style="margin-top:0.5rem" onclick="closeModal();renderTab('action')">Check out bikes</button>
+    ${outBikes.length ? `
+      <div class="detail-section">
+        <div class="detail-section-title">Bikes checked out (${outBikes.length})</div>
+        ${outBikes.map(x => `<div class="detail-row"><span class="dr-key">${x.id}</span><span class="dr-val">${escapeHtml(x.name || x.type_label || '')}${x.return_due ? ' · due ' + fmtTime(x.return_due) : ''}</span></div>`).join('')}
+      </div>
+      <button class="btn btn-secondary btn-full" id="rental-return-btn" style="margin-top:0.5rem">Return these bikes</button>
+      <button class="btn btn-primary btn-full" id="rental-checkout-btn" style="margin-top:0.5rem">Check out more bikes</button>
+    ` : `
+      <button class="btn btn-primary btn-full" id="rental-checkout-btn" style="margin-top:0.5rem">Check out bikes</button>
+    `}
   `);
+  const cb = document.getElementById('rental-checkout-btn');
+  if (cb) cb.onclick = () => goCheckoutForRental(b);
+  const rb = document.getElementById('rental-return-btn');
+  if (rb) rb.onclick = () => goReturnForRental(outBikes.map(x => x.id));
+}
+
+// Open the Action screen straight into a return, pre-loaded with these bikes.
+function goReturnForRental(bikeIds) {
+  closeModal();
+  state.action = { type: null, bikes: [...bikeIds], searchQ: '', preloaded: null };
+  renderTab('action');
+  setTimeout(() => selectActionType('return'), 120);
+}
+
+// Open the Action screen straight into a rental checkout, pre-filled with this
+// booking's customer, so the user just picks the bike(s) that were handed over.
+function goCheckoutForRental(b) {
+  closeModal();
+  state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
+  renderTab('action');
+  setTimeout(async () => {
+    state.action.fromBooking = b; // existing FareHarbor booking → simplified form
+    await selectActionType('rental');
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    set('af-name', b.name);
+    set('af-phone', b.phone);
+    set('af-email', b.email);
+  }, 120);
 }
 
 function goCheckoutForTour(tourId, guide) {
