@@ -85,7 +85,11 @@ def load_bookings(path, con):
     out = pd.DataFrame()
     out['booking_id'] = df['Booking ID'].astype(str).str.lstrip('#')
     out['order_id'] = df['Order ID'].astype(str).str.lstrip('#')
-    out['cancelled'] = (df['Cancelled?'].astype(str).str.strip().str.lower() == 'yes').astype(int)
+    # FareHarbor writes 'Cancelled' (not 'Yes') in this column; accept both.
+    _canc = df['Cancelled?'].astype(str).str.strip().str.lower()
+    out['cancelled'] = _canc.isin(['yes', 'cancelled']).astype(int)
+    out['cancelled_at'] = pd.to_datetime(df['Cancelled At Date'], errors='coerce')
+    out['cancelled_by'] = df['Cancelled By']
     out['item'] = df['Item']
 
     cat = df['Item'].apply(classify_item)
@@ -111,6 +115,10 @@ def load_bookings(path, con):
 
     # Lead time: days between booking and tour
     out['lead_days'] = (out['tour_date'] - out['booked_at']).dt.days
+
+    # For cancellations: how many days before the tour did they cancel?
+    # (negative = cancelled after the tour date, i.e. a no-show cleanup)
+    out['cancel_days_before_tour'] = (out['tour_date'] - out['cancelled_at']).dt.days
 
     out['pax'] = pd.to_numeric(df['# of Pax'], errors='coerce')
     out['language'] = df['Contact Language']

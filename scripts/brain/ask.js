@@ -28,9 +28,14 @@ Currency DKK. Data covers Dec 2022 - Jul 2026.
 
 TABLE bookings  -- one row per booking (3,071 rows)
   booking_id, order_id
-  cancelled          INT  0/1. NOTE: current export contains NO cancelled
-                          bookings (all 0) — cancellation questions CANNOT be
-                          answered; say so rather than guessing.
+  cancelled          INT  0/1 (FareHarbor writes 'Cancelled' in the source)
+  cancelled_at       DATE when it was cancelled (NULL if not cancelled)
+  cancelled_by       TEXT who cancelled it
+  cancel_days_before_tour INT  tour_date - cancelled_at. How far ahead they
+                          cancelled; negative = cancelled after the tour date.
+                          NOTE: cancellations are rare (~20 of 3,174 = 0.6%),
+                          so slice them carefully — per-channel or per-product
+                          cancellation rates rest on tiny samples. Say so.
   item               TEXT product code. Tours: A3/L3/F3/H3 (3h group tours),
                           A3P/L3P/F3P (private), CUSTOM (bespoke groups),
                           ESS/ARCH/NV/LIGHT/Nordhavn (older/retired names),

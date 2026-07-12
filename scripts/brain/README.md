@@ -29,9 +29,9 @@ Re-run that any time with fresh exports to refresh the data.
 Uses ANTHROPIC_API_KEY_REPORTS (falls back to ANTHROPIC_API_KEY).
 
 ## Known data gaps
-- The bookings export contains NO cancelled bookings, so cancellation-rate
+- Cancellations ARE loaded (~0.6% of bookings). Small sample: dont over-read
+  per-channel cancel rates.
   questions can't be answered. Re-export with cancelled bookings included to
-  fix.
 - Availabilities that sold ZERO bookings aren't in this data (bookings-only),
   so true occupancy / empty-departure questions need the fleet DB
   (tour_availabilities) instead.
