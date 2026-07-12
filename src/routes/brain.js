@@ -15,6 +15,8 @@ const { execFile } = require('child_process');
 
 const BRAIN_DIR = path.join(__dirname, '../../scripts/brain');
 const DB_PATH = path.join(BRAIN_DIR, 'analytics.db');
+// The live fleet DB — attached READ-ONLY. The brain must never write to it.
+const FLEET_DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/fleet.db');
 const UPLOAD_DIR = path.join(BRAIN_DIR, 'uploads');
 const API_KEY =
   process.env.ANTHROPIC_API_KEY_REPORTS || process.env.ANTHROPIC_API_KEY;
@@ -71,11 +73,41 @@ TABLE sales  -- one row per payment or refund event
   gross, processing_fee, net, refund_gross, tax_paid, subtotal_paid REAL
   payout_date DATE
 
+TABLE fleet.tour_availabilities  -- EVERY departure slot offered, sold or not
+  availability_id  TEXT  join to bookings.availability_id
+  feed_id, feed_label TEXT  product (feed_label is the code, e.g. 'A3','L3')
+  feed_type        TEXT  'tour' | 'rental'
+  guide            TEXT  guide assigned to this departure
+  start_date TEXT ('YYYY-MM-DD'), start_time TEXT ('HH:MM')
+  end_time TEXT, summary TEXT
+  booking_count    INT   bookings on this departure (0 = it ran EMPTY / unsold)
+  total_bikes      INT   bikes required
+  This is the ONLY source for departures that sold ZERO bookings, so it is
+  what makes occupancy, fill-rate and "which slots run empty" answerable.
+  Occupancy must be computed as booked vs offered across these rows.
+
+TABLE fleet.guide_tour_hours  -- per-departure guide hours
+  availability_id TEXT, guide TEXT, feed_id, feed_label TEXT
+  start_date TEXT, duration_minutes INT, booking_count INT
+
+TABLE fleet.guide_reviews  -- 5-star reviews logged per guide
+  guide_id TEXT, review_date TEXT, reviewer_name TEXT, platform TEXT,
+  booking_type TEXT, review_text TEXT
+
 CRITICAL GUIDANCE
 - "Do people BOOK on X" -> booked_dow (sale date). "Are X tours BUSY" ->
   tour_dow (delivery date). Different questions! If ambiguous, answer both.
+- OCCUPANCY / EMPTY SLOTS: you MUST use fleet.tour_availabilities. The
+  bookings table only contains departures that SOLD, so counting bookings
+  alone silently ignores every empty departure and overstates demand.
+- GUIDES: guide info is in fleet.tour_availabilities.guide and
+  fleet.guide_tour_hours — not in the bookings table.
+- IMPORTANT: the fleet.* tables only go back a few months (the fleet app is
+  newer than the booking history). Bookings/sales cover 2023->now, but
+  occupancy and guide data DO NOT. Never present a long-run trend from
+  fleet.* tables; state the limitation instead.
 - Cancellations are rare (~0.6%). Per-channel/product cancel rates rest on
-  tiny samples — report the raw counts and say when a number is too small to
+  tiny samples — report raw counts and say when a number is too small to
   trust rather than presenting a dramatic percentage as fact.
 - Product lineup changed over time (L2 discontinued, H3/F3 newer, legacy
   names archived). Be careful with per-product year-over-year.
@@ -83,11 +115,6 @@ CRITICAL GUIDANCE
   asked.
 - bookings.total = booking value. Use the sales table for actual cash
   movements including refunds.
-
-KNOWN GAPS (say so if asked, don't invent):
-- Departures that sold ZERO bookings are not in this data, so true occupancy
-  and "which slots run empty" cannot be answered here.
-- Guide assignment is not in this data.
 `;
 
 const SYSTEM = `You are the data analyst for BeCopenhagen, a Copenhagen bike tour
@@ -114,7 +141,20 @@ function openDb() {
     e.code = 'NO_DB';
     throw e;
   }
-  return new DatabaseSync(DB_PATH, { readOnly: true });
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+
+  // Attach the live fleet DB as `fleet`, read-only, so the brain can answer
+  // occupancy and guide questions. Opened via a file: URI with mode=ro so
+  // SQLite itself refuses any write — the app's data cannot be touched.
+  if (fs.existsSync(FLEET_DB_PATH)) {
+    try {
+      const uri = 'file:' + FLEET_DB_PATH.replace(/'/g, "''") + '?mode=ro';
+      db.exec(`ATTACH DATABASE '${uri}' AS fleet`);
+    } catch (e) {
+      console.warn('[brain] could not attach fleet DB (continuing without it):', e.message);
+    }
+  }
+  return db;
 }
 
 function runSelect(sql) {
