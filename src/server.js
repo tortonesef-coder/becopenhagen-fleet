@@ -46,6 +46,12 @@ app.get('/', (req, res) => {
   res.send(indexHtmlVersioned);
 });
 
+app.get('/brain', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, '../public/brain.html'));
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.use((req, res, next) => {
