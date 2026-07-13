@@ -280,22 +280,18 @@ function syncFeedToDB(feed, events) {
       guide=COALESCE(excluded.guide, guide), start_at=excluded.start_at, end_at=excluded.end_at,
       start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
       -- iCal owns the non-GT bike categories (parsed from the summary text);
-      -- v2 owns GT (from FareHarbor resources). Merge per-key instead of
-      -- replacing the whole object, so the two sources stop erasing each
-      -- other. GT is left untouched here; the combined total is existing GT
-      -- plus iCal's non-GT count. Atomic (single statement) — no read/write
-      -- race with the hourly v2 process.
-      --
-      -- NOTE: this used to json_set() a HARDCODED list (A/E/B/AC/AT), which
-      -- silently dropped every other bike type — cargo, touring, small-adult,
-      -- mountain. Now we take iCal's whole object and re-attach GT, so any bike
-      -- type the fleet defines flows through without another code change.
-      bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN json_set(
-          json(excluded.bikes_needed),
-          '$.GT', COALESCE(json_extract(bikes_needed,'$.GT'),0)
-        ) ELSE bikes_needed END,
-      total_bikes=CASE WHEN excluded.total_bikes > 0
-        THEN COALESCE(json_extract(bikes_needed,'$.GT'),0) + excluded.total_bikes
+      -- OWNERSHIP: bike counts for TOURS come from FareHarbor resources via the
+      -- v2 scraper (the bike actually assigned — adult, guided, touring, cargo…).
+      -- iCal only knows what the customer ORDERED, from booking text, which can't
+      -- see that a tour used touring bikes or that a rental "adult bike" was
+      -- really a child-seat bike with the seat removed. So iCal writes bike
+      -- counts for RENTALS only and leaves tour rows to v2 — otherwise this 90s
+      -- sync would keep clobbering v2's hourly resource data.
+      bikes_needed=CASE
+        WHEN excluded.feed_type='rental' AND excluded.total_bikes > 0 THEN excluded.bikes_needed
+        ELSE bikes_needed END,
+      total_bikes=CASE
+        WHEN excluded.feed_type='rental' AND excluded.total_bikes > 0 THEN excluded.total_bikes
         ELSE total_bikes END,
       booking_count=excluded.booking_count, bookings_json=excluded.bookings_json,
       last_synced=excluded.last_synced, summary=excluded.summary

@@ -62,15 +62,58 @@ function resolveGuideName(crewMember) {
 // endpoint always returns full names, so we resolve guide-resource IDs and
 // the "Guided Tour Bikes" resource ID here, then use ID matching (always
 // present, even on abbreviated objects) everywhere else.
+// Map a FareHarbor resource NAME to one of our bike type codes, using the fleet's
+// own bike_types.fareharbor_resource values (e.g. "Christiania Cargo Bikes" -> CC).
+// Longest/most-specific name first, so "Adult City Bikes (Small)" isn't swallowed
+// by "Adult's Bikes". Falls back to keyword rules for names we don't have a type
+// row for, so a new FareHarbor resource still lands somewhere sensible.
+function bikeTypeForResourceName(name, typeRows) {
+  const norm = (s) => String(s || '').toLowerCase()
+    .replace(/['’]/g, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  const n = norm(name);
+  if (!n) return null;
+
+  let best = null, bestWords = 0;
+  for (const t of typeRows) {
+    const words = norm(t.fareharbor_resource).split(' ')
+      .filter(w => w && !['bike', 'bikes', 'with'].includes(w));
+    if (!words.length) continue;
+    if (!words.every(w => n.includes(w))) continue;
+    if (words.length > bestWords) { best = t.id; bestWords = words.length; }
+  }
+  if (best) return best;
+
+  if (/guided tour bike/.test(n)) return 'GT';
+  if (/electric|e-?bike/.test(n)) return 'E';
+  if (/cargo|christiania/.test(n)) return 'CC';
+  if (/touring/.test(n)) return 'TB';
+  if (/mountain/.test(n)) return 'MB';
+  if (/toddler/.test(n)) return 'AT';
+  if (/child.*seat|\+.*child/.test(n)) return 'AC';
+  if (/kid|child/.test(n)) return 'B';
+  if (/small/.test(n)) return 'SA';
+  if (/bike|cykel/.test(n)) return 'A';
+  return null; // not a bike resource at all
+}
+
 async function fetchResourceLookup(page, activeGuideNames) {
   const guideResourceIds = new Map(); // resourcePk -> guide name
+  const bikeResourceTypes = new Map(); // resourcePk -> bike type code (A, GT, TB, CC, ...)
   let guidedTourBikesId = null;
   let electricCargoBikeId = null; // single shared prop for the Food Tour — not a per-customer bike, always excluded from counts
+
+  // The fleet's own type names, so the mapping follows the fleet, not a hardcoded list
+  let typeRows = [];
+  try {
+    typeRows = getDb().prepare(
+      `SELECT id, fareharbor_resource FROM bike_types WHERE fareharbor_resource IS NOT NULL AND fareharbor_resource != ''`
+    ).all();
+  } catch {}
 
   try {
     const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/resources/?include-archived=yes`;
     const resp = await page.request.get(url, { timeout: 30000 });
-    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, guidedTourBikesId, electricCargoBikeId }; }
+    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId }; }
     const data = await resp.json();
     const resources = Array.isArray(data) ? data : (data.objects || data.resources || []);
     for (const r of resources) {
@@ -80,20 +123,24 @@ async function fetchResourceLookup(page, activeGuideNames) {
       const matchedGuide = activeGuideNames.find(gn => guideMatches(baseName, gn));
       if (matchedGuide) {
         guideResourceIds.set(String(pk), matchedGuide);
+        continue; // a guide is never a bike
       }
       if (/^guided tour bikes$/i.test(baseName)) {
         guidedTourBikesId = String(pk);
       }
       if (/^electric cargo bike$/i.test(baseName)) {
         electricCargoBikeId = String(pk);
+        continue; // shared prop, never counted as a bike
       }
+      const cat = bikeTypeForResourceName(baseName, typeRows);
+      if (cat) bikeResourceTypes.set(String(pk), cat);
     }
-    console.log(`  Resource lookup: ${guideResourceIds.size} guide resources, guided tour bikes id=${guidedTourBikesId || 'not found'}, electric cargo bike id=${electricCargoBikeId || 'not found'}`);
+    console.log(`  Resource lookup: ${guideResourceIds.size} guides, ${bikeResourceTypes.size} bike resources, guided tour bikes id=${guidedTourBikesId || 'not found'}, electric cargo bike id=${electricCargoBikeId || 'not found'}`);
   } catch (e) {
     console.log('  Resource lookup fetch failed:', e.message);
   }
 
-  return { guideResourceIds, guidedTourBikesId, electricCargoBikeId };
+  return { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId };
 }
 
 async function login(browser) {
@@ -144,63 +191,44 @@ async function fetchMonth(page, year, month) {
   return results;
 }
 
-// Map a resource to a bike category. Prefers the known resource ID (reliable,
-// unaffected by name abbreviation) over name-text matching.
-function categorizeBikeResource(name, resourcePk, guidedTourBikesId) {
-  if (guidedTourBikesId && resourcePk === guidedTourBikesId) return 'GT';
-  const n = (name || '').toLowerCase();
-  if (/guided tour bike/.test(n)) return 'GT';
-  if (/electric|e-bike/.test(n)) return 'E';
-  if (/toddler/.test(n)) return 'AT';
-  if (/child.*seat|\+.*child/.test(n)) return 'AC';
-  if (/kid|child/.test(n)) return 'B';
-  return 'A';
-}
-
 // Extract real bike counts from resource_use_summaries, excluding
 // guide-blocking resources. Guide resources are identified primarily by
 // resource ID (always present, even when the object is abbreviated) with
 // name-text matching as a fallback for guides not yet in the ID lookup.
-function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, feedIdForAlert, startDateForAlert) {
-  const bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 };
+function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, feedIdForAlert, startDateForAlert, bikeResourceTypes) {
+  const bikesNeeded = {};
   let total = 0;
   for (const entry of av.resource_use_summaries || []) {
     const rawName = entry.resource?.name || '';
     const baseName = rawName.replace(/\s*\(.*\)\s*$/, '').trim();
+    // FareHarbor sometimes sends an abbreviated resource object with no `pk` and
+    // no name — fall back to the id embedded in the URI, which is always there.
     const resourcePk = entry.resource?.pk ? String(entry.resource.pk) : (entry.resource?.uri || '').match(/\/resources\/(\d+)\//)?.[1];
 
     const isGuideResource = (resourcePk && guideResourceIds.has(resourcePk))
       || (baseName && activeGuideNames.some(gn => guideMatches(baseName, gn)));
     if (isGuideResource) continue;
 
-    // We've only ever confirmed reliable per-booking counts from the
-    // dedicated "Guided Tour Bikes" resource. Every other resource type
-    // has shown unreliable behavior in practice — the Electric Cargo Bike
-    // reports fractional prorated values (expected, single shared prop),
-    // and the generic "Adult Bike" pool has been observed reporting its
-    // total FLEET capacity rather than a per-booking count on at least one
-    // private tour. Rather than guess at each resource's semantics, only
-    // ever trust the one resource we've actually validated; everything
-    // else is ignored (shows as "own bikes" rather than a wrong number).
-    const isGuidedTourBikes = guidedTourBikesId && resourcePk === guidedTourBikesId;
-    if (!isGuidedTourBikes) continue;
+    // The Electric Cargo Bike is a single shared prop on the food tour, not a
+    // per-customer bike — it reports fractional prorated values. Never count it.
+    if (electricCargoBikeId && resourcePk === electricCargoBikeId) continue;
 
     const count = entry.total_use_count || 0;
     if (count <= 0) continue;
 
+    // Anything fractional is a shared/prorated resource, not a bike allocation.
     if (!Number.isInteger(count)) {
-      console.log(`  WARNING: non-integer Guided Tour Bikes count (${count}) — skipping`);
-      createNotification(
-        'bike_data_anomaly',
-        `Unexpected fractional bike count — ${feedIdForAlert || ''} on ${startDateForAlert || ''}`,
-        `Guided Tour Bikes reported ${count} — expected a whole number. Skipped from bike total; worth checking in FareHarbor.`,
-        av.pk + '-' + resourcePk
-      );
+      console.log(`  WARNING: non-integer count (${count}) for "${baseName || resourcePk}" — skipping`);
       continue;
     }
 
-    const cat = categorizeBikeResource(rawName, resourcePk, guidedTourBikesId);
-    bikesNeeded[cat] += count;
+    // Resource ID is authoritative (survives name abbreviation); fall back to the
+    // name for resources not in the lookup.
+    const cat = (resourcePk && bikeResourceTypes.get(resourcePk))
+      || bikeTypeForResourceName(baseName, []);
+    if (!cat) continue; // not a bike resource
+
+    bikesNeeded[cat] = (bikesNeeded[cat] || 0) + count;
     total += count;
   }
   return { bikesNeeded, total };
@@ -278,10 +306,16 @@ function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds,
         // silently undercounting group tours by skipping those fractional
         // entries, leave group tours on the existing (working) iCal
         // text-based count entirely.
-        const isPrivateTour = TOUR_ITEMS[itemPk].feed_id.endsWith('P');
-        const { bikesNeeded, total: totalBikes } = isPrivateTour
-          ? extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at)
-          : { bikesNeeded: { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 }, total: 0 };
+        // Bike counts come from FareHarbor RESOURCES for every tour now, not
+        // just private ones. Resources record the bike ACTUALLY assigned — a
+        // tour may use adult bikes, guided bikes or touring bikes, and a rental
+        // "adult bike" may really be a child-seat bike with the seat off. The
+        // booking text only says what the customer ordered, so it could never
+        // know that. Guide resources and the shared Electric Cargo Bike prop are
+        // excluded, and any fractional (prorated/shared) value is skipped rather
+        // than guessed at.
+        const { bikesNeeded, total: totalBikes } =
+          extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at, bikeResourceTypes);
         const resourceGuides = extractGuideFromResources(av, activeGuideNames, guideResourceIds);
 
         out.push({
@@ -325,7 +359,7 @@ async function main() {
     const page = await login(browser);
 
     console.log('Fetching resource lookup (guide IDs, guided tour bikes ID)...');
-    const { guideResourceIds, guidedTourBikesId, electricCargoBikeId } = await fetchResourceLookup(page, activeGuideNames);
+    const { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId } = await fetchResourceLookup(page, activeGuideNames);
 
     // Current month + next month covers 30+ days ahead
     const now = new Date();
@@ -405,23 +439,16 @@ async function main() {
           start_at=excluded.start_at, end_at=excluded.end_at,
           start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
           booking_count=excluded.booking_count, last_synced=excluded.last_synced,
-          -- v2 owns GT (from FareHarbor resources); iCal owns the non-GT
-          -- categories (from summary text). Merge only GT here, preserving
-          -- iCal's keys, so the two sources stop erasing each other. Combined
-          -- total is v2's GT plus the existing non-GT counts. Atomic — no
-          -- read/write race with the 90s iCal process.
-          bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN json_set(
-              json(COALESCE(bikes_needed,'{}')),
-              '$.GT', COALESCE(json_extract(excluded.bikes_needed,'$.GT'),0)
-            ) ELSE bikes_needed END,
-          total_bikes=CASE WHEN excluded.total_bikes > 0 THEN (
-              excluded.total_bikes
-              + COALESCE(json_extract(bikes_needed,'$.A'),0)
-              + COALESCE(json_extract(bikes_needed,'$.E'),0)
-              + COALESCE(json_extract(bikes_needed,'$.B'),0)
-              + COALESCE(json_extract(bikes_needed,'$.AC'),0)
-              + COALESCE(json_extract(bikes_needed,'$.AT'),0)
-            ) ELSE total_bikes END
+          -- OWNERSHIP: v2 now owns the bike counts for TOURS outright, because
+          -- they come from FareHarbor RESOURCES — the bike actually assigned,
+          -- across every type (adult, guided, touring, cargo…). That's strictly
+          -- better than iCal's text parse, which only knows what the customer
+          -- ordered. So replace the whole object rather than merging just GT.
+          -- (iCal still owns RENTAL bike counts; it skips tours — see ical.js.)
+          bikes_needed=CASE WHEN excluded.total_bikes > 0
+            THEN excluded.bikes_needed ELSE bikes_needed END,
+          total_bikes=CASE WHEN excluded.total_bikes > 0
+            THEN excluded.total_bikes ELSE total_bikes END
       `).run(av.availability_id, av.item.feed_id, av.item.label, 'tour',
              av.guide, av.start_at, av.end_at, av.start_date, startTime, endTime, av.booking_count,
              JSON.stringify(av.bikes_needed), av.total_bikes);
