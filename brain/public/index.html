@@ -602,7 +602,9 @@ async function ask(question){
     if (d.sql){
       const t = document.createElement('div');
       t.className = 'sqlt';
-      const label = (open) => (open ? 'hide query · ' : 'show query · ') + (d.rowCount||0).toLocaleString() + ' rows';
+      const qn = d.queryCount || 1;
+      const noun = qn > 1 ? (qn + ' queries') : 'query';
+      const label = (open) => (open ? 'hide ' : 'show ') + noun + ' · ' + (d.rowCount||0).toLocaleString() + ' rows';
       t.textContent = label(false);
       const pre = document.createElement('pre');
       pre.className = 'sql';

@@ -140,8 +140,15 @@ ${schema}
 
 Process:
 1. Work out what's really being asked (mind the booked_dow vs tour_dow trap).
-2. Emit exactly ONE SQLite SELECT query inside <sql></sql> tags. Read-only.
-3. You'll get the rows back, then explain the answer.
+2. Emit your SQL inside <sql></sql> tags. Read-only SELECT only.
+   - Usually ONE query is right.
+   - For broad questions ("analyse the business", "where are the opportunities")
+     you may emit up to 5 separate <sql> blocks, each answering one facet.
+     Keep each one SHORT and focused. Do not write one giant query.
+3. You'll get all the rows back, then you explain the answer in prose.
+
+Keep queries compact. A query that needs more than ~15 lines is a sign you're
+trying to do too much in one go — split it or simplify it.
 
 If a question needs no query, just answer it.
 
@@ -172,7 +179,7 @@ pad with disclaimers. Money in DKK. If the data can't answer it, say so plainly
 rather than guessing.`;
 }
 
-async function callClaude(messages) {
+async function callClaude(messages, maxTokens = 8000) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -180,11 +187,36 @@ async function callClaude(messages) {
       'x-api-key': API_KEY,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ model: MODEL, max_tokens: 2000, system: buildSystem(), messages }),
+    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: buildSystem(), messages }),
   });
   if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
-  return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const text = data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  // stop_reason 'max_tokens' means the reply was cut off mid-sentence — the
+  // caller must know, or it will render half a thought (or half a query).
+  return { text, truncated: data.stop_reason === 'max_tokens' };
+}
+
+// Pull every SQL block out of a reply. Tolerates an unclosed final tag, which
+// is what a truncated response looks like.
+function extractSql(text) {
+  const out = [];
+  const re = /<sql>([\s\S]*?)(?:<\/sql>|$)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const q = m[1].trim();
+    if (q) out.push(q);
+  }
+  return out;
+}
+
+// Strip SQL and memory markup, closed or not, so nothing raw ever reaches
+// the user.
+function stripMarkup(text) {
+  return text
+    .replace(/<sql>[\s\S]*?(?:<\/sql>|$)/gi, '')
+    .replace(/<remember>[\s\S]*?(?:<\/remember>|$)/gi, '')
+    .trim();
 }
 
 // --- routes ---------------------------------------------------------------
@@ -199,61 +231,90 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       { role: 'user', content: String(question) },
     ];
 
-    let reply = await callClaude(messages);
-    let sql = null;
-    let rows = null;
+    let { text: reply, truncated } = await callClaude(messages);
 
-    const m = reply.match(/<sql>([\s\S]*?)<\/sql>/i);
-    if (m) {
-      sql = m[1].trim();
-      try {
-        rows = runSelect(sql);
-      } catch (e) {
+    // If the model ran out of room mid-query, ask it to be more economical
+    // rather than rendering a half-written statement.
+    if (truncated && extractSql(reply).length === 0) {
+      messages.push({ role: 'assistant', content: stripMarkup(reply) || '(cut off)' });
+      messages.push({ role: 'user', content: 'That got cut off. Answer again, more concisely.' });
+      ({ text: reply, truncated } = await callClaude(messages));
+    }
+
+    let queries = extractSql(reply);
+    const results = [];
+
+    if (queries.length) {
+      for (const sql of queries.slice(0, 5)) {   // a few queries, not unbounded
+        try {
+          results.push({ sql, rows: runSelect(sql), error: null });
+        } catch (e) {
+          results.push({ sql, rows: null, error: e.message });
+        }
+      }
+
+      // Let it repair any query that failed — once.
+      if (results.some((r) => r.error)) {
+        const broken = results.filter((r) => r.error)
+          .map((r) => `Query:\n${r.sql}\nError: ${r.error}`).join('\n\n');
         messages.push({ role: 'assistant', content: reply });
         messages.push({
           role: 'user',
-          content: `That query failed: ${e.message}\nFix it and emit corrected SQL in <sql></sql> tags.`,
+          content: `These queries failed:\n\n${broken}\n\nEmit corrected SQL in <sql></sql> tags (only the ones that failed).`,
         });
-        reply = await callClaude(messages);
-        const m2 = reply.match(/<sql>([\s\S]*?)<\/sql>/i);
-        if (m2) {
-          sql = m2[1].trim();
-          rows = runSelect(sql);
+        const fix = await callClaude(messages);
+        const fixed = extractSql(fix.text);
+        let fi = 0;
+        for (const r of results) {
+          if (r.error && fixed[fi]) {
+            try {
+              r.rows = runSelect(fixed[fi]);
+              r.sql = fixed[fi];
+              r.error = null;
+            } catch (e) {
+              r.error = e.message;
+            }
+            fi++;
+          }
         }
       }
-    }
 
-    let answer = reply;
-    if (rows) {
+      // Hand the rows back for interpretation. Cap what we send so a huge
+      // result set can't blow the context window.
+      const payload = results.map((r, i) => {
+        if (r.error) return `Query ${i + 1} failed: ${r.error}`;
+        const shown = r.rows.slice(0, 100);
+        return `Query ${i + 1} returned ${r.rows.length} row(s)` +
+               (r.rows.length > shown.length ? ` (first ${shown.length} shown)` : '') +
+               `:\n${JSON.stringify(shown, null, 2)}`;
+      }).join('\n\n');
+
       messages.push({ role: 'assistant', content: reply });
       messages.push({
         role: 'user',
-        content:
-          `Query returned ${rows.length} row(s):\n\n` +
-          JSON.stringify(rows.slice(0, 200), null, 2) +
-          `\n\nNow answer my original question using these numbers.`,
+        content: `${payload}\n\nNow answer my original question using these numbers. Do not write any more SQL.`,
       });
-      answer = await callClaude(messages);
+
+      const final = await callClaude(messages);
+      reply = final.text;
     }
 
-    // A proposed memory — surfaced to Federico for one-tap approval.
-    // Deliberately NOT written automatically: context.md is authoritative, and
-    // silent self-writes would let a single misunderstanding harden into
-    // permanent "truth" with no audit trail.
+    // Memory proposal — surfaced for approval, never written silently.
     let learned = null;
-    const rm = answer.match(/<remember>([\s\S]*?)<\/remember>/i);
-    if (rm) learned = rm[1].trim();
+    const rm = reply.match(/<remember>([\s\S]*?)(?:<\/remember>|$)/i);
+    if (rm && rm[1].trim()) learned = rm[1].trim();
 
-    answer = answer
-      .replace(/<sql>[\s\S]*?<\/sql>/gi, '')
-      .replace(/<remember>[\s\S]*?<\/remember>/gi, '')
-      .trim();
+    const answer = stripMarkup(reply);
+
+    // Show the first result set as a table; list the rest of the queries.
+    const primary = results.find((r) => r.rows && r.rows.length);
 
     res.json({
-      answer,
-      sql,
-      rows: rows ? rows.slice(0, 25) : null,
-      rowCount: rows ? rows.length : 0,
+      answer: answer || 'I could not put that into words — try asking a narrower question.',
+      sql: results.map((r) => r.sql).join('\n\n---\n\n') || null,
+      queryCount: results.length,
+      rows: primary ? primary.rows.slice(0, 25) : null,
+      rowCount: primary ? primary.rows.length : 0,
       learned,
     });
   } catch (e) {
