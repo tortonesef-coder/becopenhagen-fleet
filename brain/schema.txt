@@ -12,7 +12,17 @@ TABLE bookings  -- one row per booking
                           CUSTOM = bespoke group bookings. Legacy/archived
                           names: ESS, ARCH, ARCH +lunch, NV, LIGHT, Nordhavn,
                           WCA. Rentals: '1-D'..'14-D' = N-day bike rental.
-  item_category      TEXT 'tour_group'|'tour_private'|'rental'|'gift_card'
+  item_category      TEXT 'tour_group' (public scheduled departures, strangers
+                          buy seats) | 'tour_private' (one group books the whole
+                          departure — includes CUSTOM bespoke groups) |
+                          'rental' (bikes) | 'gift_card' |
+                          'excluded' (not a real product — ALWAYS filter these out)
+  item_status        TEXT 'active' | 'archived' (old product, no longer sold) |
+                          'discontinued' (deliberately retired, e.g. L2)
+  item_successor     TEXT for archived products, the current product that
+                          replaced it (ESS->L3, ARCH->A3). To trend a product
+                          across its whole history you must include its
+                          predecessors, not just the current code.
   rental_days        INT  N for an N-D rental
   booked_at          DATE when the SALE was made
   booked_time TEXT, booked_dow TEXT (day name), booked_hour INT

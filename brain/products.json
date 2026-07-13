@@ -1,0 +1,57 @@
+{
+  "_comment": "The product registry. This is the single source of truth for what every FareHarbor item IS. The loader reads it, so fixing something here fixes it everywhere. Add new products as you launch them.",
+
+  "_categories": {
+    "tour_group": "Public/scheduled group tour — strangers book individual seats",
+    "tour_private": "Private tour — one group books the whole departure",
+    "rental": "Bike rental, not a tour",
+    "gift_card": "Gift certificate",
+    "excluded": "Not a real product (test items, placeholders). Excluded from all analysis."
+  },
+
+  "items": {
+    "A3": { "category": "tour_group", "name": "Architecture (3h)", "status": "active", "duration_h": 3 },
+    "L3": { "category": "tour_group", "name": "City highlights / liveability (3h)", "status": "active", "duration_h": 3 },
+    "F3": { "category": "tour_group", "name": "Urban Flavors food tour (3.5h)", "status": "active", "duration_h": 3.5 },
+    "H3": { "category": "tour_group", "name": "History tour (3h)", "status": "active", "duration_h": 3 },
+    "L2": { "category": "tour_group", "name": "Liveability (2h)", "status": "discontinued", "note": "Discontinued 2026 — low occupancy (6.6% vs ~20% for A3/L3). Exclude from forward-looking analysis." },
+
+    "A3P": { "category": "tour_private", "name": "Architecture, private", "status": "active" },
+    "L3P": { "category": "tour_private", "name": "City highlights, private", "status": "active" },
+    "F3P": { "category": "tour_private", "name": "Food tour, private", "status": "active" },
+    "L2P": { "category": "tour_private", "name": "Liveability 2h, private", "status": "discontinued" },
+    "CUSTOM": { "category": "tour_private", "name": "Bespoke group booking", "status": "active", "note": "Large custom groups (avg ~15 pax, ~6,900 DKK). Quoted individually. Single bookings can be very large and will show up as statistical outliers — treat them as such rather than as trend." },
+
+    "ESS": { "category": "tour_group", "name": "Essential Copenhagen (legacy)", "status": "archived", "successor": "L3", "note": "The old name for what is now L3." },
+    "ESS Private": { "category": "tour_private", "name": "Essential, private (legacy)", "status": "archived", "successor": "L3P" },
+    "ARCH": { "category": "tour_group", "name": "Architecture (legacy)", "status": "archived", "successor": "A3" },
+    "ARCH Private": { "category": "tour_private", "name": "Architecture, private (legacy)", "status": "archived", "successor": "A3P" },
+    "ARCH +lunch (archived)": { "category": "tour_group", "name": "Architecture + lunch (legacy)", "status": "archived", "successor": "A3" },
+
+    "NV (archived)": { "category": "tour_group", "name": "Nordvest (legacy)", "status": "archived" },
+    "NV Private (archived)": { "category": "tour_private", "name": "Nordvest, private (legacy)", "status": "archived" },
+    "Nordhavn (archived)": { "category": "tour_group", "name": "Nordhavn (legacy)", "status": "archived" },
+    "Nordhavn PRIVAT (archived)": { "category": "tour_private", "name": "Nordhavn, private (legacy)", "status": "archived" },
+    "Sydhavn PRIVAT (archived)": { "category": "tour_private", "name": "Sydhavn, private (legacy)", "status": "archived" },
+    "Nordhavn + Sydhavn PRIVAT (archived)": { "category": "tour_private", "name": "Nordhavn + Sydhavn, private (legacy)", "status": "archived" },
+    "LIGHT (archived)": { "category": "tour_group", "name": "Light tour (legacy)", "status": "archived" },
+    "WCA I [N] (archived)": { "category": "tour_group", "name": "WCA I North (legacy)", "status": "archived" },
+    "WCA II [S] (archived)": { "category": "tour_group", "name": "WCA II South (legacy)", "status": "archived" },
+
+    "Gift Certificate": { "category": "gift_card", "name": "Gift certificate", "status": "active" },
+
+    "Take a walk (archived)": { "category": "excluded", "name": "Placeholder / not a real product", "status": "archived", "note": "Averages ~5 DKK per booking. Not a genuine product — excluded so it can't skew averages." }
+  },
+
+  "_rental_rule": "Items matching the pattern 'N-D' (1-D, 2-D, ... 14-D) are N-day BIKE RENTALS, not tours. They are the largest product line by booking count.",
+
+  "_channels": {
+    "_comment": "Commission we actually pay. True net = total * (1 - commission_rate).",
+    "GetYourGuide - DKK - API": { "name": "GetYourGuide", "commission": 0.30 },
+    "TripAdvisor Experiences/Viator - DKK - API": { "name": "Viator", "commission": 0.20 },
+    "Musement - DKK - API": { "name": "Musement/TUI", "commission": 0.20 },
+    "Airbnb - API": { "name": "Airbnb", "commission": 0.20 },
+    "Google - DKK": { "name": "Google", "commission": 0.20 },
+    "FareHarbor Distribution Network - Danish Kroner": { "name": "FHDN", "commission": 0.20 }
+  }
+}

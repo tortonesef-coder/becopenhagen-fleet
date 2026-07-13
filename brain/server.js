@@ -122,12 +122,21 @@ function runSelect(sql) {
 }
 
 // --- Claude ---------------------------------------------------------------
-const SCHEMA = fs.readFileSync(path.join(__dirname, 'schema.txt'), 'utf8');
+// Read fresh on every question, so editing context.md takes effect
+// immediately — no restart, no redeploy.
+function buildSystem() {
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.txt'), 'utf8');
+  let context = '';
+  try {
+    context = fs.readFileSync(path.join(__dirname, 'context.md'), 'utf8');
+  } catch (_) {}
 
-const SYSTEM = `You are the data analyst for BeCopenhagen, a Copenhagen bike tour
+  return `You are the data analyst for BeCopenhagen, a Copenhagen bike tour
 and rental company. You answer Federico's questions by querying a SQLite database.
 
-${SCHEMA}
+${context ? '=== BUSINESS CONTEXT (authoritative — trust this over your own assumptions) ===\n' + context + '\n' : ''}
+=== DATABASE SCHEMA ===
+${schema}
 
 Process:
 1. Work out what's really being asked (mind the booked_dow vs tour_dow trap).
@@ -140,6 +149,7 @@ Style: direct, concrete, lead with the answer. Cite real numbers. Flag caveats
 that genuinely matter (small sample, discontinued product, data gap) but don't
 pad with disclaimers. Money in DKK. If the data can't answer it, say so plainly
 rather than guessing.`;
+}
 
 async function callClaude(messages) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -149,7 +159,7 @@ async function callClaude(messages) {
       'x-api-key': API_KEY,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ model: MODEL, max_tokens: 2000, system: SYSTEM, messages }),
+    body: JSON.stringify({ model: MODEL, max_tokens: 2000, system: buildSystem(), messages }),
   });
   if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
@@ -262,6 +272,29 @@ app.post('/api/upload', requireAuth, (req, res) => {
       res.json({ ok: true, message: String(stdout || '').trim() });
     }
   );
+});
+
+// Business context — editable from the UI so knowledge can be fixed the
+// moment the brain gets something wrong.
+const CONTEXT_PATH = path.join(__dirname, 'context.md');
+
+app.get('/api/context', requireAuth, (req, res) => {
+  try {
+    res.json({ text: fs.readFileSync(CONTEXT_PATH, 'utf8') });
+  } catch (e) {
+    res.json({ text: '' });
+  }
+});
+
+app.put('/api/context', requireAuth, (req, res) => {
+  const { text } = req.body || {};
+  if (typeof text !== 'string') return res.status(400).json({ error: 'Nothing to save.' });
+  try {
+    fs.writeFileSync(CONTEXT_PATH, text, 'utf8');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not save: ' + e.message });
+  }
 });
 
 app.get('/api/me', (req, res) => res.json({ user: req.session?.user || null }));

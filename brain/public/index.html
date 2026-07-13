@@ -249,6 +249,13 @@
   .btn.primary{ background:var(--red); border-color:var(--red); color:#fff; font-weight:600; }
   .btn.primary:hover{ filter:brightness(1.1); }
   .btn:disabled{ opacity:.4; cursor:default; }
+  #ctxText{
+    width:100%; height:46vh; min-height:260px; resize:vertical;
+    font-family:'IBM Plex Mono',monospace; font-size:12.5px; line-height:1.65;
+    padding:13px 15px; background:var(--asphalt); color:var(--paint-2);
+    border:1px solid var(--kerb); border-radius:var(--r); outline:none;
+  }
+  #ctxText:focus{ border-color:var(--lane); color:var(--paint); }
   .upmsg{ font-size:13px; margin-top:12px; min-height:18px; }
   .upmsg.err{ color:var(--red); } .upmsg.ok{ color:var(--green); }
 
@@ -277,6 +284,7 @@
       <span class="n" id="cnum">—</span>
       <span class="lbl">bookings</span>
     </div>
+    <button class="ibtn" id="ctxBtn" title="Edit what the brain knows">✎</button>
     <button class="ibtn" id="upBtn" title="Load new data">↑</button>
     <button class="ibtn" id="outBtn" title="Log out">⏻</button>
   </div>
@@ -286,6 +294,19 @@
   <div class="composer">
     <textarea id="q" rows="1" placeholder="Ask about bookings, revenue, channels, occupancy…"></textarea>
     <button class="send" id="send">↑</button>
+  </div>
+</div>
+
+<div class="sheetbg" id="ctxbg">
+  <div class="sheet" style="max-width:640px">
+    <h2>What the brain knows</h2>
+    <div class="hint">Business knowledge the data can't provide. <b>If the brain gets something wrong, correct it here</b> — it's read on every question, so edits apply immediately.</div>
+    <textarea id="ctxText" spellcheck="false"></textarea>
+    <div class="upmsg" id="ctxmsg"></div>
+    <div class="acts">
+      <button class="btn" id="ctxCancel">Cancel</button>
+      <button class="btn primary" id="ctxSave">Save</button>
+    </div>
   </div>
 </div>
 
@@ -520,6 +541,35 @@ $('doUp').onclick = async () => {
     m.className = 'upmsg err'; m.textContent = e.message;
     $('doUp').disabled = false;
   }
+};
+
+/* ---------- business context editor ---------- */
+$('ctxBtn').onclick = async () => {
+  $('ctxmsg').textContent = '';
+  $('ctxbg').classList.add('open');
+  try{
+    const d = await (await fetch('/api/context')).json();
+    $('ctxText').value = d.text || '';
+  }catch(e){
+    $('ctxmsg').className = 'upmsg err';
+    $('ctxmsg').textContent = 'Could not load: ' + e.message;
+  }
+};
+$('ctxCancel').onclick = () => $('ctxbg').classList.remove('open');
+$('ctxbg').onclick = e => { if (e.target === $('ctxbg')) $('ctxbg').classList.remove('open'); };
+$('ctxSave').onclick = async () => {
+  const b = $('ctxSave'); b.disabled = true;
+  const m = $('ctxmsg'); m.className = 'upmsg'; m.textContent = 'Saving…';
+  try{
+    const r = await fetch('/api/context', { method:'PUT', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ text: $('ctxText').value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Save failed');
+    m.className = 'upmsg ok'; m.textContent = 'Saved. Applies to your next question.';
+    setTimeout(() => $('ctxbg').classList.remove('open'), 1000);
+  }catch(e){
+    m.className = 'upmsg err'; m.textContent = e.message;
+  }finally{ b.disabled = false; }
 };
 
 checkAuth();

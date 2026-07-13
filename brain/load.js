@@ -106,21 +106,19 @@ function hourOf(t) {
 }
 
 /* ── business rules ─────────────────────────────────────────────────────── */
-// FareHarbor affiliate name -> (short channel, the commission we actually pay)
-const CHANNELS = {
-  'GetYourGuide - DKK - API': ['GetYourGuide', 0.30],
-  'TripAdvisor Experiences/Viator - DKK - API': ['Viator', 0.20],
-  'Musement - DKK - API': ['Musement/TUI', 0.20],
-  'Airbnb - API': ['Airbnb', 0.20],
-  'Google - DKK': ['Google', 0.20],
-  'FareHarbor Distribution Network - Danish Kroner': ['FHDN', 0.20],
-};
+// Everything here comes from products.json — the single source of truth.
+// No guessing from item names: that mislabelled the Danish "PRIVAT" tours
+// as group tours, and CUSTOM (avg 15 pax) likewise.
+const REGISTRY = JSON.parse(fs.readFileSync(path.join(__dirname, 'products.json'), 'utf8'));
+const ITEMS = REGISTRY.items || {};
+const CHANNELS = REGISTRY._channels || {};
 
 function classifyChannel(affiliate, createdBy) {
   const a = (affiliate || '').trim();
   if (a) {
-    const [name, rate] = CHANNELS[a] || [a, null];
-    return [name, rate, 'OTA'];
+    const def = CHANNELS[a];
+    if (def) return [def.name, def.commission, 'OTA'];
+    return [a, null, 'OTA'];   // unknown affiliate: don't invent a rate
   }
   const cb = (createdBy || '').trim();
   const low = cb.toLowerCase();
@@ -130,14 +128,21 @@ function classifyChannel(affiliate, createdBy) {
   return ['Unknown', null, 'Unknown'];
 }
 
-// 'N-D' items are bike rentals, not tours.
+const unknownItems = new Set();
+
 function classifyItem(item) {
   const s = (item || '').trim();
+
+  // 'N-D' = N-day bike rental
   const m = s.match(/^(\d+)-D$/);
-  if (m) return ['rental', parseInt(m[1], 10)];
-  if (/gift/i.test(s)) return ['gift_card', null];
-  if (/private/i.test(s) || /P$/.test(s)) return ['tour_private', null];
-  return ['tour_group', null];
+  if (m) return ['rental', parseInt(m[1], 10), 'active', null];
+
+  const def = ITEMS[s];
+  if (def) return [def.category, null, def.status || 'active', def.successor || null];
+
+  // Unknown item: flag it loudly rather than silently guessing a category.
+  unknownItems.add(s);
+  return ['unclassified', null, 'unknown', null];
 }
 
 /* ── load ───────────────────────────────────────────────────────────────── */
@@ -154,6 +159,7 @@ function loadBookings(file, db) {
     cancelled INTEGER, cancelled_at TEXT, cancelled_by TEXT,
     cancel_days_before_tour INTEGER,
     item TEXT, item_category TEXT, rental_days INTEGER,
+    item_status TEXT, item_successor TEXT,
     booked_at TEXT, booked_time TEXT, booked_dow TEXT, booked_hour INTEGER,
     tour_date TEXT, tour_time TEXT, tour_dow TEXT, tour_hour INTEGER,
     availability_id TEXT, lead_days INTEGER,
@@ -165,7 +171,7 @@ function loadBookings(file, db) {
   )`);
 
   const ins = db.prepare(`INSERT INTO bookings VALUES (
-    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   for (const r of recs) {
     const bookedAt = isoDate(r['Created At Date']);
@@ -176,7 +182,7 @@ function loadBookings(file, db) {
     const cancFlag = (r['Cancelled?'] || '').trim().toLowerCase();
     const cancelled = (cancFlag === 'yes' || cancFlag === 'cancelled') ? 1 : 0;
 
-    const [cat, rentalDays] = classifyItem(r['Item']);
+    const [cat, rentalDays, status, successor] = classifyItem(r['Item']);
     const [channel, rate, chType] = classifyChannel(r['Affiliate'], r['Created By']);
 
     const pax = int(r['# of Pax']);
@@ -187,7 +193,7 @@ function loadBookings(file, db) {
       (r['Order ID'] || '').replace(/^#/, ''),
       cancelled, cancelledAt, r['Cancelled By'] || null,
       daysBetween(tourDate, cancelledAt),
-      r['Item'] || null, cat, rentalDays,
+      r['Item'] || null, cat, rentalDays, status, successor,
       bookedAt, r['Created At Time'] || null, dayName(bookedAt), hourOf(r['Created At Time']),
       tourDate, r['Start Time'] || null, dayName(tourDate), hourOf(r['Start Time']),
       (r['Availability ID'] || '').replace(/^#/, ''),
@@ -266,6 +272,11 @@ function main() {
 
   db.close();
   console.log(`Loaded ${nb.toLocaleString()} bookings and ${ns.toLocaleString()} sales transactions.`);
+  if (unknownItems.size) {
+    console.log(`\nNOTE: ${unknownItems.size} item(s) are not in products.json and were left unclassified:`);
+    for (const u of unknownItems) console.log('  - ' + u);
+    console.log('Add them to products.json so they are analysed correctly.');
+  }
 }
 
 if (require.main === module) main();
