@@ -13,16 +13,13 @@ const day = process.argv[2] || new Date().toISOString().substring(0, 10);
 const CAT = { A:'Adult regular bike', E:'E-bike', B:'Child bike', AC:'Child seat', AT:'Toddler seat', GT:'Guided-tour bike', SA:'Small adult' };
 const hhmm = (t) => { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1])*60 + (+m[2]) : null; };
 
-// Tours today, plus any rental whose window COVERS today (incl. multi-day ones
-// picked up earlier and still out — they still hold bikes).
+// Tours and rentals STARTING today. A bike handed out on an earlier day is
+// already gone from the shop, so it needs no preparing this morning.
 const rows = db.prepare(`
   SELECT availability_id, feed_id, feed_type, start_date, start_time, end_time,
          booking_count, bikes_needed, total_bikes, summary
-  FROM tour_availabilities
-  WHERE (feed_type != 'rental' AND start_date = ?)
-     OR (feed_type  = 'rental' AND date(start_date) <= date(?) AND date(COALESCE(end_at, start_at)) >= date(?))
-  ORDER BY feed_type, start_time
-`).all(day, day, day);
+  FROM tour_availabilities WHERE start_date = ? ORDER BY feed_type, start_time
+`).all(day);
 
 if (!rows.length) { console.log(`\nNothing scheduled on ${day}.\n`); process.exit(0); }
 
@@ -60,7 +57,7 @@ cats.forEach(cat => {
   console.log(`  ${cat} (${CAT[cat]||'UNKNOWN'}): peak = ${peak}   [highest at: ${at}]`);
 });
 
-console.log(`\n=== rentals (summed — each ties up its bikes all day) ===\n`);
+console.log(`\n=== rentals starting today (summed — each ties up its bikes all day) ===\n`);
 const rentalTot = {};
 rentals.forEach(r => { if (r.booking_count > 0) Object.entries(r.bn).forEach(([k,n]) => { if (n>0) rentalTot[k] = (rentalTot[k]||0)+n; }); });
 if (!Object.keys(rentalTot).length) console.log('  (no rental bikes today)');

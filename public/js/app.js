@@ -3459,10 +3459,9 @@ function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); retu
 
 async function renderTodayBoard(c) {
   const today = new Date().toISOString().substring(0, 10);
-  const [tours, rentals, rentalsLiveRaw, bikes] = await Promise.all([
+  const [tours, rentals, bikes] = await Promise.all([
     api('/api/ical/tours').catch(() => []),
     api('/api/ical/rentals').catch(() => []),
-    api('/api/ical/rentals-live').catch(() => []),
     api('/api/bikes').catch(() => []),
   ]);
   const todayTours = tours.filter(t => (t.start_date || '') === today);
@@ -3488,10 +3487,11 @@ async function renderTodayBoard(c) {
   //    just today's pickups.
   const bikesOf = (r) => { try { return typeof r.bikes_needed === 'string' ? JSON.parse(r.bikes_needed) : (r.bikes_needed || {}); } catch { return {}; } };
 
-  // Rentals live today = any rental whose window covers today, including ones
-  // picked up on an EARLIER day and not yet back (the N-Day feeds). Only those
-  // with actual bookings tie up bikes.
-  const rentalsLive = rentalsLiveRaw.filter(r => (r.bookings || []).length > 0);
+  // Rentals that count = only those being PICKED UP today. A bike handed out
+  // yesterday on a multi-day rental is already gone from the shop, so it needs
+  // no preparing this morning — this number answers "how many bikes must I have
+  // ready today", not "how many are in customers' hands".
+  const rentalsLive = todayRentals.filter(r => (r.bookings || []).length > 0);
 
   const cats = new Set();
   todayTours.forEach(t => Object.entries(bikesOf(t)).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
