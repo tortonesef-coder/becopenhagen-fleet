@@ -1601,3 +1601,16 @@ details summary::-webkit-details-marker { display: none; }
   padding: 0.4rem;
 }
 .btn-link:hover { color: var(--text); }
+
+/* With 7-8 tabs (shop/admin views) the bar gets tight on a phone — let labels
+   shrink and ellipsize rather than overflow or wrap. */
+.tab-btn { min-width: 0; padding-left: 2px; padding-right: 2px; }
+.tab-btn span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 400px) {
+  .tab-btn { font-size: 0.62rem; }
+}

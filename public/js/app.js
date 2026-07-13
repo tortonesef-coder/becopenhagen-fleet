@@ -714,9 +714,9 @@ function buildTabbar() {
   // SHOP = mechanic + shopkeeper merged. Includes Tours (so the shop can see
   // which customers are coming when, and prep the right bikes) and Repairs.
   const tabs = view==='shop'
-    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Repairs',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()}]
+    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Repairs',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'log',label:'Log',icon:iconLog()}]
     : view==='admin'
-    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
+    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'log',label:'Log',icon:iconLog()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
     : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
@@ -1804,80 +1804,118 @@ async function submitResolve(ticketId, bikeId) {
 }
 
 // ── LOG ───────────────────────────────────────────────────────────────────
+const LOG_FILTERS = [
+  ['all','All'], ['checkout','Checkouts'], ['return','Returns'], ['repair_ticket','Repairs'], ['city','Left in city'],
+];
+
 async function renderLog(c) {
-  const log=await api('/api/log?limit=80');
+  if (!window._logFilter) window._logFilter = 'all';
+  const log = await api('/api/log?limit=150');
   const iconMap={checkout:'out',return:'ret',bulk_return:'ret',repair_ticket:'issue',city:'city'};
   const labelMap={checkout:'OUT',return:'RTN',bulk_return:'RTN',repair_ticket:'FIX',city:'PIN'};
-  c.innerHTML=`
-    <div class="section-title">Recent activity</div>
+
+  const f = window._logFilter;
+  const shown = log.filter(l => {
+    if (f === 'all') return true;
+    if (f === 'return') return l.action === 'return' || l.action === 'bulk_return';
+    return l.action === f;
+  });
+
+  c.innerHTML = `
+    <div class="chip-row" style="margin:0.2rem 0 0.85rem">
+      ${LOG_FILTERS.map(([id,label]) => `<button class="chip${f===id?' active':''}" data-logf="${id}" onclick="setLogFilter('${id}')">${label}</button>`).join('')}
+    </div>
     <div class="bike-list">
-      ${log.map(l=>{
+      ${shown.map(l=>{
         const d=JSON.parse(l.details||'{}');
         const who=d.customer_name||d.assigned_to||'';
-        // Returns are correctable after the fact (e.g. "that bike wasn't
-        // actually returned") — tap to fix, long after undo has expired.
-        const fixable = (l.action === 'return' || l.action === 'bulk_return') && l.bike_id;
-        return `<div class="activity-row"${fixable ? ` onclick="openReturnFix('${l.bike_id}', ${l.id})" style="cursor:pointer"` : ''}>
+        // Every bike action is correctable after the fact — this is the screen
+        // you come to when you realise something was recorded wrong.
+        const fixable = !!l.bike_id;
+        return `<div class="activity-row"${fixable ? ` onclick="openLogFix('${l.bike_id}', ${l.id})" style="cursor:pointer"` : ''}>
           <div class="ar-icon ${iconMap[l.action]||'ret'}">${labelMap[l.action]||'···'}</div>
           <div class="ar-body">
-            <div class="ar-main">${l.bike_id||''} ${who?'· '+who:''}</div>
-            <div class="ar-sub">${l.actor} · ${fmtTime(l.created_at)}${fixable ? ' · <span style="color:var(--blue)">tap to correct</span>' : ''}</div>
+            <div class="ar-main">${l.bike_id||''} ${who?'· '+escapeHtml(who):''}</div>
+            <div class="ar-sub">${escapeHtml(l.actor)} · ${timeAgo(l.created_at)}${fixable ? ' · <span style="color:var(--blue)">tap to correct</span>' : ''}</div>
           </div>
         </div>`;
-      }).join('')||'<div class="empty-state"><p>No activity yet</p></div>'}
+      }).join('')||'<div class="empty-state"><p>Nothing here yet</p></div>'}
     </div>`;
 }
 
-// Correct a return after the fact: this bike was marked returned, but it wasn't
-// (or shouldn't have been). Puts it back OUT, restoring the customer/booking it
-// was assigned to before the return, read from the checkout entry in the log.
-async function openReturnFix(bikeId, logId) {
+async function setLogFilter(id) {
+  window._logFilter = id;
+  await renderLog(document.getElementById('content'));
+}
+
+// Correct any past action on a bike. Shows what the log says, what the bike's
+// state is NOW, and offers the corrections that actually make sense for it.
+async function openLogFix(bikeId, logId) {
   const [bike, log] = await Promise.all([
     api(`/api/bikes/${bikeId}`).catch(() => null),
     api('/api/log?limit=200').catch(() => []),
   ]);
-  if (!bike) return;
+  if (!bike) { toast('Could not load that bike', 'error'); return; }
 
-  // The checkout that preceded this return tells us who had the bike.
   const entry = log.find(l => l.id === logId);
+  const ed = entry ? JSON.parse(entry.details || '{}') : {};
+  // The checkout that preceded this entry tells us who had the bike.
   const prevCheckout = log.find(l => l.bike_id === bikeId && l.action === 'checkout' && (!entry || l.created_at <= entry.created_at));
   const pd = prevCheckout ? JSON.parse(prevCheckout.details || '{}') : {};
-  const who = pd.customer_name || pd.assigned_to || '';
+  const who = ed.customer_name || ed.assigned_to || pd.customer_name || pd.assigned_to || '';
+  const isOut = bike.status === 'out';
 
-  const alreadyOut = bike.status === 'out';
+  const actionLabels = { checkout:'Checked out', return:'Returned', bulk_return:'Returned', repair_ticket:'Repair reported', city:'Left in city', missing:'Marked missing' };
+
   openModal(`
     <div class="modal-title">${bikeId}</div>
     <div class="detail-section" style="border-top:none;padding-top:0">
-      <div class="detail-row"><span class="dr-key">Status now</span><span class="dr-val">${bike.status}</span></div>
-      ${who ? `<div class="detail-row"><span class="dr-key">Was out to</span><span class="dr-val">${escapeHtml(who)}</span></div>` : ''}
-      ${prevCheckout?.booking_ref ? `<div class="detail-row"><span class="dr-key">Booking</span><span class="dr-val">#${prevCheckout.booking_ref}</span></div>` : ''}
+      <div class="detail-row"><span class="dr-key">This entry</span><span class="dr-val">${actionLabels[entry?.action] || entry?.action || '—'}${entry ? ' · ' + timeAgo(entry.created_at) : ''}</span></div>
+      <div class="detail-row"><span class="dr-key">By</span><span class="dr-val">${escapeHtml(entry?.actor || '—')}</span></div>
+      ${who ? `<div class="detail-row"><span class="dr-key">Customer</span><span class="dr-val">${escapeHtml(who)}</span></div>` : ''}
+      ${(entry?.booking_ref || prevCheckout?.booking_ref) ? `<div class="detail-row"><span class="dr-key">Booking</span><span class="dr-val">#${entry?.booking_ref || prevCheckout?.booking_ref}</span></div>` : ''}
+      <div class="detail-row"><span class="dr-key">Bike is now</span><span class="dr-val"><strong>${bike.status}</strong>${isOut && bike.customer_name ? ' · ' + escapeHtml(bike.customer_name) : ''}</span></div>
     </div>
-    <p style="font-size:0.82rem;color:var(--text2);margin:0.6rem 0">
-      ${alreadyOut
-        ? 'This bike is currently out, so there is nothing to correct here.'
-        : 'Marked returned by mistake? Put it back out to the same customer.'}
-    </p>
-    ${alreadyOut ? '' : `<button class="btn btn-primary btn-full" id="fix-unreturn">Undo this return — put back out</button>`}
+    <p style="font-size:0.78rem;color:var(--text3);margin:0.6rem 0">Fix the bike's current state if this was recorded wrong.</p>
+    ${isOut
+      ? `<button class="btn btn-primary btn-full" id="fix-return">Mark as returned (it's back)</button>
+         <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" id="fix-repair">Send to repair</button>`
+      : `<button class="btn btn-primary btn-full" id="fix-unreturn">Put back out${who ? ' to ' + escapeHtml(who) : ''}</button>
+         <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" id="fix-repair">Send to repair</button>`}
     <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" onclick="closeModal()">Close</button>
   `);
 
-  const btn = document.getElementById('fix-unreturn');
-  if (btn) btn.onclick = async () => {
+  const done = (msg) => { closeModal(); toast(msg, 'success'); renderTab('log'); };
+
+  document.getElementById('fix-unreturn')?.addEventListener('click', async () => {
     try {
       await api(`/api/bikes/${bikeId}/checkout`, {method:'POST', body:{
         assignment_type: pd.assignment_type || 'rental',
         assigned_to: pd.assigned_to || '',
         customer_name: pd.customer_name || '',
         fareharbor_booking_ref: prevCheckout?.booking_ref || '',
-        note: 'Return corrected',
+        note: 'Corrected from log',
         force: true,
       }});
-      closeModal();
-      toast(`${bikeId} put back out${who ? ' to ' + who : ''}`, 'success');
-      renderTab('log');
+      done(`${bikeId} put back out${who ? ' to ' + who : ''}`);
     } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
-  };
+  });
+
+  document.getElementById('fix-return')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/bikes/${bikeId}/return`, {method:'POST', body:{new_status:'available', note:'Corrected from log'}});
+      done(`${bikeId} marked returned`);
+    } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
+  });
+
+  document.getElementById('fix-repair')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/bikes/${bikeId}/return`, {method:'POST', body:{new_status:'repair', note:'Corrected from log'}});
+      done(`${bikeId} sent to repair`);
+    } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
+  });
 }
+
 
 // ── Markdown renderer (lightweight, no external dependency) ───────────────
 // Supports: headings (#/##/###), bold (**), italic (*), inline code (`),
