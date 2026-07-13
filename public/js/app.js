@@ -1697,15 +1697,69 @@ async function renderLog(c) {
       ${log.map(l=>{
         const d=JSON.parse(l.details||'{}');
         const who=d.customer_name||d.assigned_to||'';
-        return `<div class="activity-row">
+        // Returns are correctable after the fact (e.g. "that bike wasn't
+        // actually returned") — tap to fix, long after undo has expired.
+        const fixable = (l.action === 'return' || l.action === 'bulk_return') && l.bike_id;
+        return `<div class="activity-row"${fixable ? ` onclick="openReturnFix('${l.bike_id}', ${l.id})" style="cursor:pointer"` : ''}>
           <div class="ar-icon ${iconMap[l.action]||'ret'}">${labelMap[l.action]||'···'}</div>
           <div class="ar-body">
             <div class="ar-main">${l.bike_id||''} ${who?'· '+who:''}</div>
-            <div class="ar-sub">${l.actor} · ${fmtTime(l.created_at)}</div>
+            <div class="ar-sub">${l.actor} · ${fmtTime(l.created_at)}${fixable ? ' · <span style="color:var(--blue)">tap to correct</span>' : ''}</div>
           </div>
         </div>`;
       }).join('')||'<div class="empty-state"><p>No activity yet</p></div>'}
     </div>`;
+}
+
+// Correct a return after the fact: this bike was marked returned, but it wasn't
+// (or shouldn't have been). Puts it back OUT, restoring the customer/booking it
+// was assigned to before the return, read from the checkout entry in the log.
+async function openReturnFix(bikeId, logId) {
+  const [bike, log] = await Promise.all([
+    api(`/api/bikes/${bikeId}`).catch(() => null),
+    api('/api/log?limit=200').catch(() => []),
+  ]);
+  if (!bike) return;
+
+  // The checkout that preceded this return tells us who had the bike.
+  const entry = log.find(l => l.id === logId);
+  const prevCheckout = log.find(l => l.bike_id === bikeId && l.action === 'checkout' && (!entry || l.created_at <= entry.created_at));
+  const pd = prevCheckout ? JSON.parse(prevCheckout.details || '{}') : {};
+  const who = pd.customer_name || pd.assigned_to || '';
+
+  const alreadyOut = bike.status === 'out';
+  openModal(`
+    <div class="modal-title">${bikeId}</div>
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-row"><span class="dr-key">Status now</span><span class="dr-val">${bike.status}</span></div>
+      ${who ? `<div class="detail-row"><span class="dr-key">Was out to</span><span class="dr-val">${escapeHtml(who)}</span></div>` : ''}
+      ${prevCheckout?.booking_ref ? `<div class="detail-row"><span class="dr-key">Booking</span><span class="dr-val">#${prevCheckout.booking_ref}</span></div>` : ''}
+    </div>
+    <p style="font-size:0.82rem;color:var(--text2);margin:0.6rem 0">
+      ${alreadyOut
+        ? 'This bike is currently out, so there is nothing to correct here.'
+        : 'Marked returned by mistake? Put it back out to the same customer.'}
+    </p>
+    ${alreadyOut ? '' : `<button class="btn btn-primary btn-full" id="fix-unreturn">Undo this return — put back out</button>`}
+    <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" onclick="closeModal()">Close</button>
+  `);
+
+  const btn = document.getElementById('fix-unreturn');
+  if (btn) btn.onclick = async () => {
+    try {
+      await api(`/api/bikes/${bikeId}/checkout`, {method:'POST', body:{
+        assignment_type: pd.assignment_type || 'rental',
+        assigned_to: pd.assigned_to || '',
+        customer_name: pd.customer_name || '',
+        fareharbor_booking_ref: prevCheckout?.booking_ref || '',
+        note: 'Return corrected',
+        force: true,
+      }});
+      closeModal();
+      toast(`${bikeId} put back out${who ? ' to ' + who : ''}`, 'success');
+      renderTab('log');
+    } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
+  };
 }
 
 // ── Markdown renderer (lightweight, no external dependency) ───────────────
