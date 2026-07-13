@@ -483,6 +483,16 @@ function initSchema() {
     db.exec("ALTER TABLE team_members ADD COLUMN view_mode TEXT");
   }
 
+  // Hassan is demoted from admin to staff: he runs the shop, fixes bikes and
+  // guides, but doesn't need admin. Only Fede and Søren remain admins. His guide
+  // hours/reviews are unaffected — those hang off is_guide, not the role. Guarded
+  // so it runs once (and won't fight a later manual role change).
+  const hassanDemoted = db.prepare("SELECT value FROM app_settings WHERE key='hassan_demoted'").get();
+  if (!hassanDemoted) {
+    db.exec("UPDATE team_members SET role='staff', can_shop=1, is_guide=1 WHERE id='hassan'");
+    db.exec("INSERT OR REPLACE INTO app_settings (key,value,updated_at) VALUES ('hassan_demoted', datetime('now'), datetime('now'))");
+  }
+
   const emCols = db.prepare("PRAGMA table_info(emails_sent)").all().map(c => c.name);
   if (!emCols.includes('content_hash')) db.exec("ALTER TABLE emails_sent ADD COLUMN content_hash TEXT");
 

@@ -211,7 +211,7 @@ async function showTeamPicker() {
   const shopBtn = document.createElement('button');
   shopBtn.id = 'shop-mode-entry-btn';
   shopBtn.className = 'shop-mode-entry';
-  shopBtn.innerHTML = '🏪 Shop Mode (shared device)';
+  shopBtn.innerHTML = '🏪 Counter Mode (shared device)';
   shopBtn.onclick = () => initShopMode();
   wrap.appendChild(shopBtn);
 }
@@ -399,11 +399,11 @@ async function checkSession() {
 function switchUser() {
   if (state.shopMode) {
     openModal(`
-      <div class="modal-title">Exit Shop Mode?</div>
+      <div class="modal-title">Exit Counter Mode?</div>
       <p style="font-size:0.9rem;color:var(--text2);margin-bottom:1.25rem">This will log out of the shared shop device and return to normal login. Use this on personal phones, not the shop iPad.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="closeModal();exitShopMode()">Exit Shop Mode</button>
+        <button class="btn btn-primary" onclick="closeModal();exitShopMode()">Exit Counter Mode</button>
       </div>
     `);
     return;
@@ -486,7 +486,7 @@ function showShopPinSetup() {
       <div class="bc-logo-wrap">
         <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
-        <div class="bc-sub-label">Shop Mode Setup</div>
+        <div class="bc-sub-label">Counter Mode Setup</div>
       </div>
       <p style="font-size:0.85rem;color:var(--text2);text-align:center;margin-bottom:1rem">Set a 4-digit PIN for this shop device.</p>
       <input type="hidden" id="shop-pin-setup" value=""/>
@@ -508,7 +508,7 @@ function showShopPinEntry() {
       <div class="bc-logo-wrap">
         <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
-        <div class="bc-sub-label">Shop Mode</div>
+        <div class="bc-sub-label">Counter Mode</div>
       </div>
       <input type="hidden" id="shop-pin-entry" value=""/>
       ${pinDotsHtml('shop-pin-entry')}
@@ -4013,7 +4013,10 @@ async function openTourDetail(availId) {
           : (b.source && b.source !== "direct"
               ? "<span style='font-size:0.68rem;background:var(--blue-bg);color:var(--blue);padding:1px 6px;border-radius:10px;margin-left:5px'>"+b.source+"</span>"
               : "");
-        const canSeePayments = state.actor?.role === 'admin' || state.actor?.role === 'mechanic';
+        // Whether the customer still owes money is shop-floor info (you need it
+        // when handing the bike over), so it follows the SHOP capability rather
+        // than the role — Hassan keeps it after being demoted from admin.
+        const canSeePayments = state.actor?.role === 'admin' || state.actor?.can_shop || state.actor?.role === 'mechanic';
         const unpaid = (canSeePayments && b.due && b.due !== "DKK0.00")
           ? "<span style='font-size:0.68rem;background:#fdecea;color:#e04040;padding:1px 6px;border-radius:10px;margin-left:4px'>Due: "+b.due+"</span>"
           : "";
