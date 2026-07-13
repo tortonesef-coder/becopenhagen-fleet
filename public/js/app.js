@@ -578,7 +578,7 @@ async function showShopWhoAreYou() {
 }
 
 function landingTab() {
-  if (state.shopMode) return 'action';
+  if (state.shopMode) return 'today';   // counter opens on the day's board too
   const v = activeView();
   if (v === 'admin') return 'operations';
   if (v === 'shop') return 'today';
@@ -592,7 +592,7 @@ function showMain() {
   document.getElementById('screen-main').style.display='flex';
   document.getElementById('actor-badge').textContent = state.shopMode ? ('🏪 ' + state.actor.name) : state.actor.name;
   buildTabbar();
-  renderTab(state.shopMode ? 'action' : landingTab());
+  renderTab(landingTab());
   if (!state.shopMode) checkBorrowedReminder();
   if (state.actor?.role === 'admin') startNotifPolling();
 }
@@ -629,7 +629,20 @@ function setActiveView(v) {
 function buildTabbar() {
   if (state.shopMode) {
     document.getElementById('btn-more-menu')?.classList.add('hidden');
-    const tabs = [{id:'action',label:'Action',icon:iconAction()},{id:'bikes',label:'Bikes',icon:iconBike()}];
+    // Counter (shared iPad) sees the same operational picture as a logged-in
+    // shopkeeper — today's board, checkouts, repairs, tours, rentals, bikes —
+    // so whoever is on the floor has the full picture. Fleet is deliberately
+    // left out: it edits the bike CATALOGUE (add/retire/recode), which is a
+    // rare, destructive, accountable action that shouldn't sit on an unlocked
+    // shared device. Same reason the counter keeps its restricted action set.
+    const tabs = [
+      {id:'today',label:'Today',icon:iconToday()},
+      {id:'action',label:'Action',icon:iconAction()},
+      {id:'tickets',label:'Repairs',icon:iconTicket()},
+      {id:'tours',label:'Tours',icon:iconTours()},
+      {id:'rentals',label:'Rentals',icon:iconRentals()},
+      {id:'bikes',label:'Bikes',icon:iconBike()},
+    ];
     document.getElementById('tabbar').innerHTML=tabs.map(t=>`
       <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
         ${t.icon}<span>${t.label}</span>
@@ -1574,7 +1587,9 @@ function renderTicketQueue(tickets) {
         <span style="font-size:0.72rem;color:var(--text3)">${complexLabels[t.complexity||3]}</span>
       </div>
       <div style="margin-top:0.6rem;display:flex;gap:0.5rem">
-        <button class="btn btn-sm btn-success" onclick="resolveTicket(${t.id},'${t.bike_id}')">✓ Resolved</button>
+        ${state.shopMode
+          ? `<span style="font-size:0.72rem;color:var(--text3);align-self:center">Log in as yourself to resolve</span>`
+          : `<button class="btn btn-sm btn-success" onclick="resolveTicket(${t.id},'${t.bike_id}')">✓ Resolved</button>`}
         <button class="btn btn-sm btn-secondary" onclick="showBike('${t.bike_id}')">View bike</button>
         ${t.can_rent?'':`<button class="btn btn-sm btn-secondary" onclick="toggleCanRent(${t.id},1)">Can rent now</button>`}
       </div>
@@ -4015,8 +4030,9 @@ async function openTourDetail(availId) {
               : "");
         // Whether the customer still owes money is shop-floor info (you need it
         // when handing the bike over), so it follows the SHOP capability rather
-        // than the role — Hassan keeps it after being demoted from admin.
-        const canSeePayments = state.actor?.role === 'admin' || state.actor?.can_shop || state.actor?.role === 'mechanic';
+        // than the role — Hassan keeps it after being demoted from admin, and
+        // the shared counter device sees it too.
+        const canSeePayments = state.shopMode || state.actor?.role === 'admin' || state.actor?.can_shop || state.actor?.role === 'mechanic';
         const unpaid = (canSeePayments && b.due && b.due !== "DKK0.00")
           ? "<span style='font-size:0.68rem;background:#fdecea;color:#e04040;padding:1px 6px;border-radius:10px;margin-left:4px'>Due: "+b.due+"</span>"
           : "";
