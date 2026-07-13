@@ -251,8 +251,8 @@ app.post('/api/upload', requireAuth, (req, res) => {
   }
 
   execFile(
-    'python3',
-    [path.join(__dirname, 'load.py'), bPath, sPath, '--db', DB_PATH],
+    process.execPath,
+    [path.join(__dirname, 'load.js'), bPath, sPath, '--db', DB_PATH],
     { timeout: 180000 },
     (err, stdout, stderr) => {
       if (err) {
