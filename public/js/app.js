@@ -177,36 +177,35 @@ async function initIdentity() {
 }
 
 async function showTeamPicker() {
-  // Rebuild the identity screen's markup from scratch, since Shop Mode's
-  // PIN screens replace #screen-identity's innerHTML entirely — the normal
-  // #identity-grid element may no longer exist in the DOM at this point.
+  // Login is email + password. We deliberately no longer list the team here:
+  // an unauthenticated visitor shouldn't see who works here or who is an admin.
   document.getElementById('screen-identity').innerHTML = `
     <div class="identity-wrap">
       <div class="bc-logo-wrap">
         <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
       </div>
-      <p class="identity-prompt">Who are you?</p>
-      <div class="identity-grid" id="identity-grid"></div>
+      <p class="identity-prompt">Sign in</p>
+      <div class="login-form">
+        <div class="form-group">
+          <input class="form-input" type="email" id="login-email" placeholder="Email" autocomplete="username" autocapitalize="none" spellcheck="false"/>
+        </div>
+        <div class="form-group">
+          <input class="form-input" type="password" id="login-password" placeholder="Password" autocomplete="current-password"/>
+        </div>
+        <div id="login-error" style="color:#e04040;font-size:0.85rem;min-height:1.1rem;margin-bottom:0.4rem"></div>
+        <button class="btn btn-primary btn-full" id="login-submit">Sign in</button>
+        <button class="btn-link" id="login-forgot" type="button">Set up / forgot password</button>
+      </div>
     </div>`;
 
-  const team = await api('/auth/team');
-  team.sort((a,b)=>a.name.localeCompare(b.name));
-  const n = team.length;
-  let cols = (n % 4 === 0) ? 4 : 3;
+  const submit = () => submitEmailLogin();
+  document.getElementById('login-submit').addEventListener('click', submit);
+  document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-password').focus(); });
+  document.getElementById('login-forgot').addEventListener('click', showForgotByEmail);
 
-  const grid = document.getElementById('identity-grid');
-  grid.style.setProperty('--id-cols', cols);
-  grid.innerHTML = team.map(m=>`
-    <button class="identity-btn role-${m.role}" data-id="${m.id}">
-      <span class="iname">${m.name}</span>
-      <span class="irole">${m.role}</span>
-    </button>`).join('');
-  grid.querySelectorAll('.identity-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>selectMember(btn.dataset.id));
-  });
-
-  // Shop mode entry point, visible to everyone on the identity screen
+  // Counter Mode entry point (shared device — no personal login)
   const wrap = document.querySelector('.identity-wrap');
   const shopBtn = document.createElement('button');
   shopBtn.id = 'shop-mode-entry-btn';
@@ -214,6 +213,59 @@ async function showTeamPicker() {
   shopBtn.innerHTML = '🏪 Counter Mode (shared device)';
   shopBtn.onclick = () => initShopMode();
   wrap.appendChild(shopBtn);
+}
+
+async function submitEmailLogin() {
+  const email = document.getElementById('login-email')?.value?.trim();
+  const password = document.getElementById('login-password')?.value;
+  const err = document.getElementById('login-error');
+  const btn = document.getElementById('login-submit');
+  if (err) err.textContent = '';
+  if (!email || !password) { if (err) err.textContent = 'Enter your email and password'; return; }
+
+  btn.disabled = true; btn.textContent = 'Signing in...';
+  try {
+    const data = await api('/auth/login-email', { method:'POST', body:{ email, password } });
+    state.actor = data.actor;
+    showMain();
+  } catch(e) {
+    if (err) err.textContent = e.message || 'Incorrect email or password';
+    const pw = document.getElementById('login-password');
+    if (pw) { pw.value = ''; pw.focus(); }
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+}
+
+function showForgotByEmail() {
+  const prefill = document.getElementById('login-email')?.value?.trim() || '';
+  openModal(`
+    <div class="modal-title">Set up / reset password</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">Enter your work email and we'll send you a link to set a new password.</p>
+    <div class="form-group">
+      <input class="form-input" type="email" id="forgot-email" placeholder="you@example.com" value="${prefill}" autocapitalize="none" spellcheck="false" autofocus/>
+    </div>
+    <div id="forgot-status" style="font-size:0.85rem;margin-bottom:0.75rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="forgot-send">Send link</button>
+    </div>
+  `);
+  document.getElementById('forgot-send').addEventListener('click', async () => {
+    const email = document.getElementById('forgot-email')?.value?.trim();
+    const status = document.getElementById('forgot-status');
+    const btn = document.getElementById('forgot-send');
+    if (!email) { if (status) { status.style.color = '#e04040'; status.textContent = 'Enter your email'; } return; }
+    btn.disabled = true; btn.textContent = 'Sending...';
+    try {
+      const data = await api('/auth/forgot-password-email', { method:'POST', body:{ email }});
+      if (status) { status.style.color = 'var(--text2)'; status.textContent = data.message || 'Check your inbox.'; }
+    } catch(e) {
+      if (status) { status.style.color = '#e04040'; status.textContent = e.message; }
+    } finally {
+      btn.disabled = false; btn.textContent = 'Send link';
+    }
+  });
 }
 
 async function selectMember(memberId) {
@@ -564,9 +616,8 @@ async function showShopWhoAreYou() {
 
   const grid = document.getElementById('shop-who-grid');
   grid.innerHTML = team.map(m=>`
-    <button class="identity-btn role-${m.role}" data-id="${m.id}">
+    <button class="identity-btn" data-id="${m.id}">
       <span class="iname">${m.name}</span>
-      <span class="irole">${m.role}</span>
     </button>`).join('');
   grid.querySelectorAll('.identity-btn').forEach(btn=>{
     btn.addEventListener('click', async () => {
@@ -611,7 +662,9 @@ function availableViews() {
 // The hat you're wearing right now. Remembered per person.
 function activeView() {
   const views = availableViews();
-  const saved = state.activeView || (() => { try { return localStorage.getItem('bcf_view_' + (state.actor?.id||'')); } catch { return null; } })();
+  // While previewing someone else, ignore the saved hat — show THEIR default.
+  const saved = state.viewingAs ? state.activeView
+    : (state.activeView || (() => { try { return localStorage.getItem('bcf_view_' + (state.actor?.id||'')); } catch { return null; } })());
   if (saved && views.includes(saved)) return saved;
   if (views.includes('admin')) return 'admin';   // admins land in admin, as today
   if (views.includes('guide') && views.length === 1) return 'guide';
@@ -621,7 +674,7 @@ function activeView() {
 function setActiveView(v) {
   if (!availableViews().includes(v)) return;
   state.activeView = v;
-  try { localStorage.setItem('bcf_view_' + (state.actor?.id||''), v); } catch {}
+  if (!state.viewingAs) { try { localStorage.setItem('bcf_view_' + (state.actor?.id||''), v); } catch {} }
   buildTabbar();
   renderTab(landingTab());
 }
@@ -4160,8 +4213,15 @@ function fmtDateFull(d) {
 
 // ── View As (admin preview of another role's view) ───────────────────────
 async function renderViewAs(el) {
-  const team = await api('/auth/team');
+  const team = await api('/auth/team-admin');
   team.sort((a,b)=>a.name.localeCompare(b.name));
+  const hats = (m) => {
+    const h = [];
+    if (m.can_shop || m.role === 'mechanic' || m.role === 'admin') h.push('Shop');
+    if (m.is_guide || m.role === 'guide') h.push('Guide');
+    if (m.role === 'admin') h.push('Admin');
+    return h.join(' · ') || '—';
+  };
 
   el.innerHTML = `
     <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">
@@ -4169,20 +4229,24 @@ async function renderViewAs(el) {
     </p>
     <div class="bike-list">
       ${team.filter(m => m.id !== state.realActor?.id && m.id !== state.actor?.id).map(m => `
-        <div class="bike-row" onclick="startViewAs('${m.id}','${m.name}','${m.role}')">
+        <div class="bike-row" onclick='startViewAs(${JSON.stringify(m.id)}, ${JSON.stringify(m.name)}, ${JSON.stringify(m)})'>
           <div class="br-info">
-            <div class="br-name" style="font-weight:600;font-size:0.92rem">${m.name}</div>
-            <div class="br-detail">${m.role}</div>
+            <div class="br-name" style="font-weight:600;font-size:0.92rem">${escapeHtml(m.name)}</div>
+            <div class="br-detail">${hats(m)}</div>
           </div>
           <span class="badge" style="background:var(--bg3);color:var(--text2)">Preview →</span>
         </div>`).join('')}
     </div>`;
 }
 
-function startViewAs(memberId, memberName, memberRole) {
+function startViewAs(memberId, memberName, member) {
   // Save the real admin identity so we can return to it
   if (!state.realActor) state.realActor = { ...state.actor };
-  state.actor = { id: memberId, name: memberName, role: memberRole };
+  const m = (member && typeof member === 'object') ? member : { role: member };
+  // Carry capabilities too, so the preview reproduces their ACTUAL view (a
+  // shop+guide person previews with both hats), not just their role.
+  state.actor = { id: memberId, name: memberName, role: m.role, is_guide: m.is_guide, can_shop: m.can_shop, view_mode: m.view_mode };
+  state.activeView = null; // let their own default view apply
   state.viewingAs = true;
   buildTabbar();
   renderTab(landingTab());
@@ -4237,9 +4301,8 @@ async function showShopWhoDidThis(bikeIds) {
 
   const grid = document.getElementById('shop-attribution-grid');
   grid.innerHTML = team.map(m=>`
-    <button class="identity-btn role-${m.role}" data-id="${m.id}">
+    <button class="identity-btn" data-id="${m.id}">
       <span class="iname">${m.name}</span>
-      <span class="irole">${m.role}</span>
     </button>`).join('');
 
   grid.querySelectorAll('.identity-btn').forEach(btn=>{
