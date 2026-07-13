@@ -70,28 +70,37 @@ function parseBikeCounts(lines) {
   const add = (k, n) => { if (k && n > 0) need[k] = (need[k] || 0) + n; };
 
   (Array.isArray(lines) ? lines : [lines]).filter(Boolean).forEach(line => {
+    const text = String(line);
+    // "Bike context" is LINE-wide: "3 Adults, 1 Child incl. bike rental" means
+    // both the adults and the child get a bike, even though only the last phrase
+    // says "bike". Tours phrase it that way. If a line mentions no bike at all
+    // (e.g. a bare "4 People"), it tells us nothing about bikes — skip it.
+    const lineMentionsBike = /bike|cykel/i.test(text);
+    if (!lineMentionsBike) return;
+
     // Split on commas so each "<n> <type>" phrase is judged on its own.
-    String(line).split(/,|;/).forEach(part => {
+    text.split(/,|;/).forEach(part => {
       const m = part.match(/(\d+)\s+(.+)/);
       if (!m) return;
       const n = parseInt(m[1], 10);
       if (!Number.isFinite(n) || n <= 0) return;
       const phrase = m[2];
 
-      // Only count phrases that actually refer to a bike (or a known type).
-      // Check the specific tour phrasings FIRST: "2 Adults incl. e-bike rentals"
-      // contains "adult", so a naive type match would file it as a plain adult
-      // bike and lose the e-bike.
+      // E-bike first: "2 Adults incl. e-bike rentals" contains "adult", so a
+      // naive type match would file it as a plain adult bike and lose the e-bike.
       if (/e-?bike|electric/i.test(phrase)) { add('E', n); return; }
 
-      const hit = classify(phrase);
-      if (hit) { add(hit, n); return; }
-
-      // Tour phrasing: "5 Adults incl. bike rentals" / "1 Child incl. bike rental"
-      if (/\bbike/i.test(phrase)) {
-        if (/child|kid/i.test(phrase)) add('B', n);
-        else add('A', n);
+      // Match against the fleet's own FareHarbor type names, but only when the
+      // phrase itself names a bike ("2 Adult's Bikes", "1 Christiania Cargo Bike").
+      if (/bike|cykel/i.test(phrase)) {
+        const hit = classify(phrase);
+        if (hit) { add(hit, n); return; }
       }
+
+      // Otherwise it's a person-count on a bike-bearing line ("3 Adults" in
+      // "3 Adults, 1 Child incl. bike rental") — one bike each.
+      if (/child|kid/i.test(phrase)) add('B', n);
+      else if (/adult|people|person|guest/i.test(phrase)) add('A', n);
     });
   });
   return need;

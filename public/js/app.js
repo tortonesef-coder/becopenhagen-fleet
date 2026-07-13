@@ -3546,13 +3546,15 @@ async function renderTodayBoard(c) {
   const neededHtml = keys.length
     ? keys.map(k => {
         const v = needed[k];
+        // Always say what the bikes are FOR — not only when it's a mix. A bare
+        // "Cargo bike 2" leaves the shop guessing whether it's a tour or a rental.
         const parts = [];
-        if (v.tourPeak) parts.push(`${v.tourPeak} tours`);
-        if (v.rentalN) parts.push(`${v.rentalN} rentals`);
+        if (v.tourPeak) parts.push(`${v.tourPeak} tour${v.tourPeak !== 1 ? 's' : ''}`);
+        if (v.rentalN) parts.push(`${v.rentalN} rental${v.rentalN !== 1 ? 's' : ''}`);
         return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.4rem 0;border-bottom:1px solid var(--border)">
           <span>
             <span style="font-weight:700">${catLabel(k)}</span>
-            ${parts.length > 1 ? `<span style="font-size:0.72rem;color:var(--text3);margin-left:0.4rem">${parts.join(' + ')}</span>` : ''}
+            ${parts.length ? `<span style="font-size:0.72rem;color:var(--text3);margin-left:0.4rem">${parts.join(' + ')}</span>` : ''}
           </span>
           <strong style="font-size:1.15rem">${v.total}</strong>
         </div>`;
