@@ -150,16 +150,18 @@ If Federico tells you something about the business you didn't know — a
 correction, a rule, a definition, a piece of context that would change how you
 answer similar questions in future — propose it as a memory by emitting:
 
-<remember>the fact, written as one clear standalone sentence</remember>
+<remember>the fact as ONE short standalone sentence</remember>
 
 Rules for this:
+- ONE LINE. One fact. Short. Never a paragraph, never multiple facts bundled
+  together — each fact must be independently true, editable and deletable.
 - Only for DURABLE business knowledge (how the business works, what a product
   is, a rule, a correction of something you got wrong).
 - NEVER for one-off query results, numbers you just computed, or anything
   already in the data — the data is queried live and doesn't need remembering.
 - Only when he actually tells you something. Don't propose memories from your
   own inferences or from what a query returned.
-- Write it so it stands alone and makes sense months from now with no
+- Write it so it stands alone and still makes sense months from now with no
   conversation around it.
 - At most one per reply. If nothing qualifies, emit nothing. Most replies
   should have no <remember> at all.
@@ -344,8 +346,50 @@ app.post('/api/remember', requireAuth, (req, res) => {
     if (!text.includes(HEADING)) {
       text += `\n\n${HEADING}\n\nThings Federico taught the brain while chatting. Edit or delete freely.\n`;
     }
-    text += `\n- ${clean} _(${today})_\n`;
+    text += `\n- ${clean} (verified ${today})\n`;
     fs.writeFileSync(CONTEXT_PATH, text, 'utf8');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not save: ' + e.message });
+  }
+});
+
+// --- review flow: confirm the facts Claude asserted from memory ---
+// Anything tagged (unverified) was written by Claude, not by Federico, and
+// should not be trusted until he says so.
+
+app.get('/api/unverified', requireAuth, (req, res) => {
+  try {
+    const text = fs.readFileSync(CONTEXT_PATH, 'utf8');
+    const facts = text.split('\n')
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => /^\s*-\s+.*\(unverified\)\s*$/i.test(line))
+      .map(({ line, i }) => ({
+        id: i,
+        text: line.replace(/^\s*-\s+/, '').replace(/\s*\(unverified\)\s*$/i, '').trim(),
+      }));
+    res.json({ facts });
+  } catch (e) {
+    res.json({ facts: [] });
+  }
+});
+
+// verdict: 'confirm' | 'delete' | 'edit' (with newText)
+app.post('/api/verify', requireAuth, (req, res) => {
+  const { id, verdict, newText } = req.body || {};
+  try {
+    const lines = fs.readFileSync(CONTEXT_PATH, 'utf8').split('\n');
+    if (typeof id !== 'number' || !lines[id]) return res.status(400).json({ error: 'No such line.' });
+
+    if (verdict === 'delete') {
+      lines.splice(id, 1);
+    } else if (verdict === 'edit' && newText && newText.trim()) {
+      lines[id] = '- ' + newText.trim().replace(/\s+/g, ' ') + ' (verified)';
+    } else {
+      lines[id] = lines[id].replace(/\s*\(unverified\)\s*$/i, ' (verified)');
+    }
+
+    fs.writeFileSync(CONTEXT_PATH, lines.join('\n'), 'utf8');
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'Could not save: ' + e.message });

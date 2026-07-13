@@ -199,6 +199,36 @@
   .learn.done{ border-left-color:var(--green); }
   .learn.done .eyebrow{ color:var(--green); }
 
+  /* review: confirm the facts Claude asserted from memory */
+  .review{
+    margin-top:8px; padding:20px; border-radius:var(--r-lg);
+    background:var(--asphalt-2); border:1px solid var(--kerb); border-left:2px solid var(--lane);
+  }
+  .review .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:9.5px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--lane); margin-bottom:10px;
+  }
+  .review h2{ font-size:18px; font-weight:600; letter-spacing:-.015em; margin-bottom:6px; }
+  .review .lede{ font-size:14px; color:var(--paint-2); line-height:1.55; margin-bottom:16px; max-width:56ch; }
+  .review .fact{
+    font-size:15px; line-height:1.5; padding:14px 16px; margin-bottom:12px;
+    background:var(--asphalt); border:1px solid var(--kerb); border-radius:var(--r);
+  }
+  .review .fact[contenteditable]:focus{ outline:none; border-color:var(--lane); }
+  .review .foot{ display:flex; align-items:center; gap:8px; }
+  .review .count{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--paint-3); margin-right:auto;
+  }
+  .review button{
+    font:inherit; font-size:13px; font-weight:500; padding:8px 15px; cursor:pointer;
+    border-radius:8px; border:1px solid var(--kerb); background:transparent; color:var(--paint-2);
+    transition:.15s;
+  }
+  .review button:hover{ color:var(--paint); border-color:var(--kerb-2); }
+  .review button.yes{ background:var(--green); border-color:var(--green); color:#0d1f14; font-weight:600; }
+  .review button.yes:hover{ filter:brightness(1.08); }
+  .review .done{ font-size:14px; color:var(--green); }
+
   .opener h2{ font-size:22px; font-weight:600; letter-spacing:-.02em; margin-bottom:6px; }
   .opener p{ font-size:14.5px; color:var(--paint-2); margin-bottom:18px; max-width:52ch; }
   .chips{ display:flex; flex-wrap:wrap; gap:7px; }
@@ -396,8 +426,74 @@ function table(rows, total){
 
 async function checkAuth(){
   const d = await (await fetch('/api/me')).json();
-  if (d.user){ $('login').style.display='none'; $('app').style.display='flex'; await loadStatus(); opener(); }
+  if (d.user){
+    $('login').style.display='none'; $('app').style.display='flex';
+    await loadStatus();
+    const reviewed = await maybeReview();
+    if (!reviewed) opener();
+  }
   else { $('login').style.display='grid'; $('app').style.display='none'; }
+}
+
+/* ---------- verify what Claude claimed to know ----------
+   context.md was seeded from Claude's memory of past conversations. Those
+   lines are authoritative once trusted, so they get confirmed by a human
+   before the brain relies on them. */
+async function maybeReview(){
+  let facts = [];
+  try{ facts = (await (await fetch('/api/unverified')).json()).facts || []; }catch(_){ return false; }
+  if (!facts.length) return false;
+
+  thread.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'msg bot';
+  wrap.innerHTML = '<div class="review"></div>';
+  thread.appendChild(wrap);
+  const box = wrap.querySelector('.review');
+
+  let idx = 0;
+  const total = facts.length;
+
+  function step(){
+    if (idx >= facts.length){
+      box.innerHTML =
+        '<div class="eyebrow">Done</div>' +
+        '<div class="done">All checked. You can edit any of it later with the ✎ button.</div>';
+      setTimeout(opener, 1200);
+      return;
+    }
+    const f = facts[idx];
+    box.innerHTML =
+      '<div class="eyebrow">Check what I think I know</div>' +
+      '<h2>Is this right?</h2>' +
+      '<div class="lede">I wrote these from our past conversations, so I could have it wrong. Anything you confirm here, I\'ll treat as fact from now on. Edit the text directly if it needs fixing.</div>' +
+      '<div class="fact" contenteditable="true"></div>' +
+      '<div class="foot">' +
+        '<span class="count">' + (idx+1) + ' / ' + total + '</span>' +
+        '<button class="no">Wrong, drop it</button>' +
+        '<button class="yes">Correct</button>' +
+      '</div>';
+    box.querySelector('.fact').textContent = f.text;
+
+    const send = async (verdict) => {
+      const edited = box.querySelector('.fact').textContent.trim();
+      const changed = edited && edited !== f.text;
+      try{
+        await fetch('/api/verify', { method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({
+            id: f.id,
+            verdict: verdict === 'delete' ? 'delete' : (changed ? 'edit' : 'confirm'),
+            newText: changed ? edited : undefined,
+          })});
+      }catch(_){}
+      idx++;
+      step();
+    };
+    box.querySelector('.yes').onclick = () => send('confirm');
+    box.querySelector('.no').onclick  = () => send('delete');
+  }
+  step();
+  return true;
 }
 $('loginBtn').onclick = async () => {
   const b = $('loginBtn'); b.disabled = true; $('loginErr').textContent = '';
