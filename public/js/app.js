@@ -714,9 +714,9 @@ function buildTabbar() {
   // SHOP = mechanic + shopkeeper merged. Includes Tours (so the shop can see
   // which customers are coming when, and prep the right bikes) and Repairs.
   const tabs = view==='shop'
-    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Repairs',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'log',label:'Log',icon:iconLog()}]
+    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Repairs',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
     : view==='admin'
-    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'log',label:'Log',icon:iconLog()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
+    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'log',label:'Log',icon:iconLog()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
     : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
@@ -774,7 +774,7 @@ async function renderTab(id) {
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id!=='action') c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
-  if(id==='bikes') await renderBikes(c);
+  if(id==='bikes') await renderBikesTab(c);
   else if(id==='today') await renderTodayBoard(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
@@ -819,6 +819,40 @@ async function drillType(typeId) {
 }
 
 // ── BIKES ─────────────────────────────────────────────────────────────────
+// Bikes tab = the live picture (what's available / out / in repair) and the
+// fleet catalogue (add / edit / retire bikes) as two sub-tabs. They were two
+// separate bottom tabs, which crowded the bar — but they're different jobs
+// (daily status vs. rare catalogue editing), so they stay distinct here.
+async function renderBikesTab(c) {
+  // Counter Mode (shared, unauthenticated iPad) gets the live status only —
+  // the Fleet catalogue (add/retire/recode bikes) is destructive and needs to
+  // be attributable to a person, so it stays off the shared device.
+  if (state.shopMode) return renderBikes(c);
+
+  if (!window._bikesTab) window._bikesTab = 'status';
+  const tabs = [['status','Status'],['fleet','Fleet']];
+  c.innerHTML = `
+    <div class="subtab-row">
+      ${tabs.map(([id,label])=>`<button class="subtab${window._bikesTab===id?' active':''}" data-bikestab="${id}" onclick="switchBikesTab('${id}')">${label}</button>`).join('')}
+    </div>
+    <div id="bikes-tab-content"></div>`;
+  await renderBikesSubTab();
+}
+
+async function switchBikesTab(tab) {
+  window._bikesTab = tab;
+  logPageView(`bikes.${tab}`);
+  document.querySelectorAll('[data-bikestab]').forEach(b => b.classList.toggle('active', b.dataset.bikestab === tab));
+  await renderBikesSubTab();
+}
+
+async function renderBikesSubTab() {
+  const el = document.getElementById('bikes-tab-content');
+  if (!el) return;
+  if (window._bikesTab === 'fleet') await renderAdminBikes(el);
+  else await renderBikes(el);
+}
+
 async function renderBikes(c) {
   const avail = await api('/api/availability');
   const types = avail.types;
