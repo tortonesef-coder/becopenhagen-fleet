@@ -39,13 +39,18 @@ async function login(browser) {
   return page;
 }
 
+process.on('unhandledRejection', (e) => { console.error('\nFAILED:', e?.message || e); process.exit(1); });
+
 (async () => {
   if (!process.env.FAREHARBOR_EMAIL || !process.env.FAREHARBOR_PASSWORD) {
-    console.error('FAREHARBOR_EMAIL / FAREHARBOR_PASSWORD not set in .env');
+    console.error('FAREHARBOR_EMAIL / FAREHARBOR_PASSWORD not set in the environment.');
+    console.error('The scraper reads them from /etc/environment — check they are there.');
     process.exit(1);
   }
+  console.log('Logging in to FareHarbor...');
   const browser = await chromium.launch({ headless: true });
   const page = await login(browser);
+  console.log('Logged in. Fetching calendar weeks (this takes ~60s)...');
 
   const now = new Date();
   const months = new Set([`${now.getFullYear()}-${now.getMonth() + 1}`]);
@@ -59,7 +64,8 @@ async function login(browser) {
       const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/items/${ALL_ITEM_IDS}/calendar/${year}/${String(month).padStart(2,'0')}/?allow_grouped=yes&include_resource_use_summaries=yes&path=2&week_number=${week}`;
       try {
         const resp = await page.request.get(url, { timeout: 60000 });
-        if (!resp.ok()) continue;
+        if (!resp.ok()) { console.log(`  ${year}-${month} week ${week}: HTTP ${resp.status()}`); continue; }
+        process.stdout.write('.');
         const json = await resp.json();
         const walk = (n) => {
           if (!n || typeof n !== 'object') return;
@@ -72,6 +78,7 @@ async function login(browser) {
     }
   }
   await browser.close();
+  console.log('');
 
   const from = new Date(Date.now() - 864e5).toISOString();
   const to = new Date(Date.now() + DAYS * 864e5).toISOString();
