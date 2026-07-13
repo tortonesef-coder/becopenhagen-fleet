@@ -566,7 +566,11 @@ function showShopPinEntry() {
       ${pinDotsHtml('shop-pin-entry')}
       <div id="shop-pin-error" style="color:#e04040;font-size:0.85rem;margin:0.5rem 0;text-align:center"></div>
       ${pinKeypadHtml('shop-pin-entry')}
+      <button class="btn-link" id="leave-counter-mode" type="button">Not the shop iPad? Sign in with email</button>
     </div>`;
+  // Escape hatch: without this, a device whose session has shop_mode set is
+  // stuck on this PIN screen forever, with no route back to the normal login.
+  document.getElementById('leave-counter-mode')?.addEventListener('click', exitShopMode);
 }
 
 async function submitShopPin() {

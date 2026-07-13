@@ -96,7 +96,12 @@ app.get('/session/me', (req, res) => {
     return res.json({ actor: null, shop_mode: true });
   }
   if (!req.session.actor) return res.json({ actor: null });
-  res.json({ actor: { id: req.session.actor, name: req.session.actor_name, role: req.session.actor_role }});
+  // Read the member fresh so the restored session carries CAPABILITIES too
+  // (can_shop / is_guide / view_mode). Without these the view switcher would
+  // disappear on every page refresh, and tabs would fall back to role-only.
+  const m = getDb().prepare('SELECT id, name, role, is_guide, can_shop, view_mode FROM team_members WHERE id=? AND active=1').get(req.session.actor);
+  if (!m) return res.json({ actor: null });
+  res.json({ actor: { id: m.id, name: m.name, role: m.role, is_guide: m.is_guide, can_shop: m.can_shop, view_mode: m.view_mode }});
 });
 
 app.get('*', (req, res) => {
