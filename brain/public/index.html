@@ -175,6 +175,30 @@
   }
   .err a{ color:var(--lane); }
 
+  /* a memory the brain wants to keep — you decide, not it */
+  .learn{
+    margin-top:12px; padding:11px 13px; display:flex; align-items:flex-start; gap:11px;
+    background:var(--asphalt-2); border:1px solid var(--kerb);
+    border-left:2px solid var(--lane); border-radius:var(--r);
+  }
+  .learn .body{ flex:1; min-width:0; }
+  .learn .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:9px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--paint-3); margin-bottom:4px;
+  }
+  .learn .fact{ font-size:13.5px; color:var(--paint); line-height:1.5; }
+  .learn .btns{ display:flex; gap:6px; flex:none; align-self:center; }
+  .learn button{
+    font:inherit; font-size:12px; font-weight:500; padding:6px 12px; cursor:pointer;
+    border-radius:7px; border:1px solid var(--kerb); background:transparent; color:var(--paint-2);
+    transition:.15s; white-space:nowrap;
+  }
+  .learn button:hover{ color:var(--paint); border-color:var(--kerb-2); }
+  .learn button.keep{ background:var(--lane); border-color:var(--lane); color:#fff; }
+  .learn button.keep:hover{ filter:brightness(1.1); }
+  .learn.done{ border-left-color:var(--green); }
+  .learn.done .eyebrow{ color:var(--green); }
+
   .opener h2{ font-size:22px; font-weight:600; letter-spacing:-.02em; margin-bottom:6px; }
   .opener p{ font-size:14.5px; color:var(--paint-2); margin-bottom:18px; max-width:52ch; }
   .chips{ display:flex; flex-wrap:wrap; gap:7px; }
@@ -492,6 +516,8 @@ async function ask(question){
       thread.scrollTop = thread.scrollHeight;
     }
 
+    if (d.learned) renderLearn(el, d.learned);
+
     hist.push({role:'user',content:question});
     hist.push({role:'assistant',content:d.answer});
     hist = hist.slice(-6);
@@ -542,6 +568,46 @@ $('doUp').onclick = async () => {
     $('doUp').disabled = false;
   }
 };
+
+/* ---------- proposed memories ----------
+   The brain proposes; you decide. context.md is authoritative, so letting the
+   brain write to it unsupervised would let one misunderstanding harden into
+   permanent truth. One tap keeps you in the loop. */
+function renderLearn(el, fact){
+  const box = document.createElement('div');
+  box.className = 'learn';
+  box.innerHTML =
+    '<div class="body">' +
+      '<div class="eyebrow">Remember this?</div>' +
+      '<div class="fact"></div>' +
+    '</div>' +
+    '<div class="btns">' +
+      '<button class="keep">Keep</button>' +
+      '<button class="skip">No</button>' +
+    '</div>';
+  box.querySelector('.fact').textContent = fact;
+
+  box.querySelector('.skip').onclick = () => box.remove();
+  box.querySelector('.keep').onclick = async () => {
+    const btns = box.querySelector('.btns');
+    btns.innerHTML = '<button disabled>Saving…</button>';
+    try{
+      const r = await fetch('/api/remember', { method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ fact }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Could not save');
+      box.classList.add('done');
+      box.querySelector('.eyebrow').textContent = 'Remembered';
+      btns.remove();
+    }catch(e){
+      btns.innerHTML = '<button class="skip">Failed</button>';
+      box.querySelector('.skip').onclick = () => box.remove();
+    }
+  };
+
+  el.appendChild(box);
+  thread.scrollTop = thread.scrollHeight;
+}
 
 /* ---------- business context editor ---------- */
 $('ctxBtn').onclick = async () => {

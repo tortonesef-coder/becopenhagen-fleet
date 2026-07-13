@@ -145,6 +145,25 @@ Process:
 
 If a question needs no query, just answer it.
 
+LEARNING
+If Federico tells you something about the business you didn't know — a
+correction, a rule, a definition, a piece of context that would change how you
+answer similar questions in future — propose it as a memory by emitting:
+
+<remember>the fact, written as one clear standalone sentence</remember>
+
+Rules for this:
+- Only for DURABLE business knowledge (how the business works, what a product
+  is, a rule, a correction of something you got wrong).
+- NEVER for one-off query results, numbers you just computed, or anything
+  already in the data — the data is queried live and doesn't need remembering.
+- Only when he actually tells you something. Don't propose memories from your
+  own inferences or from what a query returned.
+- Write it so it stands alone and makes sense months from now with no
+  conversation around it.
+- At most one per reply. If nothing qualifies, emit nothing. Most replies
+  should have no <remember> at all.
+
 Style: direct, concrete, lead with the answer. Cite real numbers. Flag caveats
 that genuinely matter (small sample, discontinued product, data gap) but don't
 pad with disclaimers. Money in DKK. If the data can't answer it, say so plainly
@@ -215,12 +234,25 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       answer = await callClaude(messages);
     }
 
-    answer = answer.replace(/<sql>[\s\S]*?<\/sql>/gi, '').trim();
+    // A proposed memory — surfaced to Federico for one-tap approval.
+    // Deliberately NOT written automatically: context.md is authoritative, and
+    // silent self-writes would let a single misunderstanding harden into
+    // permanent "truth" with no audit trail.
+    let learned = null;
+    const rm = answer.match(/<remember>([\s\S]*?)<\/remember>/i);
+    if (rm) learned = rm[1].trim();
+
+    answer = answer
+      .replace(/<sql>[\s\S]*?<\/sql>/gi, '')
+      .replace(/<remember>[\s\S]*?<\/remember>/gi, '')
+      .trim();
+
     res.json({
       answer,
       sql,
       rows: rows ? rows.slice(0, 25) : null,
       rowCount: rows ? rows.length : 0,
+      learned,
     });
   } catch (e) {
     if (e.code === 'NO_DB') return res.status(409).json({ error: e.message });
@@ -290,6 +322,29 @@ app.put('/api/context', requireAuth, (req, res) => {
   const { text } = req.body || {};
   if (typeof text !== 'string') return res.status(400).json({ error: 'Nothing to save.' });
   try {
+    fs.writeFileSync(CONTEXT_PATH, text, 'utf8');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not save: ' + e.message });
+  }
+});
+
+// Commit an approved memory. Appended under a dated "Learned" section so
+// there's always an audit trail of what the brain was taught and when.
+app.post('/api/remember', requireAuth, (req, res) => {
+  const { fact } = req.body || {};
+  if (!fact || !String(fact).trim()) return res.status(400).json({ error: 'Nothing to remember.' });
+
+  const clean = String(fact).trim().replace(/\s+/g, ' ');
+  const today = new Date().toISOString().slice(0, 10);
+
+  try {
+    let text = fs.readFileSync(CONTEXT_PATH, 'utf8');
+    const HEADING = '## Learned in conversation';
+    if (!text.includes(HEADING)) {
+      text += `\n\n${HEADING}\n\nThings Federico taught the brain while chatting. Edit or delete freely.\n`;
+    }
+    text += `\n- ${clean} _(${today})_\n`;
     fs.writeFileSync(CONTEXT_PATH, text, 'utf8');
     res.json({ ok: true });
   } catch (e) {
