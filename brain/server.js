@@ -206,7 +206,12 @@ app.post('/api/ask', requireAuth, async (req, res) => {
     }
 
     answer = answer.replace(/<sql>[\s\S]*?<\/sql>/gi, '').trim();
-    res.json({ answer, sql, rowCount: rows ? rows.length : 0 });
+    res.json({
+      answer,
+      sql,
+      rows: rows ? rows.slice(0, 25) : null,
+      rowCount: rows ? rows.length : 0,
+    });
   } catch (e) {
     if (e.code === 'NO_DB') return res.status(409).json({ error: e.message });
     console.error('[brain] ask failed:', e.message);
