@@ -60,17 +60,22 @@ function logPageView(tab) {
 }
 
 // ── Toast + Undo ──────────────────────────────────────────────────────────
-function toast(msg, type="") {
+function toast(msg, type="", opts = {}) {
   const el = document.getElementById("toast");
   if (!el) return;
   clearTimeout(toast._timer);
   const check = type.includes('success')
     ? '<svg class="toast-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>'
     : '';
-  el.innerHTML = check + `<span>${msg}</span>`;
+  const undoBtn = opts.undo ? '<button class="toast-undo-btn" id="toast-undo">Undo</button>' : '';
+  el.innerHTML = check + `<span>${msg}</span>` + undoBtn;
   el.className = "toast " + type;
   el.classList.remove("hidden");
-  toast._timer = setTimeout(dismissToast, 1800);
+  if (opts.undo) {
+    document.getElementById('toast-undo')?.addEventListener('click', () => { dismissToast(); triggerUndo(); });
+  }
+  // Give the user longer to reach an Undo button than a plain toast
+  toast._timer = setTimeout(dismissToast, opts.undo ? 6000 : 1800);
 }
 
 function dismissToast() {
@@ -1209,6 +1214,24 @@ async function submitActionNew() {
   if(bikes.length===0){toast('No bike selected — type a bike ID and tap Add','error');return;}
   const actor = state.actor?.id||'unknown';
 
+  // Before a return wipes the assignment, snapshot each bike's current state so
+  // undo can put it back exactly (customer, booking ref, due date) rather than
+  // re-checking it out as a generic rental.
+  if (type === 'return') {
+    const snap = {};
+    await Promise.all(bikes.map(async (id) => {
+      try {
+        const b = await api(`/api/bikes/${id}`);
+        snap[id] = {
+          assignment_type: b.assignment_type, assigned_to: b.assigned_to,
+          customer_name: b.customer_name, fareharbor_booking_ref: b.fareharbor_booking_ref,
+          return_due: b.return_due, note: b.status_note,
+        };
+      } catch {}
+    }));
+    state.action._preReturn = snap;
+  }
+
   try {
     for(const bikeId of bikes) {
       if(type==='return') {
@@ -1318,14 +1341,23 @@ async function submitActionNew() {
     // Build undo function based on action type
     let undoFn = null;
     if (type === 'return') {
-      const prevStatuses = bikes.map(id => {
-        const b = null; // we don't have prev status here, best we can do is re-checkout
-        return id;
-      });
-      // Undo return = mark as out again (approximate)
+      // Restore each bike EXACTLY as it was: same assignment type, customer,
+      // booking ref and due date. (state.action._preReturn was captured before
+      // the return ran — without it, undo could only re-check-out a generic
+      // rental and would silently lose the customer and booking link.)
+      const prev = state.action._preReturn || {};
       undoFn = async () => {
         for (const id of bikes) {
-          await api(`/api/bikes/${id}/checkout`, {method:'POST', body:{assignment_type:'rental', assigned_to:'(undone return)', force:true}});
+          const p = prev[id];
+          await api(`/api/bikes/${id}/checkout`, {method:'POST', body: p ? {
+            assignment_type: p.assignment_type || 'rental',
+            assigned_to: p.assigned_to || '',
+            customer_name: p.customer_name || '',
+            fareharbor_booking_ref: p.fareharbor_booking_ref || '',
+            return_due: p.return_due || '',
+            note: p.note || '',
+            force: true,
+          } : {assignment_type:'rental', assigned_to:'(undone return)', force:true}});
         }
         renderAction(document.getElementById('content'));
       };
@@ -1367,7 +1399,7 @@ async function submitActionNew() {
       };
     }
 
-    toast(`Done — ${label.toLowerCase()}`, 'success');
+    toast(`Done — ${label.toLowerCase()}`, 'success', { undo: !!undoFn });
     if (undoFn) pushUndo(label.toLowerCase(), undoFn);
 
     if (state.shopMode) {
