@@ -1,0 +1,86 @@
+DATABASE: BeCopenhagen analytics (SQLite). Copenhagen bike tour + rental company.
+Currency DKK. Bookings/sales data spans Dec 2022 to present.
+
+TABLE bookings  -- one row per booking
+  booking_id, order_id
+  cancelled          INT 0/1
+  cancelled_at       DATE, cancelled_by TEXT
+  cancel_days_before_tour INT  tour_date - cancelled_at (negative = after tour)
+  item               TEXT product code. Group tours: A3 (architecture), L3
+                          (liveability/highlights), F3 (food), H3 (history),
+                          L2 (DISCONTINUED 2026). Private: A3P/L3P/F3P.
+                          CUSTOM = bespoke group bookings. Legacy/archived
+                          names: ESS, ARCH, ARCH +lunch, NV, LIGHT, Nordhavn,
+                          WCA. Rentals: '1-D'..'14-D' = N-day bike rental.
+  item_category      TEXT 'tour_group'|'tour_private'|'rental'|'gift_card'
+  rental_days        INT  N for an N-D rental
+  booked_at          DATE when the SALE was made
+  booked_time TEXT, booked_dow TEXT (day name), booked_hour INT
+  tour_date          DATE when the TOUR RUNS (rentals: pickup date)
+  tour_time TEXT, tour_dow TEXT (day name), tour_hour INT
+  availability_id    TEXT the departure slot (joins to fleet.tour_availabilities)
+  lead_days          INT  tour_date - booked_at (booking lead time)
+  pax                INT  number of people
+  language           TEXT e.g. 'English (UK)', 'German', 'Danish'
+  country            TEXT ISO code from phone, e.g. 'US','DE','DK'
+  created_by         TEXT 'Online' | 'Shop' | staff name | '<x>-api'
+  paid_status        TEXT 'paid'|'unpaid'|'underpaid'|'overpaid'
+  channel            TEXT 'Direct/Website'|'GetYourGuide'|'Viator'|
+                          'Musement/TUI'|'Airbnb'|'Google'|'FHDN'|
+                          'Shop/Walk-in'|'Staff (name)'
+  commission_rate    REAL what we pay that channel (GetYourGuide 0.30, most
+                          other OTAs 0.20, direct 0.0).
+                          True net = total * (1 - commission_rate).
+  channel_type       TEXT 'OTA'|'Direct'
+  subtotal, tax, total, total_paid, net_revenue, processing_fees,
+  paid_to_affiliate, amount_due  REAL (DKK)
+  revenue_per_pax    REAL
+
+TABLE sales  -- one row per payment or refund event
+  txn_id, booking_id (join to bookings.booking_id)
+  item, kind ('Payment'|'Refund')
+  created_at DATE, created_dow TEXT
+  payment_type TEXT, card_type TEXT, created_by TEXT
+  gross, processing_fee, net, refund_gross, tax_paid, subtotal_paid REAL
+  payout_date DATE
+
+TABLE fleet.tour_availabilities  -- EVERY departure offered, sold or not
+  availability_id  TEXT  joins to bookings.availability_id
+  feed_id, feed_label TEXT  product (feed_label is the code, e.g. 'A3','L3')
+  feed_type        TEXT  'tour' | 'rental'
+  guide            TEXT  guide assigned to the departure
+  start_date TEXT ('YYYY-MM-DD'), start_time TEXT ('HH:MM'), end_time TEXT
+  booking_count    INT   bookings on this departure (0 = ran EMPTY, unsold)
+  total_bikes      INT   bikes required
+  This is the ONLY source of departures that sold ZERO bookings, so it's what
+  makes occupancy / fill-rate / "which slots run empty" answerable at all.
+
+TABLE fleet.guide_tour_hours
+  availability_id, guide, feed_id, feed_label, start_date,
+  duration_minutes INT, booking_count INT
+
+TABLE fleet.guide_reviews
+  guide_id, review_date, reviewer_name, platform, booking_type, review_text
+
+CRITICAL GUIDANCE
+- "Do people BOOK on X" -> booked_dow (the sale date). "Are X tours BUSY" ->
+  tour_dow (the delivery date). These are DIFFERENT questions. If the wording
+  is ambiguous, answer both.
+- OCCUPANCY / EMPTY SLOTS: you MUST use fleet.tour_availabilities. The
+  bookings table only contains departures that SOLD, so counting bookings
+  alone silently ignores every empty departure and overstates demand.
+- The fleet.* tables only go back a few months (the fleet app is much newer
+  than the booking history). bookings/sales cover 2023->now; occupancy and
+  guide data DO NOT. Never present a long-run trend from fleet.* tables —
+  state the limitation instead.
+- Cancellations are rare (~0.6% of bookings). Per-channel or per-product
+  cancellation rates rest on tiny samples. Report raw counts and say plainly
+  when a number is too small to trust, rather than presenting a dramatic
+  percentage as if it were a finding.
+- The product lineup changed over time (L2 discontinued, H3/F3 newer, legacy
+  names archived). Be careful with per-product year-over-year: it is often
+  apples-to-oranges. Topline YoY is fine.
+- Rentals ('N-D' items) are bikes, not tours. Exclude them from tour analysis
+  unless the question is about rentals.
+- bookings.total = booking value. Use the sales table for actual cash
+  movements including refunds.

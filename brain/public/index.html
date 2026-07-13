@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Brain · beCopenhagen</title>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#C8102E"/>
+<style>
+  :root{
+    --bg:#faf9f7; --bg2:#fff; --bg3:#f0efec;
+    --border:#e5e3df; --border-strong:#d4d1cb;
+    --text:#1c1b19; --text2:#5c5a55; --text3:#8e8b84;
+    --red:#C8102E; --green:#2d7d46; --green-bg:#eaf5ee;
+    --radius:12px; --radius-sm:8px;
+    --shadow:0 1px 2px rgba(0,0,0,.04);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#151412; --bg2:#1f1e1c; --bg3:#2a2926;
+      --border:#302f2c; --border-strong:#403e3a;
+      --text:#f0efec; --text2:#a8a59f; --text3:#7a7770;
+      --green-bg:#1a2e20;
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--text);overscroll-behavior:none}
+
+  /* ---------- login ---------- */
+  #login{
+    position:fixed; inset:0; display:grid; place-items:center; padding:24px;
+    background:var(--bg); z-index:100;
+  }
+  .card{ width:100%; max-width:340px; }
+  .card h1{ font-size:26px; letter-spacing:-.02em; margin-bottom:4px; }
+  .card p{ font-size:13.5px; color:var(--text2); margin-bottom:22px; }
+  .card input{
+    width:100%; padding:12px 14px; margin-bottom:10px; font-size:16px;
+    border:1px solid var(--border-strong); border-radius:var(--radius-sm);
+    background:var(--bg2); color:var(--text); outline:none;
+  }
+  .card input:focus{ border-color:var(--red); }
+  .card button{
+    width:100%; padding:12px; font-size:15px; font-weight:600; color:#fff;
+    background:var(--red); border:0; border-radius:var(--radius-sm); cursor:pointer;
+  }
+  .card button:disabled{ opacity:.5; }
+  #loginErr{ font-size:13px; color:var(--red); margin-top:10px; min-height:18px; }
+
+  /* ---------- app ---------- */
+  #app{ display:none; flex-direction:column; height:100dvh; }
+  .top{
+    flex:none; display:flex; align-items:center; gap:10px; padding:12px 14px;
+    padding-top:calc(12px + env(safe-area-inset-top));
+    background:var(--bg2); border-bottom:1px solid var(--border);
+  }
+  .top h1{ font-size:16px; font-weight:650; letter-spacing:-.01em; }
+  .top .status{ margin-left:auto; font-size:11.5px; color:var(--text3); text-align:right; line-height:1.35; }
+  .top .status b{ color:var(--text2); font-weight:600; }
+  .ibtn{
+    flex:none; width:34px; height:34px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:var(--bg2); color:var(--text2);
+    font-size:15px; cursor:pointer; display:grid; place-items:center;
+  }
+  .ibtn:active{ background:var(--bg3); }
+
+  .thread{ flex:1; overflow-y:auto; padding:16px 14px 8px; -webkit-overflow-scrolling:touch; }
+  .msg{ max-width:88%; margin-bottom:14px; }
+  .msg.me{ margin-left:auto; }
+  .msg.me .bubble{ background:var(--red); color:#fff; border-radius:16px 16px 4px 16px; padding:9px 13px; font-size:14.5px; }
+  .msg.bot .bubble{
+    background:var(--bg2); border:1px solid var(--border); border-radius:16px 16px 16px 4px;
+    padding:11px 14px; font-size:14.5px; box-shadow:var(--shadow); white-space:pre-wrap; line-height:1.5;
+  }
+  .sqlt{ margin-top:7px; font-size:11.5px; color:var(--text3); cursor:pointer; user-select:none; }
+  pre.sql{
+    display:none; margin-top:6px; background:#1a1917; color:#d6d3ce;
+    border-radius:var(--radius-sm); padding:10px 12px; font-size:11.5px;
+    line-height:1.5; overflow-x:auto; font-family:ui-monospace,Menlo,monospace; white-space:pre;
+  }
+  pre.sql.open{ display:block; }
+  .think{ display:flex; gap:4px; padding:4px 2px; }
+  .think i{ width:6px;height:6px;border-radius:50%;background:var(--text3);animation:bl 1.3s infinite both; }
+  .think i:nth-child(2){animation-delay:.2s} .think i:nth-child(3){animation-delay:.4s}
+  @keyframes bl{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+  .starters{ padding:2px 0 6px; display:flex; flex-wrap:wrap; gap:7px; }
+  .starter{
+    font-size:12.5px; padding:7px 11px; border-radius:999px; cursor:pointer;
+    background:var(--bg2); border:1px solid var(--border); color:var(--text2);
+  }
+  .starter:active{ background:var(--bg3); }
+
+  .composer{
+    flex:none; display:flex; gap:8px; padding:10px 12px;
+    padding-bottom:calc(10px + env(safe-area-inset-bottom));
+    background:var(--bg2); border-top:1px solid var(--border);
+  }
+  .composer textarea{
+    flex:1; resize:none; border:1px solid var(--border-strong); border-radius:18px;
+    padding:9px 14px; font:inherit; font-size:16px; max-height:110px;
+    background:var(--bg); color:var(--text); outline:none;
+  }
+  .composer textarea:focus{ border-color:var(--red); }
+  .send{ flex:none;width:38px;height:38px;border-radius:50%;border:0;background:var(--red);color:#fff;font-size:17px;cursor:pointer;align-self:flex-end; }
+  .send:disabled{ opacity:.4; }
+
+  .sheetbg{ position:fixed; inset:0; background:rgba(0,0,0,.4); display:none; align-items:flex-end; justify-content:center; z-index:50; }
+  .sheetbg.open{ display:flex; }
+  .sheet{ width:100%; max-width:520px; background:var(--bg2); border-radius:18px 18px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .sheet h2{ font-size:16px; margin-bottom:5px; }
+  .sheet .hint{ font-size:12.5px; color:var(--text2); margin-bottom:14px; line-height:1.5; }
+  .drop{
+    border:1.5px dashed var(--border-strong); border-radius:var(--radius); padding:14px;
+    text-align:center; font-size:13px; color:var(--text2); margin-bottom:10px; cursor:pointer;
+    background:var(--bg); display:block;
+  }
+  .drop.has{ border-style:solid; border-color:var(--green); background:var(--green-bg); color:var(--green); }
+  .drop small{ display:block; font-size:11px; color:var(--text3); margin-top:3px; }
+  .drop.has small{ color:var(--green); }
+  .acts{ display:flex; gap:8px; margin-top:6px; }
+  .btn{ flex:1; padding:11px; border-radius:var(--radius-sm); border:1px solid var(--border-strong); background:var(--bg2); color:var(--text); font:inherit; font-weight:550; font-size:14px; cursor:pointer; }
+  .btn.primary{ background:var(--red); border-color:var(--red); color:#fff; }
+  .btn:disabled{ opacity:.45; }
+  .upmsg{ font-size:12.5px; margin-top:10px; }
+  .upmsg.err{ color:var(--red); } .upmsg.ok{ color:var(--green); }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card">
+    <h1>Brain</h1>
+    <p>beCopenhagen business data</p>
+    <input type="email" id="email" placeholder="Email" autocomplete="username"/>
+    <input type="password" id="pw" placeholder="Password" autocomplete="current-password"/>
+    <button id="loginBtn">Log in</button>
+    <div id="loginErr"></div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="top">
+    <h1>Brain</h1>
+    <div class="status" id="status">…</div>
+    <button class="ibtn" id="upBtn" title="Upload weekly data">↑</button>
+    <button class="ibtn" id="outBtn" title="Log out">⏻</button>
+  </div>
+
+  <div class="thread" id="thread">
+    <div class="msg bot">
+      <div class="bubble">Ask me anything about the business. I query the booking, sales and departure data directly.</div>
+      <div class="starters">
+        <span class="starter">Do people book more on Sundays?</span>
+        <span class="starter">Which channel nets most after commission?</span>
+        <span class="starter">Which time slots run empty?</span>
+        <span class="starter">Fill rate by product</span>
+        <span class="starter">How are rentals trending year over year?</span>
+        <span class="starter">Average booking lead time by product</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="composer">
+    <textarea id="q" rows="1" placeholder="Ask about bookings, revenue, channels…"></textarea>
+    <button class="send" id="send">↑</button>
+  </div>
+</div>
+
+<div class="sheetbg" id="sheetbg">
+  <div class="sheet">
+    <h2>Weekly data refresh</h2>
+    <div class="hint">Export both reports from FareHarbor as <b>Detailed</b>, range <b>01/01/2023 → today</b>, all columns. Drop them in — this rebuilds the database.</div>
+    <label class="drop" id="dropB"><input type="file" accept=".csv" id="fileB" hidden/><span id="labB"><b>Bookings report</b><small>Tap to choose the CSV</small></span></label>
+    <label class="drop" id="dropS"><input type="file" accept=".csv" id="fileS" hidden/><span id="labS"><b>Sales report</b><small>Tap to choose the CSV</small></span></label>
+    <div class="upmsg" id="upmsg"></div>
+    <div class="acts">
+      <button class="btn" id="cancelUp">Cancel</button>
+      <button class="btn primary" id="doUp" disabled>Rebuild</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let history_ = [], busy = false;
+
+// ---------- auth ----------
+async function checkAuth(){
+  const r = await fetch('/api/me');
+  const d = await r.json();
+  if (d.user){ showApp(); } else { $('login').style.display='grid'; $('app').style.display='none'; }
+}
+function showApp(){
+  $('login').style.display='none';
+  $('app').style.display='flex';
+  loadStatus();
+}
+$('loginBtn').onclick = async () => {
+  const btn = $('loginBtn'); btn.disabled = true; $('loginErr').textContent='';
+  try{
+    const r = await fetch('/api/login',{
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ email: $('email').value, password: $('pw').value })
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Login failed');
+    $('pw').value=''; showApp();
+  }catch(e){ $('loginErr').textContent = e.message; }
+  finally{ btn.disabled=false; }
+};
+$('pw').addEventListener('keydown', e => { if(e.key==='Enter') $('loginBtn').click(); });
+$('outBtn').onclick = async () => {
+  await fetch('/api/logout',{method:'POST'});
+  location.reload();
+};
+
+// ---------- status ----------
+async function loadStatus(){
+  try{
+    const s = await (await fetch('/api/status')).json();
+    const el = $('status');
+    if(!s.loaded){ el.innerHTML='<b>No data</b><br>Upload to start'; return; }
+    el.innerHTML = '<b>'+s.bookings.toLocaleString()+'</b> bookings<br>'+
+      (s.fleet ? 'through '+(s.bookings_to||'').slice(0,10) : 'fleet DB offline');
+  }catch(_){}
+}
+
+// ---------- chat ----------
+const thread = $('thread'), qEl = $('q'), sendEl = $('send');
+function addMsg(who, text){
+  const d=document.createElement('div'); d.className='msg '+who;
+  const b=document.createElement('div'); b.className='bubble'; b.textContent=text;
+  d.appendChild(b); thread.appendChild(d); thread.scrollTop=thread.scrollHeight; return d;
+}
+function addThinking(){
+  const d=document.createElement('div'); d.className='msg bot';
+  d.innerHTML='<div class="bubble"><div class="think"><i></i><i></i><i></i></div></div>';
+  thread.appendChild(d); thread.scrollTop=thread.scrollHeight; return d;
+}
+async function ask(question){
+  if(busy || !question.trim()) return;
+  busy=true; sendEl.disabled=true;
+  addMsg('me', question);
+  qEl.value=''; qEl.style.height='auto';
+  const pending = addThinking();
+  try{
+    const r = await fetch('/api/ask',{
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ question, history: history_ })
+    });
+    const d = await r.json();
+    pending.remove();
+    if(r.status===401){ location.reload(); return; }
+    if(!r.ok){ addMsg('bot','⚠︎ '+(d.error||'Something went wrong.')); return; }
+
+    const el=document.createElement('div'); el.className='msg bot';
+    const b=document.createElement('div'); b.className='bubble'; b.textContent=d.answer;
+    el.appendChild(b);
+    if(d.sql){
+      const t=document.createElement('div'); t.className='sqlt';
+      t.textContent='⌄ show query ('+d.rowCount+' rows)';
+      const pre=document.createElement('pre'); pre.className='sql'; pre.textContent=d.sql;
+      t.onclick=()=>{ pre.classList.toggle('open');
+        t.textContent=(pre.classList.contains('open')?'⌃ hide':'⌄ show')+' query ('+d.rowCount+' rows)'; };
+      el.appendChild(t); el.appendChild(pre);
+    }
+    thread.appendChild(el); thread.scrollTop=thread.scrollHeight;
+    history_.push({role:'user',content:question});
+    history_.push({role:'assistant',content:d.answer});
+    history_ = history_.slice(-6);
+  }catch(e){ pending.remove(); addMsg('bot','⚠︎ '+e.message); }
+  finally{ busy=false; sendEl.disabled=false; }
+}
+sendEl.onclick = () => ask(qEl.value);
+qEl.addEventListener('keydown', e => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ask(qEl.value);} });
+qEl.addEventListener('input', () => { qEl.style.height='auto'; qEl.style.height=Math.min(qEl.scrollHeight,110)+'px'; });
+document.addEventListener('click', e => { if(e.target.classList.contains('starter')) ask(e.target.textContent); });
+
+// ---------- upload ----------
+let csvB=null, csvS=null;
+$('upBtn').onclick = () => $('sheetbg').classList.add('open');
+$('cancelUp').onclick = () => $('sheetbg').classList.remove('open');
+$('sheetbg').onclick = e => { if(e.target===$('sheetbg')) $('sheetbg').classList.remove('open'); };
+function wire(input, dropId, labId, set){
+  input.onchange = () => {
+    const f = input.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      set(rd.result);
+      $(dropId).classList.add('has');
+      $(labId).innerHTML = '<b>✓ '+f.name+'</b><small>'+Math.round(f.size/1024)+' KB</small>';
+      $('doUp').disabled = !(csvB && csvS);
+    };
+    rd.readAsText(f);
+  };
+}
+wire($('fileB'),'dropB','labB', t => { csvB=t; });
+wire($('fileS'),'dropS','labS', t => { csvS=t; });
+$('doUp').onclick = async () => {
+  $('doUp').disabled=true;
+  const m=$('upmsg'); m.className='upmsg'; m.textContent='Rebuilding the database…';
+  try{
+    const r = await fetch('/api/upload',{
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ bookings_csv: csvB, sales_csv: csvS })
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Upload failed');
+    m.className='upmsg ok'; m.textContent='✓ '+(d.message||'Done.');
+    loadStatus();
+    setTimeout(()=>$('sheetbg').classList.remove('open'), 1400);
+  }catch(e){ m.className='upmsg err'; m.textContent='⚠︎ '+e.message; $('doUp').disabled=false; }
+};
+
+checkAuth();
+</script>
+</body>
+</html>
