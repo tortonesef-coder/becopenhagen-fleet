@@ -3459,9 +3459,10 @@ function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); retu
 
 async function renderTodayBoard(c) {
   const today = new Date().toISOString().substring(0, 10);
-  const [tours, rentals, bikes] = await Promise.all([
+  const [tours, rentals, rentalsLiveRaw, bikes] = await Promise.all([
     api('/api/ical/tours').catch(() => []),
     api('/api/ical/rentals').catch(() => []),
+    api('/api/ical/rentals-live').catch(() => []),
     api('/api/bikes').catch(() => []),
   ]);
   const todayTours = tours.filter(t => (t.start_date || '') === today);
@@ -3473,27 +3474,54 @@ async function renderTodayBoard(c) {
     const k = String(b.fareharbor_booking_ref); (outByRef[k] = outByRef[k] || []).push(b);
   });
 
-  // ---- "Bikes needed today", split by TOURS vs RENTALS (that's how the shop
-  // thinks about it). Tours use a PEAK: each tour holds its bikes from
-  // start-10min to end+20min, so two non-overlapping tours share the same bikes.
-  // Rentals are summed (multi-day → each ties up its bikes all day anyway).
-  const tourCats = new Set();
-  todayTours.forEach(t => Object.entries(t.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) tourCats.add(k); }));
-  const tourNeeded = {};
-  tourCats.forEach(cat => {
+  // ---- "Bikes needed today" — ONE number per bike type. ----
+  // The shop has one pool of each bike type; a tour bike and a rental bike are
+  // the same physical bike. So the answer to "how many must I have ready?" is
+  // the PEAK simultaneous demand, per type, across tours AND rentals together.
+  //
+  //  - A tour holds its bikes from (start - 10min) to (end + 20min), so two
+  //    tours far enough apart share the same bikes; overlapping ones don't.
+  //  - A rental holds its bikes ALL DAY (they leave and come back days later),
+  //    so it overlaps every tour — it's a flat baseline added to the peak.
+  //    That includes rentals that STARTED ON AN EARLIER DAY and are still out
+  //    (the N-Day feeds), which is why we look at the whole rental window, not
+  //    just today's pickups.
+  const bikesOf = (r) => { try { return typeof r.bikes_needed === 'string' ? JSON.parse(r.bikes_needed) : (r.bikes_needed || {}); } catch { return {}; } };
+
+  // Rentals live today = any rental whose window covers today, including ones
+  // picked up on an EARLIER day and not yet back (the N-Day feeds). Only those
+  // with actual bookings tie up bikes.
+  const rentalsLive = rentalsLiveRaw.filter(r => (r.bookings || []).length > 0);
+
+  const cats = new Set();
+  todayTours.forEach(t => Object.entries(bikesOf(t)).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
+  rentalsLive.forEach(r => Object.entries(bikesOf(r)).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
+
+  const needed = {};
+  cats.forEach(cat => {
+    // Rentals: flat all-day baseline.
+    let rentalN = 0;
+    rentalsLive.forEach(r => { rentalN += bikesOf(r)[cat] || 0; });
+
+    // Tours: sweep-line peak, so non-overlapping tours reuse the same bikes.
     const evs = [];
+    let untimed = 0;
     todayTours.forEach(t => {
-      const n = (t.bikes_needed || {})[cat] || 0; if (n <= 0) return;
+      const n = bikesOf(t)[cat] || 0; if (n <= 0) return;
       const s = hhmmToMin(t.start_time), e = hhmmToMin(t.end_time);
-      if (s == null || e == null) return;
+      // A tour with no usable time can't be placed on the timeline — count it
+      // in full rather than silently dropping it (better to over-prepare).
+      if (s == null || e == null) { untimed += n; return; }
       evs.push([s - 10, n]); evs.push([e + 20, -n]);
     });
-    evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // at same minute, release before acquire
-    let cur = 0, peak = 0; evs.forEach(([, d]) => { cur += d; if (cur > peak) peak = cur; });
-    if (peak > 0) tourNeeded[cat] = peak;
+    evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // release before acquire at the same minute
+    let cur = 0, tourPeak = 0;
+    evs.forEach(([, d]) => { cur += d; if (cur > tourPeak) tourPeak = cur; });
+    tourPeak += untimed;
+
+    const total = tourPeak + rentalN;
+    if (total > 0) needed[cat] = { total, tourPeak, rentalN };
   });
-  const rentalNeeded = {};
-  todayRentals.forEach(r => { if ((r.bookings || []).length) Object.entries(r.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) rentalNeeded[k] = (rentalNeeded[k] || 0) + n; }); });
 
   // ---- Timeline: tour departures + rental pickups, by time ----
   const events = [];
@@ -3512,16 +3540,21 @@ async function renderTodayBoard(c) {
     .sort((a, b) => String(a.return_due).localeCompare(String(b.return_due)));
 
   // ---- Render ----
-  const needGroup = (title, obj) => {
-    const keys = Object.keys(obj).filter(k => obj[k] > 0).sort((a, b) => obj[b] - obj[a]);
-    if (!keys.length) return '';
-    return `<div style="margin-bottom:0.65rem">
-      <div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:0.15rem">${title}</div>
-      ${keys.map(k => `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.25rem 0;border-bottom:1px solid var(--border)"><span style="font-weight:600">${catLabel(k)}</span><strong style="font-size:1.05rem">${obj[k]}</strong></div>`).join('')}
-    </div>`;
-  };
-  const neededHtml = (Object.keys(tourNeeded).length || Object.keys(rentalNeeded).length)
-    ? needGroup('For tours (peak at once)', tourNeeded) + needGroup('For rentals', rentalNeeded)
+  const keys = Object.keys(needed).sort((a, b) => needed[b].total - needed[a].total);
+  const neededHtml = keys.length
+    ? keys.map(k => {
+        const v = needed[k];
+        const parts = [];
+        if (v.tourPeak) parts.push(`${v.tourPeak} tours`);
+        if (v.rentalN) parts.push(`${v.rentalN} rentals`);
+        return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.4rem 0;border-bottom:1px solid var(--border)">
+          <span>
+            <span style="font-weight:700">${catLabel(k)}</span>
+            ${parts.length > 1 ? `<span style="font-size:0.72rem;color:var(--text3);margin-left:0.4rem">${parts.join(' + ')}</span>` : ''}
+          </span>
+          <strong style="font-size:1.15rem">${v.total}</strong>
+        </div>`;
+      }).join('')
     : '<div style="color:var(--text3);font-size:0.85rem">Nothing needed today</div>';
 
   const eventsHtml = events.length ? events.map(e => {

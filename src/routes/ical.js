@@ -659,6 +659,26 @@ router.get('/tours', (req, res) => {
   res.json(results);
 });
 
+// GET /api/ical/rentals-live — rentals whose window COVERS today, including
+// multi-day ones that started on an earlier day and are still out. The Today
+// board needs these: a 3-day rental picked up yesterday is still holding bikes
+// today, so it must count towards "bikes needed today". (The /rentals endpoint
+// above is a forward-looking pickup list and deliberately doesn't show these.)
+router.get('/rentals-live', (req, res) => {
+  const rows = db().prepare(`
+    SELECT * FROM tour_availabilities
+    WHERE feed_type='rental'
+      AND date(start_date) <= date('now')
+      AND date(COALESCE(end_at, start_at)) >= date('now')
+    ORDER BY start_at LIMIT 100
+  `).all();
+  res.json(rows.map(r => ({
+    ...r,
+    bikes_needed: JSON.parse(r.bikes_needed || '{}'),
+    bookings: JSON.parse(r.bookings_json || '[]'),
+  })));
+});
+
 // GET /api/ical/rentals — upcoming rental bookings
 // Rentals picked up at 09:30. Shop closes at 16:30 CEST (14:30 UTC).
 // After 14:30 UTC, today's rentals are done — show from tomorrow only.

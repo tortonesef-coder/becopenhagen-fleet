@@ -13,11 +13,16 @@ const day = process.argv[2] || new Date().toISOString().substring(0, 10);
 const CAT = { A:'Adult regular bike', E:'E-bike', B:'Child bike', AC:'Child seat', AT:'Toddler seat', GT:'Guided-tour bike', SA:'Small adult' };
 const hhmm = (t) => { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1])*60 + (+m[2]) : null; };
 
+// Tours today, plus any rental whose window COVERS today (incl. multi-day ones
+// picked up earlier and still out — they still hold bikes).
 const rows = db.prepare(`
   SELECT availability_id, feed_id, feed_type, start_date, start_time, end_time,
          booking_count, bikes_needed, total_bikes, summary
-  FROM tour_availabilities WHERE start_date = ? ORDER BY start_time
-`).all(day);
+  FROM tour_availabilities
+  WHERE (feed_type != 'rental' AND start_date = ?)
+     OR (feed_type  = 'rental' AND date(start_date) <= date(?) AND date(COALESCE(end_at, start_at)) >= date(?))
+  ORDER BY feed_type, start_time
+`).all(day, day, day);
 
 if (!rows.length) { console.log(`\nNothing scheduled on ${day}.\n`); process.exit(0); }
 
