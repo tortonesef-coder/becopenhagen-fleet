@@ -15,7 +15,8 @@
 //   node scripts/fixes/diag-resources.js [days]     (default 4)
 
 const { chromium } = require('playwright');
-require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+// Credentials come from the environment (/etc/environment), same as the real
+// scraper — there is no .env file in this project.
 
 const COMPANY_SLUG = 'becopenhagen';
 const DAYS = parseInt(process.argv[2], 10) || 4;
