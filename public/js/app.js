@@ -3450,10 +3450,12 @@ async function renderTours(c) {
 }
 
 // ── TODAY BOARD (shop manifest) ──────────────────────────────────────────
-// These keys come from the FareHarbor summary parser (src/routes/ical.js):
-//   A = adult regular bike   E = e-bike        B  = child bike
-//   AC = child seat          AT = toddler seat GT = guided-tour bike
-const CAT_LABELS = { A:'Adult bike', E:'E-bike', B:'Child bike', AC:'Child seat', AT:'Toddler seat', GT:'Guided bike', SA:'Small adult' };
+// Bike type codes, matching bike_types in the fleet (src/db/seed.js).
+const CAT_LABELS = {
+  A:'Adult bike', SA:'Small adult bike', AC:'Adult + child seat', AT:'Adult + toddler seat',
+  B:'Kids bike (small)', BM:'Kids bike (medium)', TB:'Touring bike', MB:'Mountain bike',
+  CC:'Cargo bike', E:'Electric bike', GT:'Guided bike',
+};
 const catLabel = (k) => CAT_LABELS[k] || k;
 function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
 

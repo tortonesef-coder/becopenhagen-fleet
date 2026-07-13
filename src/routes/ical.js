@@ -6,6 +6,7 @@ const { createNotification, resolveNotification } = require('./admin-notifs');
 const { logTourChange } = require('../tour-change-log');
 const { computeBufferedMinutes } = require('../tour-duration');
 const { notifyFirstBooking } = require('../notify-first-booking');
+const { parseBikeCounts } = require('../parse-bikes');
 
 function db() { return getDb(); }
 
@@ -134,21 +135,18 @@ function parseIcal(text) {
       }
     }
 
-    // Parse bike counts from summary
-    // "5 Adults incl. bike rentals, 2 Adults incl. e-bike rentals, 1 Child incl. bike rental"
+    // Bike counts. NOTE: these are recomputed from the per-booking lines further
+    // down (see `bikesFromBookings`), because the SUMMARY only carries the
+    // "N Adults incl. bike rentals" phrasing that TOURS use — rentals phrase it
+    // as "2 Adult's Bikes, 1 Christiania Cargo Bike" and parsed to zero here,
+    // so every rental's bikes were invisible to the Today board.
     let bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 };
     const summaryLower = summary.toLowerCase();
-    const bikeMatches = summaryLower.matchAll(/(\d+)\s+adult[^,]*(e-bike|electric)[^,]*/gi);
-    const regularMatches = summaryLower.matchAll(/(\d+)\s+adult[^,]*(?<!e-bike|electric)[^,]*incl\.[^,]*bike/gi);
-    const childMatches = summaryLower.matchAll(/(\d+)\s+child[^,]*incl\.[^,]*bike/gi);
-
     for (const m of summaryLower.matchAll(/(\d+)\s+adult[^,]*incl[^,]*e-bike[^,]*/gi)) bikesNeeded.E += parseInt(m[1]);
     for (const m of summaryLower.matchAll(/(\d+)\s+adult[^,]*incl[^,]*bike[^,]*(?!e-bike)/gi)) {
       if (!m[0].includes('e-bike') && !m[0].includes('electric')) bikesNeeded.A += parseInt(m[1]);
     }
     for (const m of summaryLower.matchAll(/(\d+)\s+child[^,]*incl[^,]*bike/gi)) bikesNeeded.B += parseInt(m[1]);
-
-    const totalBikesNeeded = Object.values(bikesNeeded).reduce((a,b)=>a+b,0);
 
     // Parse individual bookings from description
     const bookings = [];
@@ -230,6 +228,17 @@ function parseIcal(text) {
       });
     });
 
+    // The per-booking "what" lines carry the REAL bike breakdown, in the fleet's
+    // own type names ("2 Adult's Bikes, 1 Christiania Cargo Bike"). The summary
+    // regexes above only understand the tour phrasing ("N Adults incl. bike
+    // rentals"), so rentals parsed to zero bikes. Recompute from the bookings
+    // whenever they tell us something — this is what makes cargo/touring/small
+    // bikes visible, and what makes rental bike counts correct at all.
+    const fromBookings = parseBikeCounts(bookings.map(b => b.what).filter(Boolean));
+    if (Object.keys(fromBookings).length) bikesNeeded = fromBookings;
+
+    const totalBikesNeeded = Object.values(bikesNeeded).reduce((a, b) => a + b, 0);
+
     // Extract availability ID from UID
     const availId = uid.match(/availabilities\/(\d+)/)?.[1] || uid;
 
@@ -276,13 +285,14 @@ function syncFeedToDB(feed, events) {
       -- other. GT is left untouched here; the combined total is existing GT
       -- plus iCal's non-GT count. Atomic (single statement) — no read/write
       -- race with the hourly v2 process.
+      --
+      -- NOTE: this used to json_set() a HARDCODED list (A/E/B/AC/AT), which
+      -- silently dropped every other bike type — cargo, touring, small-adult,
+      -- mountain. Now we take iCal's whole object and re-attach GT, so any bike
+      -- type the fleet defines flows through without another code change.
       bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN json_set(
-          json(COALESCE(bikes_needed,'{}')),
-          '$.A',  COALESCE(json_extract(excluded.bikes_needed,'$.A'),0),
-          '$.E',  COALESCE(json_extract(excluded.bikes_needed,'$.E'),0),
-          '$.B',  COALESCE(json_extract(excluded.bikes_needed,'$.B'),0),
-          '$.AC', COALESCE(json_extract(excluded.bikes_needed,'$.AC'),0),
-          '$.AT', COALESCE(json_extract(excluded.bikes_needed,'$.AT'),0)
+          json(excluded.bikes_needed),
+          '$.GT', COALESCE(json_extract(bikes_needed,'$.GT'),0)
         ) ELSE bikes_needed END,
       total_bikes=CASE WHEN excluded.total_bikes > 0
         THEN COALESCE(json_extract(bikes_needed,'$.GT'),0) + excluded.total_bikes
