@@ -42,18 +42,22 @@ function parseCsv(text) {
 }
 
 // FareHarbor exports put a title line first, then the real header.
+// NOTE: some reports repeat a column name (the customers report has '# of Pax'
+// and 'Total' twice — once per customer line, once per booking). Keying only
+// by name would silently let the second overwrite the first, so we also keep
+// the raw positional array.
 function readReport(file) {
   const raw = fs.readFileSync(file, 'utf8');
   const rows = parseCsv(raw).filter(r => r.some(c => c.trim() !== ''));
   if (rows.length < 2) throw new Error(`${path.basename(file)} looks empty`);
 
-  const header = rows[1].map(h => h.trim());
-  const records = rows.slice(2).map(r => {
+  const header = rows[1].map(h => h.replace(/^\uFEFF/, '').trim());
+  return rows.slice(2).map(r => {
     const o = {};
-    header.forEach((h, i) => { o[h] = (r[i] ?? '').trim(); });
+    header.forEach((h, i) => { if (!(h in o)) o[h] = (r[i] ?? '').trim(); });
+    o._cells = r.map(c => (c ?? '').trim());   // positional access
     return o;
   });
-  return records;
 }
 
 /* ── value coercion ─────────────────────────────────────────────────────── */
@@ -242,6 +246,97 @@ function loadSales(file, db) {
   return recs.length;
 }
 
+/* ── customer types ─────────────────────────────────────────────────────── */
+// One row per customer line-item on a booking. This is where bike types live
+// (Christiania cargo, e-bike, child seat...), which the bookings export does
+// not contain at all.
+//
+// The 'Customer type' field does three different jobs at once, so we split it:
+//   - bike_type      the actual bike (Christiania Cargo, Electric, Touring...)
+//   - person_type    adult / child
+//   - is_private_tier "16 People (16PaxPrivate)" = a private PRICING TIER, not
+//                    a bike and not a person. Must be excluded from bike counts
+//                    or it corrupts them.
+
+function classifyCustomerType(raw) {
+  const s = (raw || '').trim();
+  const low = s.toLowerCase();
+
+  // private pricing tiers, e.g. "16 People (16PaxPrivate)"
+  if (/\(\d+PaxPrivate\)/i.test(s) || /^\d+ (person|people)\b/i.test(s)) {
+    return { bike_type: null, person_type: null, is_private_tier: 1, is_bike: 0 };
+  }
+  // bespoke group guests
+  if (/^guest custom/i.test(s)) {
+    return { bike_type: null, person_type: 'adult', is_private_tier: 0, is_bike: 0 };
+  }
+  // generic rental line
+  if (/^number of bikes$/i.test(s)) {
+    return { bike_type: 'Unspecified', person_type: null, is_private_tier: 0, is_bike: 1 };
+  }
+
+  let bike = null;
+  if (/christiania|cargo/.test(low)) bike = 'Christiania cargo';
+  else if (/e-?bike|electric/.test(low)) bike = 'Electric';
+  else if (/toddler seat/.test(low)) bike = 'Bike + toddler seat';
+  else if (/child seat/.test(low)) bike = 'Bike + child seat';
+  else if (/child bike|child \+ bike|child incl/.test(low)) bike = 'Child bike';
+  else if (/touring/.test(low)) bike = 'Touring';
+  else if (/mountain/.test(low)) bike = 'Mountain';
+  else if (/strida/.test(low)) bike = 'STRiDA foldable';
+  else if (/city bike \(small\)|city bike small/.test(low)) bike = 'City (small)';
+  else if (/city bike large/.test(low)) bike = 'City (large)';
+  else if (/own bike/.test(low)) bike = 'Own bike (brought)';
+  else if (/bike/.test(low)) bike = 'Standard';
+
+  const person = /child|toddler/.test(low) ? 'child' : 'adult';
+
+  return {
+    bike_type: bike,
+    person_type: person,
+    is_private_tier: 0,
+    is_bike: bike && bike !== 'Own bike (brought)' ? 1 : 0,
+  };
+}
+
+function loadCustomerTypes(file, db) {
+  const recs = readReport(file).filter(r => {
+    const id = (r['Booking ID'] || '').trim();
+    const ct = (r['Customer type'] || '').trim();
+    // drop the trailing totals row ("33 customer types" / "38 items")
+    if (!id || !ct) return false;
+    if (/^\d+ customer types$/i.test(ct)) return false;
+    return true;
+  });
+
+  db.exec('DROP TABLE IF EXISTS customer_types');
+  db.exec(`CREATE TABLE customer_types (
+    booking_id TEXT, item TEXT,
+    customer_type TEXT, bike_type TEXT, person_type TEXT,
+    is_bike INTEGER, is_private_tier INTEGER,
+    pax INTEGER, subtotal REAL, tax REAL, total REAL, total_paid REAL,
+    checkin_status TEXT
+  )`);
+
+  const ins = db.prepare('INSERT INTO customer_types VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  for (const r of recs) {
+    const c = classifyCustomerType(r['Customer type']);
+    // '# of Pax' and 'Total' appear TWICE in this report — customer-level at
+    // index 2/11, booking-level at 32/33. Use position, not name.
+    const cells = r._cells || [];
+    ins.run(
+      (r['Booking ID'] || '').replace(/^#/, ''),
+      r['Item'] || null,
+      r['Customer type'] || null,
+      c.bike_type, c.person_type, c.is_bike, c.is_private_tier,
+      int(cells[2]),
+      money(cells[8]), money(cells[10]), money(cells[11]), money(cells[15]),
+      r['Check-in Status'] || null
+    );
+  }
+  return recs.length;
+}
+
 /* ── main ───────────────────────────────────────────────────────────────── */
 function main() {
   const args = process.argv.slice(2);
@@ -250,7 +345,7 @@ function main() {
   const files = args.filter((a, i) => a !== '--db' && i !== dbIdx + 1);
 
   if (files.length < 2) {
-    console.error('Usage: node load.js <bookings.csv> <sales.csv> [--db analytics.db]');
+    console.error('Usage: node load.js <bookings.csv> <sales.csv> [customers.csv] [--db analytics.db]');
     process.exit(1);
   }
 
@@ -259,6 +354,8 @@ function main() {
 
   const nb = loadBookings(files[0], db);
   const ns = loadSales(files[1], db);
+  let nc = 0;
+  if (files[2] && fs.existsSync(files[2])) nc = loadCustomerTypes(files[2], db);
 
   for (const stmt of [
     'CREATE INDEX IF NOT EXISTS ix_b_booked ON bookings(booked_at)',
@@ -268,10 +365,15 @@ function main() {
     'CREATE INDEX IF NOT EXISTS ix_b_avail ON bookings(availability_id)',
     'CREATE INDEX IF NOT EXISTS ix_s_created ON sales(created_at)',
     'CREATE INDEX IF NOT EXISTS ix_s_booking ON sales(booking_id)',
-  ]) db.exec(stmt);
+    'CREATE INDEX IF NOT EXISTS ix_c_booking ON customer_types(booking_id)',
+    'CREATE INDEX IF NOT EXISTS ix_c_bike ON customer_types(bike_type)',
+  ]) { try { db.exec(stmt); } catch (_) {} }
 
   db.close();
-  console.log(`Loaded ${nb.toLocaleString()} bookings and ${ns.toLocaleString()} sales transactions.`);
+  console.log(
+    `Loaded ${nb.toLocaleString()} bookings, ${ns.toLocaleString()} sales transactions` +
+    (nc ? `, ${nc.toLocaleString()} customer line items.` : '.')
+  );
   if (unknownItems.size) {
     console.log(`\nNOTE: ${unknownItems.size} item(s) are not in products.json and were left unclassified:`);
     for (const u of unknownItems) console.log('  - ' + u);

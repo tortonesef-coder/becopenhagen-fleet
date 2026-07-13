@@ -54,6 +54,29 @@ TABLE sales  -- one row per payment or refund event
   gross, processing_fee, net, refund_gross, tax_paid, subtotal_paid REAL
   payout_date DATE
 
+TABLE customer_types  -- one row per customer LINE ITEM on a booking
+  booking_id       TEXT  joins to bookings.booking_id (many rows per booking)
+  item             TEXT  the product
+  customer_type    TEXT  the raw FareHarbor label
+  bike_type        TEXT  THE BIKE. 'Standard' | 'Christiania cargo' |
+                         'Electric' | 'Child bike' | 'Bike + child seat' |
+                         'Bike + toddler seat' | 'Touring' | 'Mountain' |
+                         'City (small)' | 'City (large)' | 'STRiDA foldable' |
+                         'Own bike (brought)' | 'Unspecified' | NULL
+  person_type      TEXT  'adult' | 'child'
+  is_bike          INT   1 if this line is an actual bike we supplied
+  is_private_tier  INT   1 if this line is a private-tour PRICING TIER
+                         (e.g. "16 People (16PaxPrivate)") — NOT a bike and NOT
+                         a person. ALWAYS exclude these when counting bikes or
+                         people, or your numbers will be wrong.
+  pax              INT   quantity on this line
+  subtotal, tax, total, total_paid  REAL
+  checkin_status   TEXT
+
+  This is the ONLY place bike types live — the bookings table has no bike
+  information at all. Any question about cargo bikes, e-bikes, child seats,
+  or adult-vs-child mix MUST use this table.
+
 TABLE fleet.tour_availabilities  -- EVERY departure offered, sold or not
   availability_id  TEXT  joins to bookings.availability_id
   feed_id, feed_label TEXT  product (feed_label is the code, e.g. 'A3','L3')

@@ -342,22 +342,28 @@ app.get('/api/status', requireAuth, (req, res) => {
 });
 
 app.post('/api/upload', requireAuth, (req, res) => {
-  const { bookings_csv, sales_csv } = req.body || {};
+  const { bookings_csv, sales_csv, customers_csv } = req.body || {};
   if (!bookings_csv || !sales_csv) {
-    return res.status(400).json({ error: 'Both the bookings CSV and the sales CSV are required.' });
+    return res.status(400).json({ error: 'The bookings CSV and the sales CSV are both required.' });
   }
   const bPath = path.join(UPLOAD_DIR, 'bookings.csv');
   const sPath = path.join(UPLOAD_DIR, 'sales.csv');
+  const cPath = path.join(UPLOAD_DIR, 'customers.csv');
   try {
     fs.writeFileSync(bPath, bookings_csv, 'utf8');
     fs.writeFileSync(sPath, sales_csv, 'utf8');
+    if (customers_csv) fs.writeFileSync(cPath, customers_csv, 'utf8');
   } catch (e) {
     return res.status(500).json({ error: 'Could not save uploads: ' + e.message });
   }
 
+  const args = [path.join(__dirname, 'load.js'), bPath, sPath];
+  if (customers_csv) args.push(cPath);
+  args.push('--db', DB_PATH);
+
   execFile(
     process.execPath,
-    [path.join(__dirname, 'load.js'), bPath, sPath, '--db', DB_PATH],
+    args,
     { timeout: 180000 },
     (err, stdout, stderr) => {
       if (err) {

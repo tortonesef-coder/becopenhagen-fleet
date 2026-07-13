@@ -367,7 +367,7 @@
 <div class="sheetbg" id="sheetbg">
   <div class="sheet">
     <h2>Load new data</h2>
-    <div class="hint">From FareHarbor, export both reports as <b>Detailed</b>, range <b>01/01/2023 → today</b>, with all columns selected. This replaces everything currently loaded.</div>
+    <div class="hint">From FareHarbor, export each as <b>Detailed</b>, range <b>01/01/2023 → today</b>, all columns. The customers report is optional but adds bike types (cargo, e-bike, child seat). This replaces everything loaded.</div>
     <label class="drop" id="dropB">
       <input type="file" accept=".csv" id="fileB" hidden/>
       <span id="labB"><b>Bookings report</b><small>Choose CSV</small></span>
@@ -375,6 +375,10 @@
     <label class="drop" id="dropS">
       <input type="file" accept=".csv" id="fileS" hidden/>
       <span id="labS"><b>Sales report</b><small>Choose CSV</small></span>
+    </label>
+    <label class="drop" id="dropC">
+      <input type="file" accept=".csv" id="fileC" hidden/>
+      <span id="labC"><b>Customers report</b><small>Choose CSV · bike types, adult/child</small></span>
     </label>
     <div class="upmsg" id="upmsg"></div>
     <div class="acts">
@@ -631,7 +635,7 @@ qEl.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey){ e.pr
 qEl.addEventListener('input', () => { qEl.style.height='auto'; qEl.style.height = Math.min(qEl.scrollHeight,120)+'px'; });
 document.addEventListener('click', e => { if (e.target.classList.contains('chip')) ask(e.target.textContent); });
 
-let csvB = null, csvS = null;
+let csvB = null, csvS = null, csvC = null;
 $('upBtn').onclick = () => $('sheetbg').classList.add('open');
 $('cancelUp').onclick = () => $('sheetbg').classList.remove('open');
 $('sheetbg').onclick = e => { if (e.target === $('sheetbg')) $('sheetbg').classList.remove('open'); };
@@ -650,12 +654,13 @@ function wire(input, drop, lab, set){
 }
 wire($('fileB'),'dropB','labB', t => { csvB = t; });
 wire($('fileS'),'dropS','labS', t => { csvS = t; });
+wire($('fileC'),'dropC','labC', t => { csvC = t; });
 $('doUp').onclick = async () => {
   $('doUp').disabled = true;
   const m = $('upmsg'); m.className = 'upmsg'; m.textContent = 'Loading…';
   try{
     const r = await fetch('/api/upload',{ method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({ bookings_csv: csvB, sales_csv: csvS }) });
+      body: JSON.stringify({ bookings_csv: csvB, sales_csv: csvS, customers_csv: csvC }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Load failed');
     m.className = 'upmsg ok'; m.textContent = d.message || 'Loaded.';
