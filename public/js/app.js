@@ -578,10 +578,11 @@ async function showShopWhoAreYou() {
 }
 
 function landingTab() {
-  if (state.actor?.role === 'guide') return 'action';
-  if (state.actor?.role === 'mechanic') return 'action';
-  if (state.actor?.role === 'admin') return 'operations';
-  return 'action';
+  if (state.shopMode) return 'action';
+  const v = activeView();
+  if (v === 'admin') return 'operations';
+  if (v === 'shop') return 'today';
+  return 'action'; // guide
 }
 
 function showMain() {
@@ -594,6 +595,35 @@ function showMain() {
   renderTab(state.shopMode ? 'action' : landingTab());
   if (!state.shopMode) checkBorrowedReminder();
   if (state.actor?.role === 'admin') startNotifPolling();
+}
+
+// Which views a person can work in, from their CAPABILITIES. `role` remains a
+// pure permission (server-enforced); what you SEE now comes from capabilities.
+function availableViews() {
+  const a = state.actor || {};
+  const views = [];
+  if (a.can_shop || a.role === 'mechanic' || a.role === 'admin') views.push('shop');
+  if (a.is_guide || a.role === 'guide') views.push('guide');
+  if (a.role === 'admin') views.push('admin');
+  return views.length ? views : ['guide'];
+}
+
+// The hat you're wearing right now. Remembered per person.
+function activeView() {
+  const views = availableViews();
+  const saved = state.activeView || (() => { try { return localStorage.getItem('bcf_view_' + (state.actor?.id||'')); } catch { return null; } })();
+  if (saved && views.includes(saved)) return saved;
+  if (views.includes('admin')) return 'admin';   // admins land in admin, as today
+  if (views.includes('guide') && views.length === 1) return 'guide';
+  return views[0];
+}
+
+function setActiveView(v) {
+  if (!availableViews().includes(v)) return;
+  state.activeView = v;
+  try { localStorage.setItem('bcf_view_' + (state.actor?.id||''), v); } catch {}
+  buildTabbar();
+  renderTab(landingTab());
 }
 
 function buildTabbar() {
@@ -609,15 +639,15 @@ function buildTabbar() {
     });
     return;
   }
-  const role=state.actor?.role;
-  document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
-  const tabs = role==='mechanic'
-    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
-    : role==='admin'
+  const view = activeView();
+  document.getElementById('btn-more-menu')?.classList.toggle('hidden', view !== 'guide');
+  // SHOP = mechanic + shopkeeper merged. Includes Tours (so the shop can see
+  // which customers are coming when, and prep the right bikes) and Repairs.
+  const tabs = view==='shop'
+    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Repairs',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()}]
+    : view==='admin'
     ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
-    : role==='guide'
-    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}]
-    : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}];
+    : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
@@ -625,6 +655,21 @@ function buildTabbar() {
   document.getElementById('tabbar').querySelectorAll('.tab-btn').forEach(btn=>{
     btn.addEventListener('click',()=>renderTab(btn.dataset.tab));
   });
+  renderViewSwitcher();
+}
+
+// Shown only to people who can work in more than one view (Fede, Hassan).
+// Single-capability people see nothing — their experience is unchanged.
+function renderViewSwitcher() {
+  const host = document.getElementById('view-switcher');
+  if (!host) return;
+  const views = availableViews();
+  if (views.length < 2) { host.innerHTML = ''; host.classList.add('hidden'); return; }
+  const labels = { shop:'Shop', guide:'Guide', admin:'Admin' };
+  const cur = activeView();
+  host.classList.remove('hidden');
+  host.innerHTML = views.map(v => `<button class="vs-btn${v===cur?' active':''}" data-view="${v}">${labels[v]||v}</button>`).join('');
+  host.querySelectorAll('.vs-btn').forEach(b => b.addEventListener('click', () => setActiveView(b.dataset.view)));
 }
 
 function setActiveTab(id) {

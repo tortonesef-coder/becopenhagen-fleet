@@ -34,7 +34,7 @@ router.post('/login', (req, res) => {
   req.session.actor = member.id;
   req.session.actor_name = member.name;
   req.session.actor_role = member.role;
-  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role } });
+  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role, is_guide: member.is_guide, can_shop: member.can_shop, view_mode: member.view_mode } });
 });
 
 // POST /auth/check-member — safe probe to see if an account needs first-time setup,
@@ -112,7 +112,7 @@ router.post('/set-password', (req, res) => {
   req.session.actor = member.id;
   req.session.actor_name = member.name;
   req.session.actor_role = member.role;
-  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role } });
+  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role, is_guide: member.is_guide, can_shop: member.can_shop, view_mode: member.view_mode } });
 });
 
 // POST /auth/set-email — required before password reset can work

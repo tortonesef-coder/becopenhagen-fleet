@@ -200,7 +200,9 @@ function initSchema() {
       password_hash TEXT,
       password_salt TEXT,
       needs_password_setup INTEGER DEFAULT 1,
-      is_guide INTEGER DEFAULT 0
+      is_guide INTEGER DEFAULT 0,
+      can_shop INTEGER DEFAULT 0,
+      view_mode TEXT
     );
 
     CREATE TABLE IF NOT EXISTS password_resets (
@@ -463,6 +465,22 @@ function initSchema() {
     // booking — mark them notified so the new webhook trigger doesn't retro-fire
     // a "first booking" email to guides for every existing booked tour.
     db.exec("UPDATE tour_availabilities SET first_booking_notified=1 WHERE booking_count >= 1");
+  }
+
+  const tmCaps = db.prepare("PRAGMA table_info(team_members)").all().map(c => c.name);
+  if (!tmCaps.includes('can_shop')) {
+    // CAPABILITIES (what a person DOES — can hold several):
+    //   is_guide  → guides tours          can_shop → works the shop floor
+    // Separate from `role` (what they're ALLOWED to do; server-enforced) and
+    // from `view_mode` (which hat they're wearing right now).
+    // Seeded to reproduce today's behaviour EXACTLY, so nothing changes on
+    // screen when this lands — only the tab logic's source of truth moves.
+    db.exec("ALTER TABLE team_members ADD COLUMN can_shop INTEGER DEFAULT 0");
+    db.exec("UPDATE team_members SET can_shop=1 WHERE role IN ('mechanic','admin')");
+  }
+  if (!tmCaps.includes('view_mode')) {
+    // Which view you're working in right now. NULL = derive from role/caps.
+    db.exec("ALTER TABLE team_members ADD COLUMN view_mode TEXT");
   }
 
   const emCols = db.prepare("PRAGMA table_info(emails_sent)").all().map(c => c.name);
