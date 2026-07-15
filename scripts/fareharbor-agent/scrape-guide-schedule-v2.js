@@ -171,12 +171,17 @@ const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,741878,65
 // via the logged-in page's cookies). Deterministic — no response interception.
 async function fetchMonth(page, year, month) {
   const results = [];
+  // A month spans up to 6 week-rows, but most use only 4-5. Requesting a
+  // week-row past the end of the month returns HTTP 400 — that's "no such week",
+  // not a failure. So a 400 just means we've run past the month's end: stop,
+  // don't retry, don't log it as an error. Only non-400 failures are worth noise.
   for (let week = 1; week <= 6; week++) {
     const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/items/${ALL_ITEM_IDS}/calendar/${year}/${String(month).padStart(2, '0')}/?allow_grouped=yes&include_resource_use_summaries=yes&path=2&week_number=${week}`;
-    let ok = false;
-    for (let attempt = 1; attempt <= 2 && !ok; attempt++) {
+    let ok = false, past_end = false;
+    for (let attempt = 1; attempt <= 2 && !ok && !past_end; attempt++) {
       try {
         const resp = await page.request.get(url, { timeout: 60000 });
+        if (resp.status() === 400) { past_end = true; break; } // ran past month end — expected
         if (!resp.ok()) { console.log(`  week ${week} attempt ${attempt}: HTTP ${resp.status()}`); continue; }
         const json = await resp.json();
         results.push(json);
@@ -185,9 +190,10 @@ async function fetchMonth(page, year, month) {
         console.log(`  week ${week} attempt ${attempt} failed: ${e.message.substring(0, 60)}`);
       }
     }
+    if (past_end) break; // no later week-rows exist either
   }
   if (results.length === 0) throw new Error(`No calendar data for ${year}-${month}`);
-  console.log(`  (${results.length}/6 week responses fetched)`);
+  console.log(`  (${results.length} week-rows fetched)`);
   return results;
 }
 
