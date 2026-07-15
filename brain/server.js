@@ -463,6 +463,36 @@ app.post('/api/verify', requireAuth, (req, res) => {
   }
 });
 
+// --- briefings: the analyst's autonomous weekly output ---
+const { runAnalysis } = require('./analyst');
+const BRIEF_DB = path.join(__dirname, 'briefings.db');
+let analysisRunning = false;
+
+app.get('/api/briefings', requireAuth, (req, res) => {
+  if (!fs.existsSync(BRIEF_DB)) return res.json({ briefings: [] });
+  try {
+    const bdb = new DatabaseSync(BRIEF_DB, { readOnly: true });
+    const rows = bdb.prepare('SELECT id, created_at, body FROM briefings ORDER BY id DESC LIMIT 12').all();
+    bdb.close();
+    res.json({ briefings: rows });
+  } catch (e) {
+    res.json({ briefings: [], error: e.message });
+  }
+});
+
+app.post('/api/analyse', requireAuth, async (req, res) => {
+  if (analysisRunning) return res.status(429).json({ error: 'An analysis is already running.' });
+  analysisRunning = true;
+  try {
+    const { briefing, queriesRun } = await runAnalysis();
+    res.json({ ok: true, briefing, queriesRun });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    analysisRunning = false;
+  }
+});
+
 app.get('/api/me', (req, res) => res.json({ user: req.session?.user || null }));
 
 app.use(express.static(path.join(__dirname, 'public')));

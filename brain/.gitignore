@@ -2,3 +2,5 @@
 node_modules/
 analytics.db
 uploads/
+briefings.db
+analyst.log
