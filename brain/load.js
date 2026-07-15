@@ -149,6 +149,22 @@ function classifyItem(item) {
   return ['unclassified', null, 'unknown', null];
 }
 
+/* ── schema migration ─────────────────────────────────────────────────────
+   Tables created before merge-mode had no primary keys, so upserts couldn't
+   dedupe. If we find such a table, drop it once — the very next full upload
+   recreates it keyed. (Detection: PRAGMA table_info pk flag.) */
+function ensureKeyed(db, table, keyCol) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.length) return; // table doesn't exist yet — fine
+    const hasPk = cols.some(c => c.name === keyCol && c.pk > 0);
+    if (!hasPk) {
+      console.log(`(migrating ${table}: old schema without primary key — rebuilding)`);
+      db.exec(`DROP TABLE ${table}`);
+    }
+  } catch (_) {}
+}
+
 /* ── load ───────────────────────────────────────────────────────────────── */
 function loadBookings(file, db) {
   const recs = readReport(file)
@@ -157,8 +173,7 @@ function loadBookings(file, db) {
     .filter(r => (r['Booking ID'] || '').trim() && (r['Item'] || '').trim())
     .filter(r => !/total/i.test(r['Booking ID']));
 
-  db.exec('DROP TABLE IF EXISTS bookings');
-  db.exec(`CREATE TABLE bookings (
+  db.exec(`CREATE TABLE IF NOT EXISTS bookings (
     booking_id TEXT, order_id TEXT,
     cancelled INTEGER, cancelled_at TEXT, cancelled_by TEXT,
     cancel_days_before_tour INTEGER,
@@ -171,10 +186,13 @@ function loadBookings(file, db) {
     channel TEXT, commission_rate REAL, channel_type TEXT, affiliate_raw TEXT,
     subtotal REAL, tax REAL, total REAL, total_paid REAL, net_revenue REAL,
     processing_fees REAL, paid_to_affiliate REAL, amount_due REAL,
-    revenue_per_pax REAL
+    revenue_per_pax REAL,
+    PRIMARY KEY (booking_id)
   )`);
 
-  const ins = db.prepare(`INSERT INTO bookings VALUES (
+  // Upsert by booking_id: new bookings insert, existing ones get REPLACED so
+  // late changes (a cancellation, a payment) are corrected on re-upload.
+  const ins = db.prepare(`INSERT OR REPLACE INTO bookings VALUES (
     ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   for (const r of recs) {
@@ -218,16 +236,16 @@ function loadBookings(file, db) {
 function loadSales(file, db) {
   const recs = readReport(file).filter(r => (r['Payment or Refund ID'] || '').trim());
 
-  db.exec('DROP TABLE IF EXISTS sales');
-  db.exec(`CREATE TABLE sales (
+  db.exec(`CREATE TABLE IF NOT EXISTS sales (
     txn_id TEXT, booking_id TEXT, item TEXT, kind TEXT,
     created_at TEXT, created_dow TEXT,
     payment_type TEXT, card_type TEXT, created_by TEXT,
     gross REAL, processing_fee REAL, net REAL, refund_gross REAL,
-    tax_paid REAL, subtotal_paid REAL, payout_date TEXT
+    tax_paid REAL, subtotal_paid REAL, payout_date TEXT,
+    PRIMARY KEY (txn_id)
   )`);
 
-  const ins = db.prepare('INSERT INTO sales VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT OR REPLACE INTO sales VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
 
   for (const r of recs) {
     const created = isoDate(r['Created At Date']);
@@ -309,14 +327,20 @@ function loadCustomerTypes(file, db) {
     return true;
   });
 
-  db.exec('DROP TABLE IF EXISTS customer_types');
-  db.exec(`CREATE TABLE customer_types (
+  db.exec(`CREATE TABLE IF NOT EXISTS customer_types (
     booking_id TEXT, item TEXT,
     customer_type TEXT, bike_type TEXT, person_type TEXT,
     is_bike INTEGER, is_private_tier INTEGER,
     pax INTEGER, subtotal REAL, tax REAL, total REAL, total_paid REAL,
     checkin_status TEXT
   )`);
+
+  // Replace per booking: a booking's customer lines can change (someone adds
+  // a child seat), and there's no stable per-line ID — so wipe just the
+  // bookings present in this upload, then insert their fresh lines.
+  const idsInUpload = [...new Set(recs.map(r => (r['Booking ID'] || '').replace(/^#/, '')))];
+  const del = db.prepare('DELETE FROM customer_types WHERE booking_id = ?');
+  for (const id of idsInUpload) del.run(id);
 
   const ins = db.prepare('INSERT INTO customer_types VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
   for (const r of recs) {
@@ -352,6 +376,9 @@ function main() {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
 
+  ensureKeyed(db, 'bookings', 'booking_id');
+  ensureKeyed(db, 'sales', 'txn_id');
+
   const nb = loadBookings(files[0], db);
   const ns = loadSales(files[1], db);
   let nc = 0;
@@ -369,10 +396,12 @@ function main() {
     'CREATE INDEX IF NOT EXISTS ix_c_bike ON customer_types(bike_type)',
   ]) { try { db.exec(stmt); } catch (_) {} }
 
+  const span = db.prepare('SELECT COUNT(*) n, MIN(booked_at) lo, MAX(booked_at) hi FROM bookings').get();
   db.close();
   console.log(
-    `Loaded ${nb.toLocaleString()} bookings, ${ns.toLocaleString()} sales transactions` +
-    (nc ? `, ${nc.toLocaleString()} customer line items.` : '.')
+    `Merged ${nb.toLocaleString()} bookings, ${ns.toLocaleString()} sales transactions` +
+    (nc ? `, ${nc.toLocaleString()} customer line items.` : '.') +
+    ` Database now holds ${span.n.toLocaleString()} bookings, ${span.lo} to ${span.hi}.`
   );
   if (unknownItems.size) {
     console.log(`\nNOTE: ${unknownItems.size} item(s) are not in products.json and were left unclassified:`);

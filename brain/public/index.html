@@ -396,7 +396,8 @@
 <div class="sheetbg" id="sheetbg">
   <div class="sheet">
     <h2>Load new data</h2>
-    <div class="hint">Export from FareHarbor as <b>Detailed</b>, range <b>01/01/2023 → today</b>, all columns: <b>bookings</b>, <b>sales</b>, and optionally <b>customers</b> (bike types). Drop them all here in any order — I identify each file by its contents, so nothing can end up in the wrong place.</div>
+    <div class="hint" id="upHint">Export from FareHarbor as <b>Detailed</b>, all columns: <b>bookings</b>, <b>sales</b>, and optionally <b>customers</b>. Drop them here in any order — files are identified by their contents.</div>
+    <div id="exportGuide" style="font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.8;color:var(--paint-2);background:var(--asphalt);border:1px solid var(--kerb);border-left:2px solid var(--lane);border-radius:var(--r);padding:11px 14px;margin-bottom:14px;"></div>
     <label class="drop" id="dropAll">
       <input type="file" accept=".csv" id="fileAll" hidden multiple/>
       <span id="labAll"><b>Drop the CSVs here</b><small>Any order · 2 or 3 files</small></span>
@@ -664,7 +665,23 @@ qEl.addEventListener('input', () => { qEl.style.height='auto'; qEl.style.height 
 document.addEventListener('click', e => { if (e.target.classList.contains('chip')) ask(e.target.textContent); });
 
 let pickedFiles = [];
-$('upBtn').onclick = () => $('sheetbg').classList.add('open');
+$('upBtn').onclick = async () => {
+  $('sheetbg').classList.add('open');
+  const g = $('exportGuide');
+  g.textContent = '…';
+  try{
+    const s = await (await fetch('/api/status')).json();
+    if (s.loaded && s.export_from){
+      const fmt = (iso) => { const [y,m,d] = iso.split('-'); return d + '/' + m + '/' + y; };
+      g.innerHTML =
+        'data through <b style="color:var(--paint)">' + fmt(s.bookings_to) + '</b><br>' +
+        'export all three: <b style="color:var(--lane)">' + fmt(s.export_from) + '</b> → <b style="color:var(--lane)">' + fmt(s.today) + '</b><br>' +
+        '<span style="color:var(--paint-3)">the one-week overlap is intentional — it catches late cancellations, and duplicates are merged away</span>';
+    } else {
+      g.innerHTML = 'No data yet — first upload should cover <b style="color:var(--lane)">01/01/2023 → today</b>.';
+    }
+  }catch(_){ g.textContent = ''; }
+};
 $('cancelUp').onclick = () => $('sheetbg').classList.remove('open');
 $('sheetbg').onclick = e => { if (e.target === $('sheetbg')) $('sheetbg').classList.remove('open'); };
 $('fileAll').onchange = async () => {

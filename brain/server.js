@@ -335,7 +335,24 @@ app.get('/api/status', requireAuth, (req, res) => {
       fleetOk = true;
     } catch (_) {}
     db.close();
-    res.json({ loaded: true, bookings: b.n, bookings_to: b.hi, fleet: fleetOk });
+
+    // Recommended export window: from ONE WEEK BEFORE the last data day (the
+    // overlap catches late changes to recent bookings — cancellations,
+    // payments) through today. Merge-mode dedupes the overlap.
+    let exportFrom = null;
+    if (b.hi) {
+      const d = new Date(b.hi);
+      d.setDate(d.getDate() - 7);
+      exportFrom = d.toISOString().slice(0, 10);
+    }
+    res.json({
+      loaded: true,
+      bookings: b.n,
+      bookings_to: b.hi ? String(b.hi).slice(0, 10) : null,
+      export_from: exportFrom,
+      today: new Date().toISOString().slice(0, 10),
+      fleet: fleetOk,
+    });
   } catch (e) {
     res.json({ loaded: false, error: e.message });
   }
@@ -362,10 +379,6 @@ function validateReport(text, kind) {
   // Detailed exports have a Booking ID / txn ID column; Summary exports don't.
   if (kind === 'bookings' && !text.includes('Booking ID')) {
     return 'bookings: no Booking ID column — did you export Summary instead of Detailed?';
-  }
-  const years = text.match(/20\d{2}/g) || [];
-  if (!years.includes('2023')) {
-    return `${kind}: no 2023 dates found — check the date range starts 01/01/2023`;
   }
   return null;
 }
