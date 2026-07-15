@@ -562,7 +562,11 @@ async function main() {
 
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
-      // Same tour still present under a different (reissued) ID? Not a cancel.
+      // Same tour still present under a different (reissued) ID? Not a cancel —
+      // just clean up the stale old-ID row. The guide is NOT carried over: on
+      // this project guides live in FareHarbor's crew note, so the reissued row
+      // already reflects FareHarbor's current assignment. Copying the old guide
+      // could wrongly override an assignment FareHarbor actually cleared.
       if (seenSlots.has(slotKey(row.start_date, row.start_time))) {
         db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
         console.log(`↻ Superseded (ID reissued), not cancelled: ${row.start_date} ${row.start_time} ${row.feed_id}`);
