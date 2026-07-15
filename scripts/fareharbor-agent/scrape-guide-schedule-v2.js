@@ -544,6 +544,16 @@ async function main() {
     // Deletion pass: any future tour slot in the DB that is NOT in the calendar
     // anymore has been cancelled/closed in FareHarbor. Delete + notify guide.
     const seenIds = new Set(all.map(a => a.availability_id));
+    // FareHarbor reissues an availability's internal ID when a private tour is
+    // edited/reassigned, so "this ID vanished from the feed" does NOT mean the
+    // tour was cancelled — the SAME slot often reappears under a fresh ID. Only
+    // treat a slot as cancelled if no slot with the same feed + date + time
+    // exists in this run. (This is what caused ~9 phantom A3P "cancelled" emails:
+    // the whole private-tour ID block was reissued in one sync.)
+    const slotKey = (d, t) => `${d}|${String(t || '').replace('.', ':')}`;
+    // Records carry start_at, not start_time — derive it the same way the write
+    // does (hhmm), so the key matches the stored row's time.
+    const seenSlots = new Set(all.map(a => slotKey(a.start_date, hhmm(a.start_at))));
     const lastSyncedDate = all.map(a => a.start_date).sort().pop() || todayStr;
     const dbFuture = db.prepare(`
       SELECT * FROM tour_availabilities
@@ -552,6 +562,12 @@ async function main() {
 
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
+      // Same tour still present under a different (reissued) ID? Not a cancel.
+      if (seenSlots.has(slotKey(row.start_date, row.start_time))) {
+        db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
+        console.log(`↻ Superseded (ID reissued), not cancelled: ${row.start_date} ${row.start_time} ${row.feed_id}`);
+        continue;
+      }
       console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
       logTourChange(db, { availability_id: row.availability_id, feed_id: row.feed_id, start_date: row.start_date, field: 'status', old_value: 'active', new_value: 'cancelled', source: 'v2', raw_data: JSON.stringify(row).substring(0, 4000) });
 

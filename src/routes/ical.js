@@ -462,7 +462,14 @@ function syncFeedToDB(feed, events) {
         WHERE feed_id=? AND availability_id NOT IN (${placeholders})
         AND booking_count > 0
         AND start_at > datetime('now')`).all(feed.id, ...currentIds);
+      // FareHarbor reissues availability IDs when a private tour is edited, so a
+      // missing ID isn't a cancellation if the same feed+date+time is still in
+      // the feed under a new ID. Guard against that (see the A3P phantom cancels).
+      // Normalize time — iCal stores "10:15", the scraper stores "10.15".
+      const slotKey = (d, t) => `${d}|${String(t || '').replace('.', ':')}`;
+      const seenSlots = new Set(events.map(e => slotKey(e.start_date, e.start_time)));
       toDelete.forEach(row => {
+        if (seenSlots.has(slotKey(row.start_date, row.start_time))) return; // superseded, not cancelled
         if (!row.guide) return;
         const allMembers = db().prepare('SELECT id, name, email FROM team_members WHERE active=1').all();
         const member = allMembers.find(m => guideMatches(row.guide, m.name));
