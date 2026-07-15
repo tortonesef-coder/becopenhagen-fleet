@@ -676,7 +676,9 @@ $('upBtn').onclick = async () => {
   const g = $('exportGuide');
   g.textContent = '…';
   try{
-    const s = await (await fetch('/api/status')).json();
+    const r = await fetch('/api/status');
+    if (r.status === 401){ location.reload(); return; }
+    const s = await r.json();
     if (s.loaded && s.export_from){
       const fmt = (iso) => { const [y,m,d] = iso.split('-'); return d + '/' + m + '/' + y; };
       g.innerHTML =
@@ -709,6 +711,7 @@ $('doUp').onclick = async () => {
   try{
     const r = await fetch('/api/upload',{ method:'POST', headers:{'content-type':'application/json'},
       body: JSON.stringify({ files: pickedFiles.map(f => ({ name: f.name, text: f.text })) }) });
+    if (r.status === 401){ location.reload(); return; }
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Load failed');
     m.className = 'upmsg ok';

@@ -5,3 +5,4 @@ uploads/
 briefings.db
 analyst.log
 *.bak
+sessions/

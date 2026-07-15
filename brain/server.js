@@ -18,6 +18,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const express = require('express');
 const session = require('express-session');
+const FileStore = require('session-file-store')(session);
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -38,8 +39,13 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '60mb' }));
+// Sessions are stored on disk, not in memory — otherwise every pm2 restart
+// logs everyone out (and the resulting 401s masquerade as other bugs).
+// NOTE: BRAIN_SESSION_SECRET must be set in .env; without it, a random
+// secret per boot would invalidate all cookies on restart anyway.
 app.use(
   session({
+    store: new FileStore({ path: path.join(__dirname, 'sessions'), ttl: 60 * 60 * 24 * 30, logFn: () => {} }),
     secret: process.env.BRAIN_SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
     resave: false,
     saveUninitialized: false,
