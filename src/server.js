@@ -118,6 +118,7 @@ require('./tour-reminders').startReminders();
 
 // Start log retention cleanup (120 days, runs daily)
 require('./log-retention').startLogRetention();
+require('./scraper-heartbeat').startHeartbeat();
 
 app.listen(PORT, () => {
   console.log(`BC Fleet running on port ${PORT}`);

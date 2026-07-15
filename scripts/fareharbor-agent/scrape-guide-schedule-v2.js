@@ -629,6 +629,15 @@ async function main() {
   } finally {
     await browser.close();
   }
+
+  // Heartbeat: record a CLEAN completion. A crash exits via the .catch below
+  // before reaching here, so this timestamp only advances on a full successful
+  // run — which is exactly what the staleness alert checks.
+  try {
+    getDb().prepare(`INSERT INTO app_settings (key, value) VALUES ('scraper_last_success', datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value=datetime('now')`).run();
+    console.log('✓ Heartbeat recorded (scraper_last_success).');
+  } catch (e) { console.error('Could not record heartbeat:', e.message); }
 }
 
 main().catch(e => { console.error('Fatal:', e.message); process.exit(1); });
