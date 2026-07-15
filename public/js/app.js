@@ -2188,9 +2188,10 @@ async function renderOpsTab() {
   if (window._opsTab === 'today') await renderTodayBoard(el);
   else if (window._opsTab === 'actions') renderAction(el);
   else if (window._opsTab === 'tours') {
-    // Operations shows only the admin's own tours (as a guide)
+    // Operations shows only the admin's own tours (as a guide). Look 120 days
+    // ahead — the default 30-day window was hiding an assigned 31 Aug A3P.
     const name = state.actor?.name;
-    const all = await api('/api/ical/tours');
+    const all = await api('/api/ical/tours?days=120');
     const mine = all.filter(t => t.guide && guideMatches(t.guide, name));
     renderToursList(el, mine, true);
   }
@@ -3450,7 +3451,10 @@ async function renderTours(c) {
   const role = state.actor?.role;
   const name = state.actor?.name;
   const isGuide = role === 'guide';
-  const tours = await api('/api/ical/tours' + (isGuide ? `?guide=${encodeURIComponent(name)}` : ''));
+  // Look far enough ahead to catch private tours booked weeks out — a guide
+  // assigned an A3P six weeks from now needs to see it. The default 30-day
+  // window was hiding a real, assigned 31 Aug A3P (47 days out).
+  const tours = await api('/api/ical/tours?days=120' + (isGuide ? `&guide=${encodeURIComponent(name)}` : ''));
   renderToursList(c, tours, isGuide);
 }
 
