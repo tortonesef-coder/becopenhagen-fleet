@@ -262,7 +262,7 @@ function extractGuideFromResources(av, activeGuideNames, guideResourceIds) {
   return matches;
 }
 
-function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId) {
+function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, bikeResourceTypes) {
   const out = [];
   const weeks = calendarJson?.calendar?.weeks || [];
   for (const week of weeks) {
@@ -314,8 +314,18 @@ function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds,
         // know that. Guide resources and the shared Electric Cargo Bike prop are
         // excluded, and any fractional (prorated/shared) value is skipped rather
         // than guessed at.
-        const { bikesNeeded, total: totalBikes } =
-          extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at, bikeResourceTypes);
+        // Bike counts come from FareHarbor resources. Wrap defensively: a fault
+        // in bike parsing must NEVER take down the tour sync — the schedule is
+        // critical, bike counts are secondary. (A missing-variable bug here once
+        // crashed the July fetch before it ever reached August, freezing every
+        // August tour. Never again — degrade to zero bikes, keep the tour.)
+        let bikesNeeded = {}, totalBikes = 0;
+        try {
+          ({ bikesNeeded, total: totalBikes } =
+            extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at, bikeResourceTypes));
+        } catch (e) {
+          console.log(`  WARNING: bike extraction failed for ${TOUR_ITEMS[itemPk].feed_id} ${day.at} — keeping the tour, zero bikes (${e.message})`);
+        }
         const resourceGuides = extractGuideFromResources(av, activeGuideNames, guideResourceIds);
 
         out.push({
@@ -370,15 +380,30 @@ async function main() {
 
     let all = [];
     for (const [y, m] of months) {
-      console.log(`Fetching calendar ${y}-${String(m).padStart(2, '0')}...`);
-      const jsonResponses = await fetchMonth(page, y, m);
-      let monthCount = 0;
-      for (const json of jsonResponses) {
-        const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId);
-        monthCount += avs.length;
-        all = all.concat(avs);
+      // Isolate each month: a failure fetching/parsing one month must not abort
+      // the others (an August-blocking crash is how we lost every August tour).
+      try {
+        console.log(`Fetching calendar ${y}-${String(m).padStart(2, '0')}...`);
+        const jsonResponses = await fetchMonth(page, y, m);
+        let monthCount = 0;
+        for (const json of jsonResponses) {
+          const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, bikeResourceTypes);
+          monthCount += avs.length;
+          all = all.concat(avs);
+        }
+        console.log(`  ${monthCount} tour availabilities found (before dedup)`);
+      } catch (e) {
+        console.error(`  ERROR fetching ${y}-${String(m).padStart(2,'0')}: ${e.message} — continuing with other months`);
       }
-      console.log(`  ${monthCount} tour availabilities found (before dedup)`);
+    }
+
+    // SAFETY: if a whole month errored out and returned nothing, do NOT let the
+    // cancellation sweep below interpret "not seen this run" as cancellations
+    // for that month. `all` must have real data before we trust it.
+    if (all.length === 0) {
+      console.error('No availabilities fetched at all — skipping cancellation sweep to avoid mass false cancels.');
+      await browser.close();
+      return;
     }
 
     // Dedupe (overlapping weeks between months)
