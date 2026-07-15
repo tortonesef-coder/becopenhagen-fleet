@@ -62,15 +62,58 @@ function resolveGuideName(crewMember) {
 // endpoint always returns full names, so we resolve guide-resource IDs and
 // the "Guided Tour Bikes" resource ID here, then use ID matching (always
 // present, even on abbreviated objects) everywhere else.
+// Map a FareHarbor resource NAME to one of our bike type codes, using the fleet's
+// own bike_types.fareharbor_resource values (e.g. "Christiania Cargo Bikes" -> CC).
+// Longest/most-specific name first, so "Adult City Bikes (Small)" isn't swallowed
+// by "Adult's Bikes". Falls back to keyword rules for names we don't have a type
+// row for, so a new FareHarbor resource still lands somewhere sensible.
+function bikeTypeForResourceName(name, typeRows) {
+  const norm = (s) => String(s || '').toLowerCase()
+    .replace(/['’]/g, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  const n = norm(name);
+  if (!n) return null;
+
+  let best = null, bestWords = 0;
+  for (const t of typeRows) {
+    const words = norm(t.fareharbor_resource).split(' ')
+      .filter(w => w && !['bike', 'bikes', 'with'].includes(w));
+    if (!words.length) continue;
+    if (!words.every(w => n.includes(w))) continue;
+    if (words.length > bestWords) { best = t.id; bestWords = words.length; }
+  }
+  if (best) return best;
+
+  if (/guided tour bike/.test(n)) return 'GT';
+  if (/electric|e-?bike/.test(n)) return 'E';
+  if (/cargo|christiania/.test(n)) return 'CC';
+  if (/touring/.test(n)) return 'TB';
+  if (/mountain/.test(n)) return 'MB';
+  if (/toddler/.test(n)) return 'AT';
+  if (/child.*seat|\+.*child/.test(n)) return 'AC';
+  if (/kid|child/.test(n)) return 'B';
+  if (/small/.test(n)) return 'SA';
+  if (/bike|cykel/.test(n)) return 'A';
+  return null; // not a bike resource at all
+}
+
 async function fetchResourceLookup(page, activeGuideNames) {
   const guideResourceIds = new Map(); // resourcePk -> guide name
+  const bikeResourceTypes = new Map(); // resourcePk -> bike type code (A, GT, TB, CC, ...)
   let guidedTourBikesId = null;
   let electricCargoBikeId = null; // single shared prop for the Food Tour — not a per-customer bike, always excluded from counts
+
+  // The fleet's own type names, so the mapping follows the fleet, not a hardcoded list
+  let typeRows = [];
+  try {
+    typeRows = getDb().prepare(
+      `SELECT id, fareharbor_resource FROM bike_types WHERE fareharbor_resource IS NOT NULL AND fareharbor_resource != ''`
+    ).all();
+  } catch {}
 
   try {
     const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/resources/?include-archived=yes`;
     const resp = await page.request.get(url, { timeout: 30000 });
-    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, guidedTourBikesId, electricCargoBikeId }; }
+    if (!resp.ok()) { console.log('  Could not fetch resource list:', resp.status()); return { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId }; }
     const data = await resp.json();
     const resources = Array.isArray(data) ? data : (data.objects || data.resources || []);
     for (const r of resources) {
@@ -80,20 +123,24 @@ async function fetchResourceLookup(page, activeGuideNames) {
       const matchedGuide = activeGuideNames.find(gn => guideMatches(baseName, gn));
       if (matchedGuide) {
         guideResourceIds.set(String(pk), matchedGuide);
+        continue; // a guide is never a bike
       }
       if (/^guided tour bikes$/i.test(baseName)) {
         guidedTourBikesId = String(pk);
       }
       if (/^electric cargo bike$/i.test(baseName)) {
         electricCargoBikeId = String(pk);
+        continue; // shared prop, never counted as a bike
       }
+      const cat = bikeTypeForResourceName(baseName, typeRows);
+      if (cat) bikeResourceTypes.set(String(pk), cat);
     }
-    console.log(`  Resource lookup: ${guideResourceIds.size} guide resources, guided tour bikes id=${guidedTourBikesId || 'not found'}, electric cargo bike id=${electricCargoBikeId || 'not found'}`);
+    console.log(`  Resource lookup: ${guideResourceIds.size} guides, ${bikeResourceTypes.size} bike resources, guided tour bikes id=${guidedTourBikesId || 'not found'}, electric cargo bike id=${electricCargoBikeId || 'not found'}`);
   } catch (e) {
     console.log('  Resource lookup fetch failed:', e.message);
   }
 
-  return { guideResourceIds, guidedTourBikesId, electricCargoBikeId };
+  return { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId };
 }
 
 async function login(browser) {
@@ -118,18 +165,23 @@ async function login(browser) {
 }
 
 // All item IDs from the discovered API URL (tours + rentals; harmless to request all)
-const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
+const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,741878,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
 
 // Fetch one calendar month by calling the internal API directly (authenticated
 // via the logged-in page's cookies). Deterministic — no response interception.
 async function fetchMonth(page, year, month) {
   const results = [];
+  // A month spans up to 6 week-rows, but most use only 4-5. Requesting a
+  // week-row past the end of the month returns HTTP 400 — that's "no such week",
+  // not a failure. So a 400 just means we've run past the month's end: stop,
+  // don't retry, don't log it as an error. Only non-400 failures are worth noise.
   for (let week = 1; week <= 6; week++) {
     const url = `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/items/${ALL_ITEM_IDS}/calendar/${year}/${String(month).padStart(2, '0')}/?allow_grouped=yes&include_resource_use_summaries=yes&path=2&week_number=${week}`;
-    let ok = false;
-    for (let attempt = 1; attempt <= 2 && !ok; attempt++) {
+    let ok = false, past_end = false;
+    for (let attempt = 1; attempt <= 2 && !ok && !past_end; attempt++) {
       try {
         const resp = await page.request.get(url, { timeout: 60000 });
+        if (resp.status() === 400) { past_end = true; break; } // ran past month end — expected
         if (!resp.ok()) { console.log(`  week ${week} attempt ${attempt}: HTTP ${resp.status()}`); continue; }
         const json = await resp.json();
         results.push(json);
@@ -138,69 +190,51 @@ async function fetchMonth(page, year, month) {
         console.log(`  week ${week} attempt ${attempt} failed: ${e.message.substring(0, 60)}`);
       }
     }
+    if (past_end) break; // no later week-rows exist either
   }
   if (results.length === 0) throw new Error(`No calendar data for ${year}-${month}`);
-  console.log(`  (${results.length}/6 week responses fetched)`);
+  console.log(`  (${results.length} week-rows fetched)`);
   return results;
-}
-
-// Map a resource to a bike category. Prefers the known resource ID (reliable,
-// unaffected by name abbreviation) over name-text matching.
-function categorizeBikeResource(name, resourcePk, guidedTourBikesId) {
-  if (guidedTourBikesId && resourcePk === guidedTourBikesId) return 'GT';
-  const n = (name || '').toLowerCase();
-  if (/guided tour bike/.test(n)) return 'GT';
-  if (/electric|e-bike/.test(n)) return 'E';
-  if (/toddler/.test(n)) return 'AT';
-  if (/child.*seat|\+.*child/.test(n)) return 'AC';
-  if (/kid|child/.test(n)) return 'B';
-  return 'A';
 }
 
 // Extract real bike counts from resource_use_summaries, excluding
 // guide-blocking resources. Guide resources are identified primarily by
 // resource ID (always present, even when the object is abbreviated) with
 // name-text matching as a fallback for guides not yet in the ID lookup.
-function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, feedIdForAlert, startDateForAlert) {
-  const bikesNeeded = { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 };
+function extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, feedIdForAlert, startDateForAlert, bikeResourceTypes) {
+  const bikesNeeded = {};
   let total = 0;
   for (const entry of av.resource_use_summaries || []) {
     const rawName = entry.resource?.name || '';
     const baseName = rawName.replace(/\s*\(.*\)\s*$/, '').trim();
+    // FareHarbor sometimes sends an abbreviated resource object with no `pk` and
+    // no name — fall back to the id embedded in the URI, which is always there.
     const resourcePk = entry.resource?.pk ? String(entry.resource.pk) : (entry.resource?.uri || '').match(/\/resources\/(\d+)\//)?.[1];
 
     const isGuideResource = (resourcePk && guideResourceIds.has(resourcePk))
       || (baseName && activeGuideNames.some(gn => guideMatches(baseName, gn)));
     if (isGuideResource) continue;
 
-    // We've only ever confirmed reliable per-booking counts from the
-    // dedicated "Guided Tour Bikes" resource. Every other resource type
-    // has shown unreliable behavior in practice — the Electric Cargo Bike
-    // reports fractional prorated values (expected, single shared prop),
-    // and the generic "Adult Bike" pool has been observed reporting its
-    // total FLEET capacity rather than a per-booking count on at least one
-    // private tour. Rather than guess at each resource's semantics, only
-    // ever trust the one resource we've actually validated; everything
-    // else is ignored (shows as "own bikes" rather than a wrong number).
-    const isGuidedTourBikes = guidedTourBikesId && resourcePk === guidedTourBikesId;
-    if (!isGuidedTourBikes) continue;
+    // The Electric Cargo Bike is a single shared prop on the food tour, not a
+    // per-customer bike — it reports fractional prorated values. Never count it.
+    if (electricCargoBikeId && resourcePk === electricCargoBikeId) continue;
 
     const count = entry.total_use_count || 0;
     if (count <= 0) continue;
 
+    // Anything fractional is a shared/prorated resource, not a bike allocation.
     if (!Number.isInteger(count)) {
-      console.log(`  WARNING: non-integer Guided Tour Bikes count (${count}) — skipping`);
-      createNotification(
-        'bike_data_anomaly',
-        `Unexpected fractional bike count — ${feedIdForAlert || ''} on ${startDateForAlert || ''}`,
-        `Guided Tour Bikes reported ${count} — expected a whole number. Skipped from bike total; worth checking in FareHarbor.`,
-        av.pk + '-' + resourcePk
-      );
+      console.log(`  WARNING: non-integer count (${count}) for "${baseName || resourcePk}" — skipping`);
       continue;
     }
 
-    const cat = categorizeBikeResource(rawName, resourcePk, guidedTourBikesId);
-    bikesNeeded[cat] += count;
+    // Resource ID is authoritative (survives name abbreviation); fall back to the
+    // name for resources not in the lookup.
+    const cat = (resourcePk && bikeResourceTypes.get(resourcePk))
+      || bikeTypeForResourceName(baseName, []);
+    if (!cat) continue; // not a bike resource
+
+    bikesNeeded[cat] = (bikesNeeded[cat] || 0) + count;
     total += count;
   }
   return { bikesNeeded, total };
@@ -234,7 +268,7 @@ function extractGuideFromResources(av, activeGuideNames, guideResourceIds) {
   return matches;
 }
 
-function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId) {
+function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, bikeResourceTypes) {
   const out = [];
   const weeks = calendarJson?.calendar?.weeks || [];
   for (const week of weeks) {
@@ -278,10 +312,26 @@ function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds,
         // silently undercounting group tours by skipping those fractional
         // entries, leave group tours on the existing (working) iCal
         // text-based count entirely.
-        const isPrivateTour = TOUR_ITEMS[itemPk].feed_id.endsWith('P');
-        const { bikesNeeded, total: totalBikes } = isPrivateTour
-          ? extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at)
-          : { bikesNeeded: { A: 0, E: 0, B: 0, AC: 0, AT: 0, GT: 0 }, total: 0 };
+        // Bike counts come from FareHarbor RESOURCES for every tour now, not
+        // just private ones. Resources record the bike ACTUALLY assigned — a
+        // tour may use adult bikes, guided bikes or touring bikes, and a rental
+        // "adult bike" may really be a child-seat bike with the seat off. The
+        // booking text only says what the customer ordered, so it could never
+        // know that. Guide resources and the shared Electric Cargo Bike prop are
+        // excluded, and any fractional (prorated/shared) value is skipped rather
+        // than guessed at.
+        // Bike counts come from FareHarbor resources. Wrap defensively: a fault
+        // in bike parsing must NEVER take down the tour sync — the schedule is
+        // critical, bike counts are secondary. (A missing-variable bug here once
+        // crashed the July fetch before it ever reached August, freezing every
+        // August tour. Never again — degrade to zero bikes, keep the tour.)
+        let bikesNeeded = {}, totalBikes = 0;
+        try {
+          ({ bikesNeeded, total: totalBikes } =
+            extractBikesFromResources(av, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, TOUR_ITEMS[itemPk].feed_id, day.at, bikeResourceTypes));
+        } catch (e) {
+          console.log(`  WARNING: bike extraction failed for ${TOUR_ITEMS[itemPk].feed_id} ${day.at} — keeping the tour, zero bikes (${e.message})`);
+        }
         const resourceGuides = extractGuideFromResources(av, activeGuideNames, guideResourceIds);
 
         out.push({
@@ -290,7 +340,13 @@ function extractAvailabilities(calendarJson, activeGuideNames, guideResourceIds,
           start_at: av.utc_start_at ? new Date(av.utc_start_at).toISOString() : av.start_at,
           end_at: av.utc_end_at ? new Date(av.utc_end_at).toISOString() : av.end_at,
           start_date: day.at,
-          booking_count: av.booking_count ?? 0,
+          // FareHarbor's `booking_count` = number of RESERVATIONS (1 for an
+          // 11-person group). `customer_count` = number of PEOPLE. Pax is what
+          // the app shows and what prep depends on, and it's independent of bikes
+          // (11 people who bring their own bikes are still an 11-pax tour). So the
+          // count the app reads is PAX. Reservation count kept separately.
+          booking_count: av.customer_count ?? av.booking_count ?? 0,
+          reservation_count: av.booking_count ?? 0,
           customer_count: av.customer_count ?? 0,
           bikes_needed: bikesNeeded,
           total_bikes: totalBikes,
@@ -325,7 +381,7 @@ async function main() {
     const page = await login(browser);
 
     console.log('Fetching resource lookup (guide IDs, guided tour bikes ID)...');
-    const { guideResourceIds, guidedTourBikesId, electricCargoBikeId } = await fetchResourceLookup(page, activeGuideNames);
+    const { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId } = await fetchResourceLookup(page, activeGuideNames);
 
     // Current month + next month covers 30+ days ahead
     const now = new Date();
@@ -336,15 +392,30 @@ async function main() {
 
     let all = [];
     for (const [y, m] of months) {
-      console.log(`Fetching calendar ${y}-${String(m).padStart(2, '0')}...`);
-      const jsonResponses = await fetchMonth(page, y, m);
-      let monthCount = 0;
-      for (const json of jsonResponses) {
-        const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId);
-        monthCount += avs.length;
-        all = all.concat(avs);
+      // Isolate each month: a failure fetching/parsing one month must not abort
+      // the others (an August-blocking crash is how we lost every August tour).
+      try {
+        console.log(`Fetching calendar ${y}-${String(m).padStart(2, '0')}...`);
+        const jsonResponses = await fetchMonth(page, y, m);
+        let monthCount = 0;
+        for (const json of jsonResponses) {
+          const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, bikeResourceTypes);
+          monthCount += avs.length;
+          all = all.concat(avs);
+        }
+        console.log(`  ${monthCount} tour availabilities found (before dedup)`);
+      } catch (e) {
+        console.error(`  ERROR fetching ${y}-${String(m).padStart(2,'0')}: ${e.message} — continuing with other months`);
       }
-      console.log(`  ${monthCount} tour availabilities found (before dedup)`);
+    }
+
+    // SAFETY: if a whole month errored out and returned nothing, do NOT let the
+    // cancellation sweep below interpret "not seen this run" as cancellations
+    // for that month. `all` must have real data before we trust it.
+    if (all.length === 0) {
+      console.error('No availabilities fetched at all — skipping cancellation sweep to avoid mass false cancels.');
+      await browser.close();
+      return;
     }
 
     // Dedupe (overlapping weeks between months)
@@ -355,6 +426,12 @@ async function main() {
     let upserted = 0;
     const assignmentDigest = new Map(); // member.id -> { member, items: [...] }
 
+    // One transaction for the whole write pass. Without this, each availability
+    // was its own write txn — dozens of separate lock grabs competing with the
+    // live app, which produced "database is locked". A single transaction is far
+    // faster and takes the write lock once, briefly.
+    db.exec('BEGIN IMMEDIATE');
+    try {
     for (const av of all) {
       if (av.start_date < todayStr) continue; // skip past
 
@@ -405,23 +482,16 @@ async function main() {
           start_at=excluded.start_at, end_at=excluded.end_at,
           start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
           booking_count=excluded.booking_count, last_synced=excluded.last_synced,
-          -- v2 owns GT (from FareHarbor resources); iCal owns the non-GT
-          -- categories (from summary text). Merge only GT here, preserving
-          -- iCal's keys, so the two sources stop erasing each other. Combined
-          -- total is v2's GT plus the existing non-GT counts. Atomic — no
-          -- read/write race with the 90s iCal process.
-          bikes_needed=CASE WHEN excluded.total_bikes > 0 THEN json_set(
-              json(COALESCE(bikes_needed,'{}')),
-              '$.GT', COALESCE(json_extract(excluded.bikes_needed,'$.GT'),0)
-            ) ELSE bikes_needed END,
-          total_bikes=CASE WHEN excluded.total_bikes > 0 THEN (
-              excluded.total_bikes
-              + COALESCE(json_extract(bikes_needed,'$.A'),0)
-              + COALESCE(json_extract(bikes_needed,'$.E'),0)
-              + COALESCE(json_extract(bikes_needed,'$.B'),0)
-              + COALESCE(json_extract(bikes_needed,'$.AC'),0)
-              + COALESCE(json_extract(bikes_needed,'$.AT'),0)
-            ) ELSE total_bikes END
+          -- OWNERSHIP: v2 now owns the bike counts for TOURS outright, because
+          -- they come from FareHarbor RESOURCES — the bike actually assigned,
+          -- across every type (adult, guided, touring, cargo…). That's strictly
+          -- better than iCal's text parse, which only knows what the customer
+          -- ordered. So replace the whole object rather than merging just GT.
+          -- (iCal still owns RENTAL bike counts; it skips tours — see ical.js.)
+          bikes_needed=CASE WHEN excluded.total_bikes > 0
+            THEN excluded.bikes_needed ELSE bikes_needed END,
+          total_bikes=CASE WHEN excluded.total_bikes > 0
+            THEN excluded.total_bikes ELSE total_bikes END
       `).run(av.availability_id, av.item.feed_id, av.item.label, 'tour',
              av.guide, av.start_at, av.end_at, av.start_date, startTime, endTime, av.booking_count,
              JSON.stringify(av.bikes_needed), av.total_bikes);
@@ -464,6 +534,11 @@ async function main() {
       console.log(`✓ ${av.start_date} ${startTime} ${av.item.feed_id} guide=${av.guide || 'unassigned'} bookings=${av.booking_count}`);
       upserted++;
     }
+      db.exec('COMMIT');
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw e;
+    }
 
     console.log(`\nDone. ${upserted} availabilities synced in one pass.`);
 
@@ -489,7 +564,7 @@ async function main() {
           <td style="padding:7px 14px 7px 0;color:#888;font-size:0.88rem">${dateLabel}</td>
           <td style="padding:7px 14px 7px 0;font-weight:700;font-size:0.9rem">${i.feed_id}</td>
           <td style="padding:7px 14px 7px 0;font-size:0.88rem">${i.startTime}${i.endTime ? ' – ' + i.endTime : ''}</td>
-          <td style="padding:7px 14px 7px 0;color:#888;font-size:0.82rem">${i.booking_count} booking${i.booking_count !== 1 ? 's' : ''}</td>
+          <td style="padding:7px 14px 7px 0;color:#888;font-size:0.82rem">${i.booking_count} guest${i.booking_count !== 1 ? 's' : ''}</td>
           <td style="padding:7px 0">${tag}</td>
         </tr>`;
       }).join('');
@@ -517,14 +592,46 @@ async function main() {
     // Deletion pass: any future tour slot in the DB that is NOT in the calendar
     // anymore has been cancelled/closed in FareHarbor. Delete + notify guide.
     const seenIds = new Set(all.map(a => a.availability_id));
+    // FareHarbor reissues an availability's internal ID when a private tour is
+    // edited/reassigned, so "this ID vanished from the feed" does NOT mean the
+    // tour was cancelled — the SAME slot often reappears under a fresh ID. Only
+    // treat a slot as cancelled if no slot with the same feed + date + time
+    // exists in this run. (This is what caused ~9 phantom A3P "cancelled" emails:
+    // the whole private-tour ID block was reissued in one sync.)
+    const slotKey = (d, t) => `${d}|${String(t || '').replace('.', ':')}`;
+    // Records carry start_at, not start_time — derive it the same way the write
+    // does (hhmm), so the key matches the stored row's time.
+    const seenSlots = new Set(all.map(a => slotKey(a.start_date, hhmm(a.start_at))));
     const lastSyncedDate = all.map(a => a.start_date).sort().pop() || todayStr;
-    const dbFuture = db.prepare(`
+
+    // SAFETY: only ever cancel tours of a feed type we ACTUALLY FETCHED this run.
+    // If a whole tour type is missing from the fetch — e.g. its item ID wasn't in
+    // ALL_ITEM_IDS (H3 was missing and every booked H3 got deleted), or that item
+    // errored — its DB rows must be left ALONE, not swept as "cancelled". Without
+    // this, one missing item ID silently wipes an entire product's bookings.
+    const fetchedFeeds = new Set(all.map(a => a.item?.feed_id).filter(Boolean));
+    const dbFutureAll = db.prepare(`
       SELECT * FROM tour_availabilities
       WHERE feed_type='tour' AND start_date > ? AND start_date <= ?
     `).all(todayStr, lastSyncedDate);
+    const dbFuture = dbFutureAll.filter(row => {
+      if (fetchedFeeds.has(row.feed_id)) return true;
+      console.log(`  ⚠ skipping cancel-check for ${row.feed_id} ${row.start_date} ${row.start_time} — that feed type wasn't fetched this run (not treating as cancelled)`);
+      return false;
+    });
 
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
+      // Same tour still present under a different (reissued) ID? Not a cancel —
+      // just clean up the stale old-ID row. The guide is NOT carried over: on
+      // this project guides live in FareHarbor's crew note, so the reissued row
+      // already reflects FareHarbor's current assignment. Copying the old guide
+      // could wrongly override an assignment FareHarbor actually cleared.
+      if (seenSlots.has(slotKey(row.start_date, row.start_time))) {
+        db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
+        console.log(`↻ Superseded (ID reissued), not cancelled: ${row.start_date} ${row.start_time} ${row.feed_id}`);
+        continue;
+      }
       console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
       logTourChange(db, { availability_id: row.availability_id, feed_id: row.feed_id, start_date: row.start_date, field: 'status', old_value: 'active', new_value: 'cancelled', source: 'v2', raw_data: JSON.stringify(row).substring(0, 4000) });
 
@@ -557,6 +664,15 @@ async function main() {
   } finally {
     await browser.close();
   }
+
+  // Heartbeat: record a CLEAN completion. A crash exits via the .catch below
+  // before reaching here, so this timestamp only advances on a full successful
+  // run — which is exactly what the staleness alert checks.
+  try {
+    getDb().prepare(`INSERT INTO app_settings (key, value) VALUES ('scraper_last_success', datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value=datetime('now')`).run();
+    console.log('✓ Heartbeat recorded (scraper_last_success).');
+  } catch (e) { console.error('Could not record heartbeat:', e.message); }
 }
 
 main().catch(e => { console.error('Fatal:', e.message); process.exit(1); });

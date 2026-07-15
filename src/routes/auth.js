@@ -6,10 +6,65 @@ const { sendPasswordResetEmail, sendVerificationCodeEmail } = require('../email'
 
 function db() { return getDb(); }
 
-// GET /auth/team — list team for the "who are you" screen (no passwords exposed)
+// The app's public base URL, used to build password reset / setup links in
+// emails. Single source of truth so it can't drift between the two send paths.
+// Canonical domain is app.becopenhagen.dk; override with APP_BASE_URL if needed.
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://app.becopenhagen.dk').replace(/\/+$/, '');
+
+// GET /auth/team — names only, for the Counter Mode "who did this?" grid.
+// Roles are NOT exposed: an unauthenticated caller has no business knowing who
+// is an admin, and the login screen no longer lists people at all.
 router.get('/team', (req, res) => {
-  const team = db().prepare('SELECT id, name, role, needs_password_setup FROM team_members WHERE active=1 ORDER BY role, name').all();
+  const team = db().prepare('SELECT id, name FROM team_members WHERE active=1 ORDER BY name').all();
   res.json(team);
+});
+
+// GET /auth/team-admin — full team incl. roles/capabilities. Admin only: the
+// public /auth/team deliberately hides roles, but the "View as" preview tool
+// needs them to reproduce another person's view.
+router.get('/team-admin', (req, res) => {
+  if (req.session?.actor_role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+  const team = db().prepare('SELECT id, name, role, is_guide, can_shop, view_mode FROM team_members WHERE active=1 ORDER BY name').all();
+  res.json(team);
+});
+
+// POST /auth/login-email — log in with email + password (the login screen).
+// Deliberately vague on failure: never reveal whether an email exists.
+router.post('/login-email', (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+  const member = db().prepare('SELECT * FROM team_members WHERE lower(email)=lower(?) AND active=1').get(String(email).trim());
+  const FAIL = { error: 'Incorrect email or password' };
+  if (!member) return res.status(401).json(FAIL);
+  if (member.needs_password_setup || !member.password_hash) {
+    return res.status(403).json({ error: 'No password set yet — use "Set up / forgot password" below.', needs_setup: true });
+  }
+  if (!verifyPassword(password, member.password_hash, member.password_salt)) return res.status(401).json(FAIL);
+
+  req.session.actor = member.id;
+  req.session.actor_name = member.name;
+  req.session.actor_role = member.role;
+  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role, is_guide: member.is_guide, can_shop: member.can_shop, view_mode: member.view_mode } });
+});
+
+// POST /auth/forgot-password-email — reset by email (no member picker).
+// Always reports success, so this can't be used to discover who has an account.
+router.post('/forgot-password-email', async (req, res) => {
+  const { email } = req.body;
+  const OK = { ok: true, message: 'If that email is on file, a reset link is on its way.' };
+  if (!email) return res.json(OK);
+
+  const member = db().prepare('SELECT * FROM team_members WHERE lower(email)=lower(?) AND active=1').get(String(email).trim());
+  if (!member || !member.email) return res.json(OK);
+
+  const token = generateToken();
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+  db().prepare('INSERT INTO password_resets (token, member_id, expires_at) VALUES (?,?,?)').run(token, member.id, expiresAt);
+
+  const resetUrl = `${APP_BASE_URL}/reset-password?token=${token}`;
+  await sendPasswordResetEmail(member.email, member.name, resetUrl).catch(e => console.error('Reset email failed:', e.message));
+  res.json(OK);
 });
 
 // POST /auth/login — step 1: check if password set, step 2: verify
@@ -34,7 +89,7 @@ router.post('/login', (req, res) => {
   req.session.actor = member.id;
   req.session.actor_name = member.name;
   req.session.actor_role = member.role;
-  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role } });
+  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role, is_guide: member.is_guide, can_shop: member.can_shop, view_mode: member.view_mode } });
 });
 
 // POST /auth/check-member — safe probe to see if an account needs first-time setup,
@@ -112,7 +167,7 @@ router.post('/set-password', (req, res) => {
   req.session.actor = member.id;
   req.session.actor_name = member.name;
   req.session.actor_role = member.role;
-  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role } });
+  res.json({ ok: true, actor: { id: member.id, name: member.name, role: member.role, is_guide: member.is_guide, can_shop: member.can_shop, view_mode: member.view_mode } });
 });
 
 // POST /auth/set-email — required before password reset can work
@@ -134,7 +189,7 @@ router.post('/forgot-password', async (req, res) => {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
   db().prepare('INSERT INTO password_resets (token, member_id, expires_at) VALUES (?,?,?)').run(token, member.id, expiresAt);
 
-  const resetUrl = `https://fleet.interestingtours.dk/reset-password?token=${token}`;
+  const resetUrl = `${APP_BASE_URL}/reset-password?token=${token}`;
   const result = await sendPasswordResetEmail(member.email, member.name, resetUrl);
 
   if (!result.ok) return res.status(500).json({ error: 'Could not send email' });

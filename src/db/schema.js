@@ -71,6 +71,11 @@ function getDb() {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     db = new DatabaseSync(DB_PATH);
     db.exec('PRAGMA journal_mode = WAL');
+    // Wait up to 5s for a competing write instead of failing instantly with
+    // "database is locked". The scraper (separate process) and the app write to
+    // the same file; WAL lets them coexist, but without a busy_timeout a write
+    // that lands mid-transaction aborts immediately. This makes it wait & retry.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON');
     initSchema();
   }
@@ -200,7 +205,9 @@ function initSchema() {
       password_hash TEXT,
       password_salt TEXT,
       needs_password_setup INTEGER DEFAULT 1,
-      is_guide INTEGER DEFAULT 0
+      is_guide INTEGER DEFAULT 0,
+      can_shop INTEGER DEFAULT 0,
+      view_mode TEXT
     );
 
     CREATE TABLE IF NOT EXISTS password_resets (
@@ -463,6 +470,32 @@ function initSchema() {
     // booking — mark them notified so the new webhook trigger doesn't retro-fire
     // a "first booking" email to guides for every existing booked tour.
     db.exec("UPDATE tour_availabilities SET first_booking_notified=1 WHERE booking_count >= 1");
+  }
+
+  const tmCaps = db.prepare("PRAGMA table_info(team_members)").all().map(c => c.name);
+  if (!tmCaps.includes('can_shop')) {
+    // CAPABILITIES (what a person DOES — can hold several):
+    //   is_guide  → guides tours          can_shop → works the shop floor
+    // Separate from `role` (what they're ALLOWED to do; server-enforced) and
+    // from `view_mode` (which hat they're wearing right now).
+    // Seeded to reproduce today's behaviour EXACTLY, so nothing changes on
+    // screen when this lands — only the tab logic's source of truth moves.
+    db.exec("ALTER TABLE team_members ADD COLUMN can_shop INTEGER DEFAULT 0");
+    db.exec("UPDATE team_members SET can_shop=1 WHERE role IN ('mechanic','admin')");
+  }
+  if (!tmCaps.includes('view_mode')) {
+    // Which view you're working in right now. NULL = derive from role/caps.
+    db.exec("ALTER TABLE team_members ADD COLUMN view_mode TEXT");
+  }
+
+  // Hassan is demoted from admin to staff: he runs the shop, fixes bikes and
+  // guides, but doesn't need admin. Only Fede and Søren remain admins. His guide
+  // hours/reviews are unaffected — those hang off is_guide, not the role. Guarded
+  // so it runs once (and won't fight a later manual role change).
+  const hassanDemoted = db.prepare("SELECT value FROM app_settings WHERE key='hassan_demoted'").get();
+  if (!hassanDemoted) {
+    db.exec("UPDATE team_members SET role='staff', can_shop=1, is_guide=1 WHERE id='hassan'");
+    db.exec("INSERT OR REPLACE INTO app_settings (key,value,updated_at) VALUES ('hassan_demoted', datetime('now'), datetime('now'))");
   }
 
   const emCols = db.prepare("PRAGMA table_info(emails_sent)").all().map(c => c.name);

@@ -1,0 +1,35 @@
+#!/bin/sh
+# Every commit must also update CLAUDE_CONTEXT.md — it's the project's living
+# memory, and a change that isn't logged there is a change future sessions
+# won't know about. (Convention enforced mechanically since 2026-07-15.)
+#
+# Trivial commits (deleting a one-off diagnostic, typo in a comment) can skip:
+#   SKIP_CONTEXT=1 git commit -m "..."
+
+[ -n "$SKIP_CONTEXT" ] && exit 0
+
+staged=$(git diff --cached --name-only)
+
+# Nothing staged (e.g. --allow-empty) — nothing to enforce.
+[ -z "$staged" ] && exit 0
+
+# If the ONLY staged changes are to docs/hooks themselves, no log entry needed.
+nontrivial=$(echo "$staged" | grep -v -E '^(CLAUDE_CONTEXT\.md|CLAUDE\.md|\.githooks/|README|dimitra-app-guide\.md)' || true)
+[ -z "$nontrivial" ] && exit 0
+
+if ! echo "$staged" | grep -q '^CLAUDE_CONTEXT\.md$'; then
+  echo ""
+  echo "✗ Commit blocked: CLAUDE_CONTEXT.md was not updated."
+  echo ""
+  echo "  This repo's convention: every change is logged in CLAUDE_CONTEXT.md,"
+  echo "  '## 8. Session Log', newest entry on top, dated, explaining WHAT"
+  echo "  changed and WHY. Add the entry, 'git add CLAUDE_CONTEXT.md', and"
+  echo "  commit again."
+  echo ""
+  echo "  Genuinely trivial commit? Skip once with:"
+  echo "    SKIP_CONTEXT=1 git commit ..."
+  echo ""
+  exit 1
+fi
+
+exit 0

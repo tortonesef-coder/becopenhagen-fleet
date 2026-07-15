@@ -36,6 +36,10 @@ app.use(session({
 const { execSync } = require('child_process');
 let APP_VERSION = 'dev';
 try { APP_VERSION = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch(e) {}
+// Ensure the repo's versioned hooks are active (git doesn't auto-trust hooks
+// from a clone). Enforces the CLAUDE_CONTEXT.md-on-every-commit convention for
+// anyone committing on this machine, incl. Claude Code sessions.
+try { execSync('git config core.hooksPath .githooks', { cwd: path.join(__dirname, '..') }); } catch(e) {}
 
 const indexHtml = require('fs').readFileSync(require('path').join(__dirname, '../public/index.html'), 'utf8');
 const indexHtmlVersioned = indexHtml.replace(/__VERSION__/g, APP_VERSION);
@@ -96,7 +100,12 @@ app.get('/session/me', (req, res) => {
     return res.json({ actor: null, shop_mode: true });
   }
   if (!req.session.actor) return res.json({ actor: null });
-  res.json({ actor: { id: req.session.actor, name: req.session.actor_name, role: req.session.actor_role }});
+  // Read the member fresh so the restored session carries CAPABILITIES too
+  // (can_shop / is_guide / view_mode). Without these the view switcher would
+  // disappear on every page refresh, and tabs would fall back to role-only.
+  const m = getDb().prepare('SELECT id, name, role, is_guide, can_shop, view_mode FROM team_members WHERE id=? AND active=1').get(req.session.actor);
+  if (!m) return res.json({ actor: null });
+  res.json({ actor: { id: m.id, name: m.name, role: m.role, is_guide: m.is_guide, can_shop: m.can_shop, view_mode: m.view_mode }});
 });
 
 app.get('*', (req, res) => {
@@ -113,6 +122,7 @@ require('./tour-reminders').startReminders();
 
 // Start log retention cleanup (120 days, runs daily)
 require('./log-retention').startLogRetention();
+require('./scraper-heartbeat').startHeartbeat();
 
 app.listen(PORT, () => {
   console.log(`BC Fleet running on port ${PORT}`);

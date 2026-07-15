@@ -60,17 +60,22 @@ function logPageView(tab) {
 }
 
 // ── Toast + Undo ──────────────────────────────────────────────────────────
-function toast(msg, type="") {
+function toast(msg, type="", opts = {}) {
   const el = document.getElementById("toast");
   if (!el) return;
   clearTimeout(toast._timer);
   const check = type.includes('success')
     ? '<svg class="toast-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>'
     : '';
-  el.innerHTML = check + `<span>${msg}</span>`;
+  const undoBtn = opts.undo ? '<button class="toast-undo-btn" id="toast-undo">Undo</button>' : '';
+  el.innerHTML = check + `<span>${msg}</span>` + undoBtn;
   el.className = "toast " + type;
   el.classList.remove("hidden");
-  toast._timer = setTimeout(dismissToast, 1800);
+  if (opts.undo) {
+    document.getElementById('toast-undo')?.addEventListener('click', () => { dismissToast(); triggerUndo(); });
+  }
+  // Give the user longer to reach an Undo button than a plain toast
+  toast._timer = setTimeout(dismissToast, opts.undo ? 6000 : 1800);
 }
 
 function dismissToast() {
@@ -172,43 +177,95 @@ async function initIdentity() {
 }
 
 async function showTeamPicker() {
-  // Rebuild the identity screen's markup from scratch, since Shop Mode's
-  // PIN screens replace #screen-identity's innerHTML entirely — the normal
-  // #identity-grid element may no longer exist in the DOM at this point.
+  // Login is email + password. We deliberately no longer list the team here:
+  // an unauthenticated visitor shouldn't see who works here or who is an admin.
   document.getElementById('screen-identity').innerHTML = `
     <div class="identity-wrap">
       <div class="bc-logo-wrap">
         <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
       </div>
-      <p class="identity-prompt">Who are you?</p>
-      <div class="identity-grid" id="identity-grid"></div>
+      <p class="identity-prompt">Sign in</p>
+      <div class="login-form">
+        <div class="form-group">
+          <input class="form-input" type="email" id="login-email" placeholder="Email" autocomplete="username" autocapitalize="none" spellcheck="false"/>
+        </div>
+        <div class="form-group">
+          <input class="form-input" type="password" id="login-password" placeholder="Password" autocomplete="current-password"/>
+        </div>
+        <div id="login-error" style="color:#e04040;font-size:0.85rem;min-height:1.1rem;margin-bottom:0.4rem"></div>
+        <button class="btn btn-primary btn-full" id="login-submit">Sign in</button>
+        <button class="btn-link" id="login-forgot" type="button">Set up / forgot password</button>
+      </div>
     </div>`;
 
-  const team = await api('/auth/team');
-  team.sort((a,b)=>a.name.localeCompare(b.name));
-  const n = team.length;
-  let cols = (n % 4 === 0) ? 4 : 3;
+  const submit = () => submitEmailLogin();
+  document.getElementById('login-submit').addEventListener('click', submit);
+  document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-password').focus(); });
+  document.getElementById('login-forgot').addEventListener('click', showForgotByEmail);
 
-  const grid = document.getElementById('identity-grid');
-  grid.style.setProperty('--id-cols', cols);
-  grid.innerHTML = team.map(m=>`
-    <button class="identity-btn role-${m.role}" data-id="${m.id}">
-      <span class="iname">${m.name}</span>
-      <span class="irole">${m.role}</span>
-    </button>`).join('');
-  grid.querySelectorAll('.identity-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>selectMember(btn.dataset.id));
-  });
-
-  // Shop mode entry point, visible to everyone on the identity screen
+  // Counter Mode entry point (shared device — no personal login)
   const wrap = document.querySelector('.identity-wrap');
   const shopBtn = document.createElement('button');
   shopBtn.id = 'shop-mode-entry-btn';
   shopBtn.className = 'shop-mode-entry';
-  shopBtn.innerHTML = '🏪 Shop Mode (shared device)';
+  shopBtn.innerHTML = '🏪 Counter Mode (shared device)';
   shopBtn.onclick = () => initShopMode();
   wrap.appendChild(shopBtn);
+}
+
+async function submitEmailLogin() {
+  const email = document.getElementById('login-email')?.value?.trim();
+  const password = document.getElementById('login-password')?.value;
+  const err = document.getElementById('login-error');
+  const btn = document.getElementById('login-submit');
+  if (err) err.textContent = '';
+  if (!email || !password) { if (err) err.textContent = 'Enter your email and password'; return; }
+
+  btn.disabled = true; btn.textContent = 'Signing in...';
+  try {
+    const data = await api('/auth/login-email', { method:'POST', body:{ email, password } });
+    state.actor = data.actor;
+    showMain();
+  } catch(e) {
+    if (err) err.textContent = e.message || 'Incorrect email or password';
+    const pw = document.getElementById('login-password');
+    if (pw) { pw.value = ''; pw.focus(); }
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+}
+
+function showForgotByEmail() {
+  const prefill = document.getElementById('login-email')?.value?.trim() || '';
+  openModal(`
+    <div class="modal-title">Set up / reset password</div>
+    <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">Enter your work email and we'll send you a link to set a new password.</p>
+    <div class="form-group">
+      <input class="form-input" type="email" id="forgot-email" placeholder="you@example.com" value="${prefill}" autocapitalize="none" spellcheck="false" autofocus/>
+    </div>
+    <div id="forgot-status" style="font-size:0.85rem;margin-bottom:0.75rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="forgot-send">Send link</button>
+    </div>
+  `);
+  document.getElementById('forgot-send').addEventListener('click', async () => {
+    const email = document.getElementById('forgot-email')?.value?.trim();
+    const status = document.getElementById('forgot-status');
+    const btn = document.getElementById('forgot-send');
+    if (!email) { if (status) { status.style.color = '#e04040'; status.textContent = 'Enter your email'; } return; }
+    btn.disabled = true; btn.textContent = 'Sending...';
+    try {
+      const data = await api('/auth/forgot-password-email', { method:'POST', body:{ email }});
+      if (status) { status.style.color = 'var(--text2)'; status.textContent = data.message || 'Check your inbox.'; }
+    } catch(e) {
+      if (status) { status.style.color = '#e04040'; status.textContent = e.message; }
+    } finally {
+      btn.disabled = false; btn.textContent = 'Send link';
+    }
+  });
 }
 
 async function selectMember(memberId) {
@@ -394,11 +451,11 @@ async function checkSession() {
 function switchUser() {
   if (state.shopMode) {
     openModal(`
-      <div class="modal-title">Exit Shop Mode?</div>
+      <div class="modal-title">Exit Counter Mode?</div>
       <p style="font-size:0.9rem;color:var(--text2);margin-bottom:1.25rem">This will log out of the shared shop device and return to normal login. Use this on personal phones, not the shop iPad.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="closeModal();exitShopMode()">Exit Shop Mode</button>
+        <button class="btn btn-primary" onclick="closeModal();exitShopMode()">Exit Counter Mode</button>
       </div>
     `);
     return;
@@ -481,7 +538,7 @@ function showShopPinSetup() {
       <div class="bc-logo-wrap">
         <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
-        <div class="bc-sub-label">Shop Mode Setup</div>
+        <div class="bc-sub-label">Counter Mode Setup</div>
       </div>
       <p style="font-size:0.85rem;color:var(--text2);text-align:center;margin-bottom:1rem">Set a 4-digit PIN for this shop device.</p>
       <input type="hidden" id="shop-pin-setup" value=""/>
@@ -503,13 +560,17 @@ function showShopPinEntry() {
       <div class="bc-logo-wrap">
         <div class="bc-logo-circle"><svg viewBox="0 0 60 60"><text x="4" y="46" font-family="Georgia, serif" font-size="42" font-style="italic" font-weight="bold" fill="white">be</text></svg></div>
         <div class="bc-wordmark">Be<span>Copenhagen</span></div>
-        <div class="bc-sub-label">Shop Mode</div>
+        <div class="bc-sub-label">Counter Mode</div>
       </div>
       <input type="hidden" id="shop-pin-entry" value=""/>
       ${pinDotsHtml('shop-pin-entry')}
       <div id="shop-pin-error" style="color:#e04040;font-size:0.85rem;margin:0.5rem 0;text-align:center"></div>
       ${pinKeypadHtml('shop-pin-entry')}
+      <button class="btn-link" id="leave-counter-mode" type="button">Not the shop iPad? Sign in with email</button>
     </div>`;
+  // Escape hatch: without this, a device whose session has shop_mode set is
+  // stuck on this PIN screen forever, with no route back to the normal login.
+  document.getElementById('leave-counter-mode')?.addEventListener('click', exitShopMode);
 }
 
 async function submitShopPin() {
@@ -559,9 +620,8 @@ async function showShopWhoAreYou() {
 
   const grid = document.getElementById('shop-who-grid');
   grid.innerHTML = team.map(m=>`
-    <button class="identity-btn role-${m.role}" data-id="${m.id}">
+    <button class="identity-btn" data-id="${m.id}">
       <span class="iname">${m.name}</span>
-      <span class="irole">${m.role}</span>
     </button>`).join('');
   grid.querySelectorAll('.identity-btn').forEach(btn=>{
     btn.addEventListener('click', async () => {
@@ -573,10 +633,11 @@ async function showShopWhoAreYou() {
 }
 
 function landingTab() {
-  if (state.actor?.role === 'guide') return 'action';
-  if (state.actor?.role === 'mechanic') return 'action';
-  if (state.actor?.role === 'admin') return 'operations';
-  return 'action';
+  if (state.shopMode) return 'today';   // counter opens on the day's board too
+  const v = activeView();
+  if (v === 'admin') return 'operations';
+  if (v === 'shop') return 'today';
+  return 'action'; // guide
 }
 
 function showMain() {
@@ -586,15 +647,59 @@ function showMain() {
   document.getElementById('screen-main').style.display='flex';
   document.getElementById('actor-badge').textContent = state.shopMode ? ('🏪 ' + state.actor.name) : state.actor.name;
   buildTabbar();
-  renderTab(state.shopMode ? 'action' : landingTab());
+  renderTab(landingTab());
   if (!state.shopMode) checkBorrowedReminder();
   if (state.actor?.role === 'admin') startNotifPolling();
+}
+
+// Which views a person can work in, from their CAPABILITIES. `role` remains a
+// pure permission (server-enforced); what you SEE now comes from capabilities.
+function availableViews() {
+  const a = state.actor || {};
+  const views = [];
+  if (a.can_shop || a.role === 'mechanic' || a.role === 'admin') views.push('shop');
+  if (a.is_guide || a.role === 'guide') views.push('guide');
+  if (a.role === 'admin') views.push('admin');
+  return views.length ? views : ['guide'];
+}
+
+// The hat you're wearing right now. Remembered per person.
+function activeView() {
+  const views = availableViews();
+  // While previewing someone else, ignore the saved hat — show THEIR default.
+  const saved = state.viewingAs ? state.activeView
+    : (state.activeView || (() => { try { return localStorage.getItem('bcf_view_' + (state.actor?.id||'')); } catch { return null; } })());
+  if (saved && views.includes(saved)) return saved;
+  if (views.includes('admin')) return 'admin';   // admins land in admin, as today
+  if (views.includes('guide') && views.length === 1) return 'guide';
+  return views[0];
+}
+
+function setActiveView(v) {
+  if (!availableViews().includes(v)) return;
+  state.activeView = v;
+  if (!state.viewingAs) { try { localStorage.setItem('bcf_view_' + (state.actor?.id||''), v); } catch {} }
+  buildTabbar();
+  renderTab(landingTab());
 }
 
 function buildTabbar() {
   if (state.shopMode) {
     document.getElementById('btn-more-menu')?.classList.add('hidden');
-    const tabs = [{id:'action',label:'Action',icon:iconAction()},{id:'bikes',label:'Bikes',icon:iconBike()}];
+    // Counter (shared iPad) sees the same operational picture as a logged-in
+    // shopkeeper — today's board, checkouts, repairs, tours, rentals, bikes —
+    // so whoever is on the floor has the full picture. Fleet is deliberately
+    // left out: it edits the bike CATALOGUE (add/retire/recode), which is a
+    // rare, destructive, accountable action that shouldn't sit on an unlocked
+    // shared device. Same reason the counter keeps its restricted action set.
+    const tabs = [
+      {id:'today',label:'Today',icon:iconToday()},
+      {id:'action',label:'Action',icon:iconAction()},
+      {id:'tickets',label:'Repairs',icon:iconTicket()},
+      {id:'tours',label:'Tours',icon:iconTours()},
+      {id:'rentals',label:'Rentals',icon:iconRentals()},
+      {id:'bikes',label:'Bikes',icon:iconBike()},
+    ];
     document.getElementById('tabbar').innerHTML=tabs.map(t=>`
       <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
         ${t.icon}<span>${t.label}</span>
@@ -604,15 +709,15 @@ function buildTabbar() {
     });
     return;
   }
-  const role=state.actor?.role;
-  document.getElementById('btn-more-menu')?.classList.toggle('hidden', role !== 'guide');
-  const tabs = role==='mechanic'
-    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Tickets',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'profile',label:'Profile',icon:iconProfile()}]
-    : role==='admin'
-    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'fleet',label:'Fleet',icon:iconFleet()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
-    : role==='guide'
-    ? [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}]
-    : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}];
+  const view = activeView();
+  document.getElementById('btn-more-menu')?.classList.toggle('hidden', view !== 'guide');
+  // SHOP = mechanic + shopkeeper merged. Includes Tours (so the shop can see
+  // which customers are coming when, and prep the right bikes) and Repairs.
+  const tabs = view==='shop'
+    ? [{id:'today',label:'Today',icon:iconToday()},{id:'action',label:'Action',icon:iconAction()},{id:'tickets',label:'Repairs',icon:iconTicket()},{id:'tours',label:'Tours',icon:iconTours()},{id:'rentals',label:'Rentals',icon:iconRentals()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'log',label:'Log',icon:iconLog()}]
+    : view==='admin'
+    ? [{id:'operations',label:'Operations',icon:iconOperations()},{id:'bikes',label:'Bikes',icon:iconBike()},{id:'guides-admin',label:'Guides',icon:iconGuidesTab()},{id:'log',label:'Log',icon:iconLog()},{id:'app-admin',label:'App',icon:iconApp()},{id:'notifs-admin',label:'Alerts',icon:iconNotifs()}]
+    : [{id:'action',label:'Action',icon:iconAction()},{id:'tours',label:'Tours',icon:iconTours()},{id:'profile',label:'Profile',icon:iconProfile()},{id:'log',label:'Log',icon:iconLog()}];
   document.getElementById('tabbar').innerHTML=tabs.map(t=>`
     <button class="tab-btn${t.id===state.currentTab?' active':''}" data-tab="${t.id}">
       ${t.icon}<span>${t.label}</span>
@@ -620,6 +725,21 @@ function buildTabbar() {
   document.getElementById('tabbar').querySelectorAll('.tab-btn').forEach(btn=>{
     btn.addEventListener('click',()=>renderTab(btn.dataset.tab));
   });
+  renderViewSwitcher();
+}
+
+// Shown only to people who can work in more than one view (Fede, Hassan).
+// Single-capability people see nothing — their experience is unchanged.
+function renderViewSwitcher() {
+  const host = document.getElementById('view-switcher');
+  if (!host) return;
+  const views = availableViews();
+  if (views.length < 2) { host.innerHTML = ''; host.classList.add('hidden'); return; }
+  const labels = { shop:'Shop', guide:'Guide', admin:'Admin' };
+  const cur = activeView();
+  host.classList.remove('hidden');
+  host.innerHTML = views.map(v => `<button class="vs-btn${v===cur?' active':''}" data-view="${v}">${labels[v]||v}</button>`).join('');
+  host.querySelectorAll('.vs-btn').forEach(b => b.addEventListener('click', () => setActiveView(b.dataset.view)));
 }
 
 function setActiveTab(id) {
@@ -654,7 +774,7 @@ async function renderTab(id) {
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
   if(id!=='action') c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
-  if(id==='bikes') await renderBikes(c);
+  if(id==='bikes') await renderBikesTab(c);
   else if(id==='today') await renderTodayBoard(c);
   else if(id==='action') renderAction(c);
   else if(id==='log') await renderLog(c);
@@ -699,6 +819,40 @@ async function drillType(typeId) {
 }
 
 // ── BIKES ─────────────────────────────────────────────────────────────────
+// Bikes tab = the live picture (what's available / out / in repair) and the
+// fleet catalogue (add / edit / retire bikes) as two sub-tabs. They were two
+// separate bottom tabs, which crowded the bar — but they're different jobs
+// (daily status vs. rare catalogue editing), so they stay distinct here.
+async function renderBikesTab(c) {
+  // Counter Mode (shared, unauthenticated iPad) gets the live status only —
+  // the Fleet catalogue (add/retire/recode bikes) is destructive and needs to
+  // be attributable to a person, so it stays off the shared device.
+  if (state.shopMode) return renderBikes(c);
+
+  if (!window._bikesTab) window._bikesTab = 'status';
+  const tabs = [['status','Status'],['fleet','Fleet']];
+  c.innerHTML = `
+    <div class="subtab-row">
+      ${tabs.map(([id,label])=>`<button class="subtab${window._bikesTab===id?' active':''}" data-bikestab="${id}" onclick="switchBikesTab('${id}')">${label}</button>`).join('')}
+    </div>
+    <div id="bikes-tab-content"></div>`;
+  await renderBikesSubTab();
+}
+
+async function switchBikesTab(tab) {
+  window._bikesTab = tab;
+  logPageView(`bikes.${tab}`);
+  document.querySelectorAll('[data-bikestab]').forEach(b => b.classList.toggle('active', b.dataset.bikestab === tab));
+  await renderBikesSubTab();
+}
+
+async function renderBikesSubTab() {
+  const el = document.getElementById('bikes-tab-content');
+  if (!el) return;
+  if (window._bikesTab === 'fleet') await renderAdminBikes(el);
+  else await renderBikes(el);
+}
+
 async function renderBikes(c) {
   const avail = await api('/api/availability');
   const types = avail.types;
@@ -1209,6 +1363,24 @@ async function submitActionNew() {
   if(bikes.length===0){toast('No bike selected — type a bike ID and tap Add','error');return;}
   const actor = state.actor?.id||'unknown';
 
+  // Before a return wipes the assignment, snapshot each bike's current state so
+  // undo can put it back exactly (customer, booking ref, due date) rather than
+  // re-checking it out as a generic rental.
+  if (type === 'return') {
+    const snap = {};
+    await Promise.all(bikes.map(async (id) => {
+      try {
+        const b = await api(`/api/bikes/${id}`);
+        snap[id] = {
+          assignment_type: b.assignment_type, assigned_to: b.assigned_to,
+          customer_name: b.customer_name, fareharbor_booking_ref: b.fareharbor_booking_ref,
+          return_due: b.return_due, note: b.status_note,
+        };
+      } catch {}
+    }));
+    state.action._preReturn = snap;
+  }
+
   try {
     for(const bikeId of bikes) {
       if(type==='return') {
@@ -1318,14 +1490,23 @@ async function submitActionNew() {
     // Build undo function based on action type
     let undoFn = null;
     if (type === 'return') {
-      const prevStatuses = bikes.map(id => {
-        const b = null; // we don't have prev status here, best we can do is re-checkout
-        return id;
-      });
-      // Undo return = mark as out again (approximate)
+      // Restore each bike EXACTLY as it was: same assignment type, customer,
+      // booking ref and due date. (state.action._preReturn was captured before
+      // the return ran — without it, undo could only re-check-out a generic
+      // rental and would silently lose the customer and booking link.)
+      const prev = state.action._preReturn || {};
       undoFn = async () => {
         for (const id of bikes) {
-          await api(`/api/bikes/${id}/checkout`, {method:'POST', body:{assignment_type:'rental', assigned_to:'(undone return)', force:true}});
+          const p = prev[id];
+          await api(`/api/bikes/${id}/checkout`, {method:'POST', body: p ? {
+            assignment_type: p.assignment_type || 'rental',
+            assigned_to: p.assigned_to || '',
+            customer_name: p.customer_name || '',
+            fareharbor_booking_ref: p.fareharbor_booking_ref || '',
+            return_due: p.return_due || '',
+            note: p.note || '',
+            force: true,
+          } : {assignment_type:'rental', assigned_to:'(undone return)', force:true}});
         }
         renderAction(document.getElementById('content'));
       };
@@ -1367,7 +1548,7 @@ async function submitActionNew() {
       };
     }
 
-    toast(`Done — ${label.toLowerCase()}`, 'success');
+    toast(`Done — ${label.toLowerCase()}`, 'success', { undo: !!undoFn });
     if (undoFn) pushUndo(label.toLowerCase(), undoFn);
 
     if (state.shopMode) {
@@ -1497,7 +1678,9 @@ function renderTicketQueue(tickets) {
         <span style="font-size:0.72rem;color:var(--text3)">${complexLabels[t.complexity||3]}</span>
       </div>
       <div style="margin-top:0.6rem;display:flex;gap:0.5rem">
-        <button class="btn btn-sm btn-success" onclick="resolveTicket(${t.id},'${t.bike_id}')">✓ Resolved</button>
+        ${state.shopMode
+          ? `<span style="font-size:0.72rem;color:var(--text3);align-self:center">Log in as yourself to resolve</span>`
+          : `<button class="btn btn-sm btn-success" onclick="resolveTicket(${t.id},'${t.bike_id}')">✓ Resolved</button>`}
         <button class="btn btn-sm btn-secondary" onclick="showBike('${t.bike_id}')">View bike</button>
         ${t.can_rent?'':`<button class="btn btn-sm btn-secondary" onclick="toggleCanRent(${t.id},1)">Can rent now</button>`}
       </div>
@@ -1655,26 +1838,118 @@ async function submitResolve(ticketId, bikeId) {
 }
 
 // ── LOG ───────────────────────────────────────────────────────────────────
+const LOG_FILTERS = [
+  ['all','All'], ['checkout','Checkouts'], ['return','Returns'], ['repair_ticket','Repairs'], ['city','Left in city'],
+];
+
 async function renderLog(c) {
-  const log=await api('/api/log?limit=80');
+  if (!window._logFilter) window._logFilter = 'all';
+  const log = await api('/api/log?limit=150');
   const iconMap={checkout:'out',return:'ret',bulk_return:'ret',repair_ticket:'issue',city:'city'};
   const labelMap={checkout:'OUT',return:'RTN',bulk_return:'RTN',repair_ticket:'FIX',city:'PIN'};
-  c.innerHTML=`
-    <div class="section-title">Recent activity</div>
+
+  const f = window._logFilter;
+  const shown = log.filter(l => {
+    if (f === 'all') return true;
+    if (f === 'return') return l.action === 'return' || l.action === 'bulk_return';
+    return l.action === f;
+  });
+
+  c.innerHTML = `
+    <div class="chip-row" style="margin:0.2rem 0 0.85rem">
+      ${LOG_FILTERS.map(([id,label]) => `<button class="chip${f===id?' active':''}" data-logf="${id}" onclick="setLogFilter('${id}')">${label}</button>`).join('')}
+    </div>
     <div class="bike-list">
-      ${log.map(l=>{
+      ${shown.map(l=>{
         const d=JSON.parse(l.details||'{}');
         const who=d.customer_name||d.assigned_to||'';
-        return `<div class="activity-row">
+        // Every bike action is correctable after the fact — this is the screen
+        // you come to when you realise something was recorded wrong.
+        const fixable = !!l.bike_id;
+        return `<div class="activity-row"${fixable ? ` onclick="openLogFix('${l.bike_id}', ${l.id})" style="cursor:pointer"` : ''}>
           <div class="ar-icon ${iconMap[l.action]||'ret'}">${labelMap[l.action]||'···'}</div>
           <div class="ar-body">
-            <div class="ar-main">${l.bike_id||''} ${who?'· '+who:''}</div>
-            <div class="ar-sub">${l.actor} · ${fmtTime(l.created_at)}</div>
+            <div class="ar-main">${l.bike_id||''} ${who?'· '+escapeHtml(who):''}</div>
+            <div class="ar-sub">${escapeHtml(l.actor)} · ${timeAgo(l.created_at)}${fixable ? ' · <span style="color:var(--blue)">tap to correct</span>' : ''}</div>
           </div>
         </div>`;
-      }).join('')||'<div class="empty-state"><p>No activity yet</p></div>'}
+      }).join('')||'<div class="empty-state"><p>Nothing here yet</p></div>'}
     </div>`;
 }
+
+async function setLogFilter(id) {
+  window._logFilter = id;
+  await renderLog(document.getElementById('content'));
+}
+
+// Correct any past action on a bike. Shows what the log says, what the bike's
+// state is NOW, and offers the corrections that actually make sense for it.
+async function openLogFix(bikeId, logId) {
+  const [bike, log] = await Promise.all([
+    api(`/api/bikes/${bikeId}`).catch(() => null),
+    api('/api/log?limit=200').catch(() => []),
+  ]);
+  if (!bike) { toast('Could not load that bike', 'error'); return; }
+
+  const entry = log.find(l => l.id === logId);
+  const ed = entry ? JSON.parse(entry.details || '{}') : {};
+  // The checkout that preceded this entry tells us who had the bike.
+  const prevCheckout = log.find(l => l.bike_id === bikeId && l.action === 'checkout' && (!entry || l.created_at <= entry.created_at));
+  const pd = prevCheckout ? JSON.parse(prevCheckout.details || '{}') : {};
+  const who = ed.customer_name || ed.assigned_to || pd.customer_name || pd.assigned_to || '';
+  const isOut = bike.status === 'out';
+
+  const actionLabels = { checkout:'Checked out', return:'Returned', bulk_return:'Returned', repair_ticket:'Repair reported', city:'Left in city', missing:'Marked missing' };
+
+  openModal(`
+    <div class="modal-title">${bikeId}</div>
+    <div class="detail-section" style="border-top:none;padding-top:0">
+      <div class="detail-row"><span class="dr-key">This entry</span><span class="dr-val">${actionLabels[entry?.action] || entry?.action || '—'}${entry ? ' · ' + timeAgo(entry.created_at) : ''}</span></div>
+      <div class="detail-row"><span class="dr-key">By</span><span class="dr-val">${escapeHtml(entry?.actor || '—')}</span></div>
+      ${who ? `<div class="detail-row"><span class="dr-key">Customer</span><span class="dr-val">${escapeHtml(who)}</span></div>` : ''}
+      ${(entry?.booking_ref || prevCheckout?.booking_ref) ? `<div class="detail-row"><span class="dr-key">Booking</span><span class="dr-val">#${entry?.booking_ref || prevCheckout?.booking_ref}</span></div>` : ''}
+      <div class="detail-row"><span class="dr-key">Bike is now</span><span class="dr-val"><strong>${bike.status}</strong>${isOut && bike.customer_name ? ' · ' + escapeHtml(bike.customer_name) : ''}</span></div>
+    </div>
+    <p style="font-size:0.78rem;color:var(--text3);margin:0.6rem 0">Fix the bike's current state if this was recorded wrong.</p>
+    ${isOut
+      ? `<button class="btn btn-primary btn-full" id="fix-return">Mark as returned (it's back)</button>
+         <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" id="fix-repair">Send to repair</button>`
+      : `<button class="btn btn-primary btn-full" id="fix-unreturn">Put back out${who ? ' to ' + escapeHtml(who) : ''}</button>
+         <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" id="fix-repair">Send to repair</button>`}
+    <button class="btn btn-secondary btn-full" style="margin-top:0.5rem" onclick="closeModal()">Close</button>
+  `);
+
+  const done = (msg) => { closeModal(); toast(msg, 'success'); renderTab('log'); };
+
+  document.getElementById('fix-unreturn')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/bikes/${bikeId}/checkout`, {method:'POST', body:{
+        assignment_type: pd.assignment_type || 'rental',
+        assigned_to: pd.assigned_to || '',
+        customer_name: pd.customer_name || '',
+        fareharbor_booking_ref: prevCheckout?.booking_ref || '',
+        note: 'Corrected from log',
+        force: true,
+      }});
+      done(`${bikeId} put back out${who ? ' to ' + who : ''}`);
+    } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
+  });
+
+  document.getElementById('fix-return')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/bikes/${bikeId}/return`, {method:'POST', body:{new_status:'available', note:'Corrected from log'}});
+      done(`${bikeId} marked returned`);
+    } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
+  });
+
+  document.getElementById('fix-repair')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/bikes/${bikeId}/return`, {method:'POST', body:{new_status:'repair', note:'Corrected from log'}});
+      done(`${bikeId} sent to repair`);
+    } catch(e) { toast('Could not correct: ' + e.message, 'error'); }
+  });
+}
+
 
 // ── Markdown renderer (lightweight, no external dependency) ───────────────
 // Supports: headings (#/##/###), bold (**), italic (*), inline code (`),
@@ -1913,9 +2188,10 @@ async function renderOpsTab() {
   if (window._opsTab === 'today') await renderTodayBoard(el);
   else if (window._opsTab === 'actions') renderAction(el);
   else if (window._opsTab === 'tours') {
-    // Operations shows only the admin's own tours (as a guide)
+    // Operations shows only the admin's own tours (as a guide). Look 120 days
+    // ahead — the default 30-day window was hiding an assigned 31 Aug A3P.
     const name = state.actor?.name;
-    const all = await api('/api/ical/tours');
+    const all = await api('/api/ical/tours?days=120');
     const mine = all.filter(t => t.guide && guideMatches(t.guide, name));
     renderToursList(el, mine, true);
   }
@@ -2607,7 +2883,12 @@ async function renderAdminReviews(el) {
     api('/api/team').catch(() => []),
     api('/api/reviews').catch(() => []),
   ]);
-  const guides = team.filter(m => m.role === 'guide' || m.role === 'admin');
+  // Who can receive a review = anyone who works with customers, not just guides.
+  // Zac is a mechanic but also does shop-floor work and gets good reviews, so
+  // key this off capabilities (guide OR shop) rather than the role alone.
+  const guides = team.filter(m =>
+    m.role === 'guide' || m.role === 'admin' || m.role === 'mechanic' || m.is_guide || m.can_shop
+  );
   const today = new Date().toISOString().substring(0, 10);
   const platforms = ['Google Maps', 'GetYourGuide', 'Viator', 'TripAdvisor', 'Airbnb'];
 
@@ -2624,8 +2905,8 @@ async function renderAdminReviews(el) {
       <div class="detail-section-title">Log a new review</div>
       <div style="display:flex;flex-direction:column;gap:0.5rem">
         <select class="form-select" id="rev-guide">
-          <option value="">Select guide…</option>
-          ${guides.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+          <option value="">Select team member…</option>
+          ${[...guides].sort((a,b)=>a.name.localeCompare(b.name)).map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
         </select>
         <div style="display:flex;gap:0.5rem">
           <input class="form-input" type="date" id="rev-date" value="${today}" style="flex:1">
@@ -3170,12 +3451,20 @@ async function renderTours(c) {
   const role = state.actor?.role;
   const name = state.actor?.name;
   const isGuide = role === 'guide';
-  const tours = await api('/api/ical/tours' + (isGuide ? `?guide=${encodeURIComponent(name)}` : ''));
+  // Look far enough ahead to catch private tours booked weeks out — a guide
+  // assigned an A3P six weeks from now needs to see it. The default 30-day
+  // window was hiding a real, assigned 31 Aug A3P (47 days out).
+  const tours = await api('/api/ical/tours?days=120' + (isGuide ? `&guide=${encodeURIComponent(name)}` : ''));
   renderToursList(c, tours, isGuide);
 }
 
 // ── TODAY BOARD (shop manifest) ──────────────────────────────────────────
-const CAT_LABELS = { A:'Regular', E:'E-bike', GT:'Guided', B:'Bike', AC:'Child-seat', AT:'Toddler-seat', SA:'Small' };
+// Bike type codes, matching bike_types in the fleet (src/db/seed.js).
+const CAT_LABELS = {
+  A:'Adult bike', SA:'Small adult bike', AC:'Adult + child seat', AT:'Adult + toddler seat',
+  B:'Kids bike (small)', BM:'Kids bike (medium)', TB:'Touring bike', MB:'Mountain bike',
+  CC:'Cargo bike', E:'Electric bike', GT:'Guided bike',
+};
 const catLabel = (k) => CAT_LABELS[k] || k;
 function hhmmToMin(t) { const m = String(t||'').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
 
@@ -3195,27 +3484,55 @@ async function renderTodayBoard(c) {
     const k = String(b.fareharbor_booking_ref); (outByRef[k] = outByRef[k] || []).push(b);
   });
 
-  // ---- "Bikes needed today", split by TOURS vs RENTALS (that's how the shop
-  // thinks about it). Tours use a PEAK: each tour holds its bikes from
-  // start-10min to end+20min, so two non-overlapping tours share the same bikes.
-  // Rentals are summed (multi-day → each ties up its bikes all day anyway).
-  const tourCats = new Set();
-  todayTours.forEach(t => Object.entries(t.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) tourCats.add(k); }));
-  const tourNeeded = {};
-  tourCats.forEach(cat => {
+  // ---- "Bikes needed today" — ONE number per bike type. ----
+  // The shop has one pool of each bike type; a tour bike and a rental bike are
+  // the same physical bike. So the answer to "how many must I have ready?" is
+  // the PEAK simultaneous demand, per type, across tours AND rentals together.
+  //
+  //  - A tour holds its bikes from (start - 10min) to (end + 20min), so two
+  //    tours far enough apart share the same bikes; overlapping ones don't.
+  //  - A rental holds its bikes ALL DAY (they leave and come back days later),
+  //    so it overlaps every tour — it's a flat baseline added to the peak.
+  //    That includes rentals that STARTED ON AN EARLIER DAY and are still out
+  //    (the N-Day feeds), which is why we look at the whole rental window, not
+  //    just today's pickups.
+  const bikesOf = (r) => { try { return typeof r.bikes_needed === 'string' ? JSON.parse(r.bikes_needed) : (r.bikes_needed || {}); } catch { return {}; } };
+
+  // Rentals that count = only those being PICKED UP today. A bike handed out
+  // yesterday on a multi-day rental is already gone from the shop, so it needs
+  // no preparing this morning — this number answers "how many bikes must I have
+  // ready today", not "how many are in customers' hands".
+  const rentalsLive = todayRentals.filter(r => (r.bookings || []).length > 0);
+
+  const cats = new Set();
+  todayTours.forEach(t => Object.entries(bikesOf(t)).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
+  rentalsLive.forEach(r => Object.entries(bikesOf(r)).forEach(([k, n]) => { if (n > 0) cats.add(k); }));
+
+  const needed = {};
+  cats.forEach(cat => {
+    // Rentals: flat all-day baseline.
+    let rentalN = 0;
+    rentalsLive.forEach(r => { rentalN += bikesOf(r)[cat] || 0; });
+
+    // Tours: sweep-line peak, so non-overlapping tours reuse the same bikes.
     const evs = [];
+    let untimed = 0;
     todayTours.forEach(t => {
-      const n = (t.bikes_needed || {})[cat] || 0; if (n <= 0) return;
+      const n = bikesOf(t)[cat] || 0; if (n <= 0) return;
       const s = hhmmToMin(t.start_time), e = hhmmToMin(t.end_time);
-      if (s == null || e == null) return;
+      // A tour with no usable time can't be placed on the timeline — count it
+      // in full rather than silently dropping it (better to over-prepare).
+      if (s == null || e == null) { untimed += n; return; }
       evs.push([s - 10, n]); evs.push([e + 20, -n]);
     });
-    evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // at same minute, release before acquire
-    let cur = 0, peak = 0; evs.forEach(([, d]) => { cur += d; if (cur > peak) peak = cur; });
-    if (peak > 0) tourNeeded[cat] = peak;
+    evs.sort((a, b) => a[0] - b[0] || a[1] - b[1]); // release before acquire at the same minute
+    let cur = 0, tourPeak = 0;
+    evs.forEach(([, d]) => { cur += d; if (cur > tourPeak) tourPeak = cur; });
+    tourPeak += untimed;
+
+    const total = tourPeak + rentalN;
+    if (total > 0) needed[cat] = { total, tourPeak, rentalN };
   });
-  const rentalNeeded = {};
-  todayRentals.forEach(r => { if ((r.bookings || []).length) Object.entries(r.bikes_needed || {}).forEach(([k, n]) => { if (n > 0) rentalNeeded[k] = (rentalNeeded[k] || 0) + n; }); });
 
   // ---- Timeline: tour departures + rental pickups, by time ----
   const events = [];
@@ -3234,16 +3551,23 @@ async function renderTodayBoard(c) {
     .sort((a, b) => String(a.return_due).localeCompare(String(b.return_due)));
 
   // ---- Render ----
-  const needGroup = (title, obj) => {
-    const keys = Object.keys(obj).filter(k => obj[k] > 0).sort((a, b) => obj[b] - obj[a]);
-    if (!keys.length) return '';
-    return `<div style="margin-bottom:0.65rem">
-      <div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:0.15rem">${title}</div>
-      ${keys.map(k => `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.25rem 0;border-bottom:1px solid var(--border)"><span style="font-weight:600">${catLabel(k)}</span><strong style="font-size:1.05rem">${obj[k]}</strong></div>`).join('')}
-    </div>`;
-  };
-  const neededHtml = (Object.keys(tourNeeded).length || Object.keys(rentalNeeded).length)
-    ? needGroup('For tours (peak at once)', tourNeeded) + needGroup('For rentals', rentalNeeded)
+  const keys = Object.keys(needed).sort((a, b) => needed[b].total - needed[a].total);
+  const neededHtml = keys.length
+    ? keys.map(k => {
+        const v = needed[k];
+        // Always say what the bikes are FOR — not only when it's a mix. A bare
+        // "Cargo bike 2" leaves the shop guessing whether it's a tour or a rental.
+        const parts = [];
+        if (v.tourPeak) parts.push(`${v.tourPeak} tour${v.tourPeak !== 1 ? 's' : ''}`);
+        if (v.rentalN) parts.push(`${v.rentalN} rental${v.rentalN !== 1 ? 's' : ''}`);
+        return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.4rem 0;border-bottom:1px solid var(--border)">
+          <span>
+            <span style="font-weight:700">${catLabel(k)}</span>
+            ${parts.length ? `<span style="font-size:0.72rem;color:var(--text3);margin-left:0.4rem">${parts.join(' + ')}</span>` : ''}
+          </span>
+          <strong style="font-size:1.15rem">${v.total}</strong>
+        </div>`;
+      }).join('')
     : '<div style="color:var(--text3);font-size:0.85rem">Nothing needed today</div>';
 
   const eventsHtml = events.length ? events.map(e => {
@@ -3328,7 +3652,7 @@ function renderToursList(el, tours, isGuideView) {
             <span class="tour-badge">${a.feed_id}</span>
             <span class="tour-time">${a.start_time}–${a.end_time}</span>
           </div>
-          <div class="tour-pax">${a.booking_count} booking${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
+          <div class="tour-pax">${a.booking_count} guest${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
         </div>
         ${a.guide ? `<div class="tour-guide">${guideEmojiByName(a.guide)} ${a.guide}</div>` : '<div class="tour-no-guide">⚠️ No guide assigned yet</div>'}
         ${needsBikes ? `<div class="tour-bikes">${bikeStr}</div>` : ''}
@@ -3882,7 +4206,11 @@ async function openTourDetail(availId) {
           : (b.source && b.source !== "direct"
               ? "<span style='font-size:0.68rem;background:var(--blue-bg);color:var(--blue);padding:1px 6px;border-radius:10px;margin-left:5px'>"+b.source+"</span>"
               : "");
-        const canSeePayments = state.actor?.role === 'admin' || state.actor?.role === 'mechanic';
+        // Whether the customer still owes money is shop-floor info (you need it
+        // when handing the bike over), so it follows the SHOP capability rather
+        // than the role — Hassan keeps it after being demoted from admin, and
+        // the shared counter device sees it too.
+        const canSeePayments = state.shopMode || state.actor?.role === 'admin' || state.actor?.can_shop || state.actor?.role === 'mechanic';
         const unpaid = (canSeePayments && b.due && b.due !== "DKK0.00")
           ? "<span style='font-size:0.68rem;background:#fdecea;color:#e04040;padding:1px 6px;border-radius:10px;margin-left:4px'>Due: "+b.due+"</span>"
           : "";
@@ -4010,8 +4338,15 @@ function fmtDateFull(d) {
 
 // ── View As (admin preview of another role's view) ───────────────────────
 async function renderViewAs(el) {
-  const team = await api('/auth/team');
+  const team = await api('/auth/team-admin');
   team.sort((a,b)=>a.name.localeCompare(b.name));
+  const hats = (m) => {
+    const h = [];
+    if (m.can_shop || m.role === 'mechanic' || m.role === 'admin') h.push('Shop');
+    if (m.is_guide || m.role === 'guide') h.push('Guide');
+    if (m.role === 'admin') h.push('Admin');
+    return h.join(' · ') || '—';
+  };
 
   el.innerHTML = `
     <p style="font-size:0.85rem;color:var(--text2);margin-bottom:1rem">
@@ -4019,20 +4354,24 @@ async function renderViewAs(el) {
     </p>
     <div class="bike-list">
       ${team.filter(m => m.id !== state.realActor?.id && m.id !== state.actor?.id).map(m => `
-        <div class="bike-row" onclick="startViewAs('${m.id}','${m.name}','${m.role}')">
+        <div class="bike-row" onclick='startViewAs(${JSON.stringify(m.id)}, ${JSON.stringify(m.name)}, ${JSON.stringify(m)})'>
           <div class="br-info">
-            <div class="br-name" style="font-weight:600;font-size:0.92rem">${m.name}</div>
-            <div class="br-detail">${m.role}</div>
+            <div class="br-name" style="font-weight:600;font-size:0.92rem">${escapeHtml(m.name)}</div>
+            <div class="br-detail">${hats(m)}</div>
           </div>
           <span class="badge" style="background:var(--bg3);color:var(--text2)">Preview →</span>
         </div>`).join('')}
     </div>`;
 }
 
-function startViewAs(memberId, memberName, memberRole) {
+function startViewAs(memberId, memberName, member) {
   // Save the real admin identity so we can return to it
   if (!state.realActor) state.realActor = { ...state.actor };
-  state.actor = { id: memberId, name: memberName, role: memberRole };
+  const m = (member && typeof member === 'object') ? member : { role: member };
+  // Carry capabilities too, so the preview reproduces their ACTUAL view (a
+  // shop+guide person previews with both hats), not just their role.
+  state.actor = { id: memberId, name: memberName, role: m.role, is_guide: m.is_guide, can_shop: m.can_shop, view_mode: m.view_mode };
+  state.activeView = null; // let their own default view apply
   state.viewingAs = true;
   buildTabbar();
   renderTab(landingTab());
@@ -4087,9 +4426,8 @@ async function showShopWhoDidThis(bikeIds) {
 
   const grid = document.getElementById('shop-attribution-grid');
   grid.innerHTML = team.map(m=>`
-    <button class="identity-btn role-${m.role}" data-id="${m.id}">
+    <button class="identity-btn" data-id="${m.id}">
       <span class="iname">${m.name}</span>
-      <span class="irole">${m.role}</span>
     </button>`).join('');
 
   grid.querySelectorAll('.identity-btn').forEach(btn=>{
