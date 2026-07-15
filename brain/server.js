@@ -341,39 +341,97 @@ app.get('/api/status', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/upload', requireAuth, (req, res) => {
-  const { bookings_csv, sales_csv, customers_csv } = req.body || {};
-  if (!bookings_csv || !sales_csv) {
-    return res.status(400).json({ error: 'The bookings CSV and the sales CSV are both required.' });
+// --- upload: one pile of files, identified by their own headers ---
+// Each FareHarbor report has a distinctive column signature, so the user
+// never assigns files to slots (and can never get them crossed):
+//   'Payment or Refund ID'  -> sales
+//   'Customer type'         -> customers
+//   'Cancelled?' (and neither of the above) -> bookings
+function sniffReport(text) {
+  const head = text.slice(0, 6000);
+  if (head.includes('Payment or Refund ID')) return 'sales';
+  if (head.includes('Customer type')) return 'customers';
+  if (head.includes('Cancelled?') && head.includes('Booking ID')) return 'bookings';
+  return null;
+}
+
+// Basic sanity: parses, has rows, and covers a plausible date range.
+function validateReport(text, kind) {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 10) return `${kind}: file has almost no rows — wrong export?`;
+  // Detailed exports have a Booking ID / txn ID column; Summary exports don't.
+  if (kind === 'bookings' && !text.includes('Booking ID')) {
+    return 'bookings: no Booking ID column — did you export Summary instead of Detailed?';
   }
+  const years = text.match(/20\d{2}/g) || [];
+  if (!years.includes('2023')) {
+    return `${kind}: no 2023 dates found — check the date range starts 01/01/2023`;
+  }
+  return null;
+}
+
+app.post('/api/upload', requireAuth, (req, res) => {
+  const { files } = req.body || {};
+  if (!Array.isArray(files) || !files.length) {
+    return res.status(400).json({ error: 'No files received.' });
+  }
+
+  const found = {};   // kind -> { name, text }
+  const problems = [];
+
+  for (const f of files) {
+    const kind = sniffReport(f.text || '');
+    if (!kind) {
+      problems.push(`"${f.name}" doesn't look like any FareHarbor report I know — skipped.`);
+      continue;
+    }
+    if (found[kind]) {
+      problems.push(`Two files both look like the ${kind} report ("${found[kind].name}" and "${f.name}") — using the first.`);
+      continue;
+    }
+    const bad = validateReport(f.text, kind);
+    if (bad) { problems.push(bad); continue; }
+    found[kind] = { name: f.name, text: f.text };
+  }
+
+  if (!found.bookings || !found.sales) {
+    const missing = ['bookings', 'sales'].filter(k => !found[k]).join(' and ');
+    return res.status(400).json({
+      error: `Missing the ${missing} report. ` + (problems.length ? problems.join(' ') : ''),
+    });
+  }
+
   const bPath = path.join(UPLOAD_DIR, 'bookings.csv');
   const sPath = path.join(UPLOAD_DIR, 'sales.csv');
   const cPath = path.join(UPLOAD_DIR, 'customers.csv');
   try {
-    fs.writeFileSync(bPath, bookings_csv, 'utf8');
-    fs.writeFileSync(sPath, sales_csv, 'utf8');
-    if (customers_csv) fs.writeFileSync(cPath, customers_csv, 'utf8');
+    fs.writeFileSync(bPath, found.bookings.text, 'utf8');
+    fs.writeFileSync(sPath, found.sales.text, 'utf8');
+    if (found.customers) fs.writeFileSync(cPath, found.customers.text, 'utf8');
   } catch (e) {
     return res.status(500).json({ error: 'Could not save uploads: ' + e.message });
   }
 
   const args = [path.join(__dirname, 'load.js'), bPath, sPath];
-  if (customers_csv) args.push(cPath);
+  if (found.customers) args.push(cPath);
   args.push('--db', DB_PATH);
 
-  execFile(
-    process.execPath,
-    args,
-    { timeout: 180000 },
-    (err, stdout, stderr) => {
-      if (err) {
-        console.error('[brain] load failed:', stderr || err.message);
-        return res.status(500).json({ error: 'Load failed: ' + String(stderr || err.message).slice(0, 400) });
-      }
-      res.json({ ok: true, message: String(stdout || '').trim() });
+  execFile(process.execPath, args, { timeout: 180000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('[brain] load failed:', stderr || err.message);
+      return res.status(500).json({ error: 'Load failed: ' + String(stderr || err.message).slice(0, 400) });
     }
-  );
+    const detected = Object.entries(found).map(([k, v]) => `${v.name} → ${k}`).join(', ');
+    res.json({
+      ok: true,
+      message: String(stdout || '').trim(),
+      detected,
+      warnings: problems,
+      customers_included: !!found.customers,
+    });
+  });
 });
+
 
 // Business context — editable from the UI so knowledge can be fixed the
 // moment the brain gets something wrong.

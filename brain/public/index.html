@@ -396,19 +396,12 @@
 <div class="sheetbg" id="sheetbg">
   <div class="sheet">
     <h2>Load new data</h2>
-    <div class="hint">From FareHarbor, export each as <b>Detailed</b>, range <b>01/01/2023 → today</b>, all columns. The customers report is optional but adds bike types (cargo, e-bike, child seat). This replaces everything loaded.</div>
-    <label class="drop" id="dropB">
-      <input type="file" accept=".csv" id="fileB" hidden/>
-      <span id="labB"><b>Bookings report</b><small>Choose CSV</small></span>
+    <div class="hint">Export from FareHarbor as <b>Detailed</b>, range <b>01/01/2023 → today</b>, all columns: <b>bookings</b>, <b>sales</b>, and optionally <b>customers</b> (bike types). Drop them all here in any order — I identify each file by its contents, so nothing can end up in the wrong place.</div>
+    <label class="drop" id="dropAll">
+      <input type="file" accept=".csv" id="fileAll" hidden multiple/>
+      <span id="labAll"><b>Drop the CSVs here</b><small>Any order · 2 or 3 files</small></span>
     </label>
-    <label class="drop" id="dropS">
-      <input type="file" accept=".csv" id="fileS" hidden/>
-      <span id="labS"><b>Sales report</b><small>Choose CSV</small></span>
-    </label>
-    <label class="drop" id="dropC">
-      <input type="file" accept=".csv" id="fileC" hidden/>
-      <span id="labC"><b>Customers report</b><small>Choose CSV · bike types, adult/child</small></span>
-    </label>
+    <div id="fileList" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--paint-2);line-height:1.8;"></div>
     <div class="upmsg" id="upmsg"></div>
     <div class="acts">
       <button class="btn" id="cancelUp">Cancel</button>
@@ -670,35 +663,34 @@ qEl.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey){ e.pr
 qEl.addEventListener('input', () => { qEl.style.height='auto'; qEl.style.height = Math.min(qEl.scrollHeight,120)+'px'; });
 document.addEventListener('click', e => { if (e.target.classList.contains('chip')) ask(e.target.textContent); });
 
-let csvB = null, csvS = null, csvC = null;
+let pickedFiles = [];
 $('upBtn').onclick = () => $('sheetbg').classList.add('open');
 $('cancelUp').onclick = () => $('sheetbg').classList.remove('open');
 $('sheetbg').onclick = e => { if (e.target === $('sheetbg')) $('sheetbg').classList.remove('open'); };
-function wire(input, drop, lab, set){
-  input.onchange = () => {
-    const f = input.files[0]; if (!f) return;
+$('fileAll').onchange = async () => {
+  const files = [...$('fileAll').files];
+  if (!files.length) return;
+  pickedFiles = await Promise.all(files.map(f => new Promise(res => {
     const rd = new FileReader();
-    rd.onload = () => {
-      set(rd.result);
-      $(drop).classList.add('has');
-      $(lab).innerHTML = '<b>✓ ' + esc(f.name) + '</b><small>' + Math.round(f.size/1024).toLocaleString() + ' KB</small>';
-      $('doUp').disabled = !(csvB && csvS);
-    };
+    rd.onload = () => res({ name: f.name, size: f.size, text: rd.result });
     rd.readAsText(f);
-  };
-}
-wire($('fileB'),'dropB','labB', t => { csvB = t; });
-wire($('fileS'),'dropS','labS', t => { csvS = t; });
-wire($('fileC'),'dropC','labC', t => { csvC = t; });
+  })));
+  $('dropAll').classList.add('has');
+  $('labAll').innerHTML = '<b>✓ ' + pickedFiles.length + ' file' + (pickedFiles.length>1?'s':'') + '</b><small>ready to load</small>';
+  $('fileList').innerHTML = pickedFiles.map(f => esc(f.name) + ' · ' + Math.round(f.size/1024).toLocaleString() + ' KB').join('<br>');
+  $('doUp').disabled = pickedFiles.length < 2;
+};
 $('doUp').onclick = async () => {
   $('doUp').disabled = true;
   const m = $('upmsg'); m.className = 'upmsg'; m.textContent = 'Loading…';
   try{
     const r = await fetch('/api/upload',{ method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({ bookings_csv: csvB, sales_csv: csvS, customers_csv: csvC }) });
+      body: JSON.stringify({ files: pickedFiles.map(f => ({ name: f.name, text: f.text })) }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Load failed');
-    m.className = 'upmsg ok'; m.textContent = d.message || 'Loaded.';
+    m.className = 'upmsg ok';
+    m.textContent = (d.message || 'Loaded.') + (d.detected ? '  [' + d.detected + ']' : '') +
+      (d.warnings && d.warnings.length ? '  ⚠ ' + d.warnings.join(' ') : '');
     await loadStatus();
     setTimeout(() => { $('sheetbg').classList.remove('open'); opener(); }, 1200);
   }catch(e){

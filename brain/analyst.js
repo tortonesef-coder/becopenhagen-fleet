@@ -206,11 +206,25 @@ async function runAnalysis({ maxRounds = 4 } = {}) {
   const db = openDb();
   const metrics = computeMetrics(db);
 
+  // Continuity: hand the analyst its own previous briefing so "Watching"
+  // items actually get followed up week over week, instead of every run
+  // starting from amnesia.
+  let previous = '';
+  if (fs.existsSync(BRIEF_DB)) {
+    try {
+      const bdb = new DatabaseSync(BRIEF_DB, { readOnly: true });
+      const last = bdb.prepare('SELECT body, created_at FROM briefings ORDER BY id DESC LIMIT 1').get();
+      bdb.close();
+      if (last) previous = `\n\nYour previous briefing (${last.created_at}) — follow up on anything you said you were watching:\n${last.body}`;
+    } catch (_) {}
+  }
+
   const system = buildSystem();
   const messages = [{
     role: 'user',
     content: 'Here are this week\'s pre-computed metrics:\n\n' +
       JSON.stringify(metrics, null, 2) +
+      previous +
       '\n\nInvestigate what deserves it, then write the briefing.',
   }];
 
