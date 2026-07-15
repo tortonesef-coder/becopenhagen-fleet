@@ -36,6 +36,10 @@ app.use(session({
 const { execSync } = require('child_process');
 let APP_VERSION = 'dev';
 try { APP_VERSION = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch(e) {}
+// Ensure the repo's versioned hooks are active (git doesn't auto-trust hooks
+// from a clone). Enforces the CLAUDE_CONTEXT.md-on-every-commit convention for
+// anyone committing on this machine, incl. Claude Code sessions.
+try { execSync('git config core.hooksPath .githooks', { cwd: path.join(__dirname, '..') }); } catch(e) {}
 
 const indexHtml = require('fs').readFileSync(require('path').join(__dirname, '../public/index.html'), 'utf8');
 const indexHtmlVersioned = indexHtml.replace(/__VERSION__/g, APP_VERSION);
