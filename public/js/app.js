@@ -3648,7 +3648,7 @@ function renderToursList(el, tours, isGuideView) {
             <span class="tour-badge">${a.feed_id}</span>
             <span class="tour-time">${a.start_time}–${a.end_time}</span>
           </div>
-          <div class="tour-pax">${a.booking_count} booking${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
+          <div class="tour-pax">${a.booking_count} guest${a.booking_count!==1?'s':''} · ${a.total_bikes > 0 ? a.total_bikes + ' bike' + (a.total_bikes!==1?'s':'') : 'own bikes'}</div>
         </div>
         ${a.guide ? `<div class="tour-guide">${guideEmojiByName(a.guide)} ${a.guide}</div>` : '<div class="tour-no-guide">⚠️ No guide assigned yet</div>'}
         ${needsBikes ? `<div class="tour-bikes">${bikeStr}</div>` : ''}
