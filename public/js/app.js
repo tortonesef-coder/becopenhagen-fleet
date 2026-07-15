@@ -2882,7 +2882,12 @@ async function renderAdminReviews(el) {
     api('/api/team').catch(() => []),
     api('/api/reviews').catch(() => []),
   ]);
-  const guides = team.filter(m => m.role === 'guide' || m.role === 'admin');
+  // Who can receive a review = anyone who works with customers, not just guides.
+  // Zac is a mechanic but also does shop-floor work and gets good reviews, so
+  // key this off capabilities (guide OR shop) rather than the role alone.
+  const guides = team.filter(m =>
+    m.role === 'guide' || m.role === 'admin' || m.role === 'mechanic' || m.is_guide || m.can_shop
+  );
   const today = new Date().toISOString().substring(0, 10);
   const platforms = ['Google Maps', 'GetYourGuide', 'Viator', 'TripAdvisor', 'Airbnb'];
 
@@ -2899,8 +2904,8 @@ async function renderAdminReviews(el) {
       <div class="detail-section-title">Log a new review</div>
       <div style="display:flex;flex-direction:column;gap:0.5rem">
         <select class="form-select" id="rev-guide">
-          <option value="">Select guide…</option>
-          ${guides.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+          <option value="">Select team member…</option>
+          ${[...guides].sort((a,b)=>a.name.localeCompare(b.name)).map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
         </select>
         <div style="display:flex;gap:0.5rem">
           <input class="form-input" type="date" id="rev-date" value="${today}" style="flex:1">
