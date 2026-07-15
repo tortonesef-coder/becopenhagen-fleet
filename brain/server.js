@@ -384,34 +384,38 @@ function validateReport(text, kind) {
 }
 
 // Detect a wrong "Report on" basis. A correct incremental export (reported on
-// created date) has all its CREATED dates inside a recent window. If a large
-// share of created dates fall well before the window, the export was almost
-// certainly run on Availability date instead — it swept in old bookings whose
-// TOURS fall in the window. Warning, not rejection: a deliberate full-history
-// re-upload also looks like this, and must stay allowed.
+// created date) has its CREATED dates confined to the export window. A
+// wrong-basis export (run on Availability date) drags in bookings CREATED
+// months or years back. Warning, not rejection: a deliberate full-history
+// re-upload also spans years and must stay allowed — the discriminator is
+// that full history is thousands of rows, a weekly slice is not.
+// Uses the same real CSV parser as the loader — naive comma-splitting
+// misreads any field containing a comma.
+const { parseCsv } = require('./load');
+
 function checkBasis(text, kind) {
-  const col = 'Created At Date';
-  const lines = text.split('\n');
-  if (lines.length < 3) return null;
-  const header = lines[1].split(',').map(h => h.replace(/"/g, '').trim());
-  const idx = header.indexOf(col);
+  let rows;
+  try { rows = parseCsv(text); } catch (_) { return null; }
+  if (rows.length < 3) return null;
+  const totalRows = rows.length - 2;   // full row count decides "deliberate full upload"
+  const header = rows[1].map(h => h.replace(/^\uFEFF/, '').trim());
+  const idx = header.indexOf('Created At Date');
   if (idx < 0) return null;
 
   const dates = [];
-  for (let i = 2; i < Math.min(lines.length, 3000); i++) {
-    const cells = lines[i].split(',');
-    const v = (cells[idx] || '').replace(/"/g, '').trim();
-    const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/) || v.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) dates.push(m[3] ? `${m[3]}-${m[2]}-${m[1]}` : v.slice(0, 10));
+  for (let i = 2; i < Math.min(rows.length, 3000); i++) {
+    const v = (rows[i][idx] || '').trim();
+    let m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) { dates.push(`${m[3]}-${m[2]}-${m[1]}`); continue; }
+    m = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) dates.push(v.slice(0, 10));
   }
   if (dates.length < 5) return null;
 
   dates.sort();
   const span = (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000;
-  // an incremental export should span days-to-weeks of CREATED dates; a
-  // wrong-basis export drags in creations from months or years back
-  if (span > 90 && dates.length < 2500) {
-    return `${kind}: created dates span ${Math.round(span)} days — if this was meant as a weekly export, it was probably run on "Availability date" instead of "created date". (Fine if you meant to upload full history.)`;
+  if (span > 90 && totalRows < 2500) {
+    return `${kind}: created dates span ${Math.round(span)} days across only ${totalRows} rows — if this was meant as a weekly export, it was probably run on "Availability date" instead of "created date". (Fine if you meant to upload a longer history.)`;
   }
   return null;
 }
