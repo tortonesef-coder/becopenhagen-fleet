@@ -6,6 +6,11 @@ const { sendPasswordResetEmail, sendVerificationCodeEmail } = require('../email'
 
 function db() { return getDb(); }
 
+// The app's public base URL, used to build password reset / setup links in
+// emails. Single source of truth so it can't drift between the two send paths.
+// Canonical domain is app.becopenhagen.dk; override with APP_BASE_URL if needed.
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://app.becopenhagen.dk').replace(/\/+$/, '');
+
 // GET /auth/team — names only, for the Counter Mode "who did this?" grid.
 // Roles are NOT exposed: an unauthenticated caller has no business knowing who
 // is an admin, and the login screen no longer lists people at all.
@@ -57,7 +62,7 @@ router.post('/forgot-password-email', async (req, res) => {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
   db().prepare('INSERT INTO password_resets (token, member_id, expires_at) VALUES (?,?,?)').run(token, member.id, expiresAt);
 
-  const resetUrl = `https://fleet.interestingtours.dk/reset-password?token=${token}`;
+  const resetUrl = `${APP_BASE_URL}/reset-password?token=${token}`;
   await sendPasswordResetEmail(member.email, member.name, resetUrl).catch(e => console.error('Reset email failed:', e.message));
   res.json(OK);
 });
@@ -184,7 +189,7 @@ router.post('/forgot-password', async (req, res) => {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
   db().prepare('INSERT INTO password_resets (token, member_id, expires_at) VALUES (?,?,?)').run(token, member.id, expiresAt);
 
-  const resetUrl = `https://fleet.interestingtours.dk/reset-password?token=${token}`;
+  const resetUrl = `${APP_BASE_URL}/reset-password?token=${token}`;
   const result = await sendPasswordResetEmail(member.email, member.name, resetUrl);
 
   if (!result.ok) return res.status(500).json({ error: 'Could not send email' });
