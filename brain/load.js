@@ -151,29 +151,36 @@ function classifyItem(item) {
 
 /* ── schema migration ─────────────────────────────────────────────────────
    Tables created before merge-mode had no primary keys, so upserts couldn't
-   dedupe. If we find such a table, drop it once — the very next full upload
-   recreates it keyed. (Detection: PRAGMA table_info pk flag.) */
-function ensureKeyed(db, table, keyCol) {
+   dedupe. Migrate by COPYING the rows into a keyed table — never by dropping.
+   (An earlier version dropped the table, which destroyed real data the first
+   time an incremental slice was uploaded. Migrations must preserve. Always.)
+
+   createSql builds the new keyed table under a temp name; rows are copied
+   across on the shared columns, then the tables are swapped. */
+function ensureKeyed(db, table, keyCol, createSqlFor) {
   try {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-    if (!cols.length) return; // table doesn't exist yet — fine
-    const hasPk = cols.some(c => c.name === keyCol && c.pk > 0);
-    if (!hasPk) {
-      console.log(`(migrating ${table}: old schema without primary key — rebuilding)`);
-      db.exec(`DROP TABLE ${table}`);
-    }
-  } catch (_) {}
+    if (!cols.length) return;                                   // no table yet
+    if (cols.some(c => c.name === keyCol && c.pk > 0)) return;  // already keyed
+
+    console.log(`(migrating ${table} to keyed schema — preserving all ${db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n} existing rows)`);
+    const tmp = `${table}_keyed_tmp`;
+    db.exec(`DROP TABLE IF EXISTS ${tmp}`);
+    db.exec(createSqlFor(tmp));
+    const newCols = db.prepare(`PRAGMA table_info(${tmp})`).all().map(c => c.name);
+    const oldCols = cols.map(c => c.name);
+    const shared = newCols.filter(c => oldCols.includes(c)).map(c => `"${c}"`).join(',');
+    db.exec(`INSERT OR REPLACE INTO ${tmp} (${shared}) SELECT ${shared} FROM ${table}`);
+    db.exec(`DROP TABLE ${table}`);
+    db.exec(`ALTER TABLE ${tmp} RENAME TO ${table}`);
+  } catch (e) {
+    // If migration fails, leave the original table alone — an unkeyed table
+    // that merges imperfectly beats a destroyed one.
+    console.error(`(migration of ${table} failed, leaving it untouched: ${e.message})`);
+  }
 }
 
-/* ── load ───────────────────────────────────────────────────────────────── */
-function loadBookings(file, db) {
-  const recs = readReport(file)
-    // FareHarbor appends a grand-totals row (no booking id / no item).
-    // It must be dropped or it poisons every aggregate.
-    .filter(r => (r['Booking ID'] || '').trim() && (r['Item'] || '').trim())
-    .filter(r => !/total/i.test(r['Booking ID']));
-
-  db.exec(`CREATE TABLE IF NOT EXISTS bookings (
+const BOOKINGS_SCHEMA = (name) => `CREATE TABLE ${name} (
     booking_id TEXT, order_id TEXT,
     cancelled INTEGER, cancelled_at TEXT, cancelled_by TEXT,
     cancel_days_before_tour INTEGER,
@@ -188,7 +195,26 @@ function loadBookings(file, db) {
     processing_fees REAL, paid_to_affiliate REAL, amount_due REAL,
     revenue_per_pax REAL,
     PRIMARY KEY (booking_id)
-  )`);
+  )`;
+
+const SALES_SCHEMA = (name) => `CREATE TABLE ${name} (
+    txn_id TEXT, booking_id TEXT, item TEXT, kind TEXT,
+    created_at TEXT, created_dow TEXT,
+    payment_type TEXT, card_type TEXT, created_by TEXT,
+    gross REAL, processing_fee REAL, net REAL, refund_gross REAL,
+    tax_paid REAL, subtotal_paid REAL, payout_date TEXT,
+    PRIMARY KEY (txn_id)
+  )`;
+
+/* ── load ───────────────────────────────────────────────────────────────── */
+function loadBookings(file, db) {
+  const recs = readReport(file)
+    // FareHarbor appends a grand-totals row (no booking id / no item).
+    // It must be dropped or it poisons every aggregate.
+    .filter(r => (r['Booking ID'] || '').trim() && (r['Item'] || '').trim())
+    .filter(r => !/total/i.test(r['Booking ID']));
+
+  db.exec(BOOKINGS_SCHEMA('bookings').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
 
   // Upsert by booking_id: new bookings insert, existing ones get REPLACED so
   // late changes (a cancellation, a payment) are corrected on re-upload.
@@ -236,14 +262,7 @@ function loadBookings(file, db) {
 function loadSales(file, db) {
   const recs = readReport(file).filter(r => (r['Payment or Refund ID'] || '').trim());
 
-  db.exec(`CREATE TABLE IF NOT EXISTS sales (
-    txn_id TEXT, booking_id TEXT, item TEXT, kind TEXT,
-    created_at TEXT, created_dow TEXT,
-    payment_type TEXT, card_type TEXT, created_by TEXT,
-    gross REAL, processing_fee REAL, net REAL, refund_gross REAL,
-    tax_paid REAL, subtotal_paid REAL, payout_date TEXT,
-    PRIMARY KEY (txn_id)
-  )`);
+  db.exec(SALES_SCHEMA('sales').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
 
   const ins = db.prepare('INSERT OR REPLACE INTO sales VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
 
@@ -373,11 +392,25 @@ function main() {
     process.exit(1);
   }
 
+  // Backup before any write: if anything destructive ever slips through,
+  // the previous state is one file-copy away.
+  let preCount = 0;
+  if (fs.existsSync(dbPath)) {
+    for (const ext of ['', '-wal', '-shm']) {
+      if (fs.existsSync(dbPath + ext)) fs.copyFileSync(dbPath + ext, dbPath + ext + '.bak');
+    }
+    try {
+      const d0 = new DatabaseSync(dbPath, { readOnly: true });
+      preCount = d0.prepare('SELECT COUNT(*) n FROM bookings').get().n;
+      d0.close();
+    } catch (_) {}
+  }
+
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
 
-  ensureKeyed(db, 'bookings', 'booking_id');
-  ensureKeyed(db, 'sales', 'txn_id');
+  ensureKeyed(db, 'bookings', 'booking_id', BOOKINGS_SCHEMA);
+  ensureKeyed(db, 'sales', 'txn_id', SALES_SCHEMA);
 
   const nb = loadBookings(files[0], db);
   const ns = loadSales(files[1], db);
@@ -398,6 +431,23 @@ function main() {
 
   const span = db.prepare('SELECT COUNT(*) n, MIN(booked_at) lo, MAX(booked_at) hi FROM bookings').get();
   db.close();
+
+  // INVARIANT: under accrual the booking count can never DECREASE — merge
+  // inserts and replaces, never deletes. A shrink means something destructive
+  // happened: restore the backup and refuse to proceed.
+  if (span.n < preCount) {
+    for (const ext of ['', '-wal', '-shm']) {
+      if (fs.existsSync(dbPath + ext + '.bak')) fs.copyFileSync(dbPath + ext + '.bak', dbPath + ext);
+      else if (fs.existsSync(dbPath + ext)) fs.unlinkSync(dbPath + ext);
+    }
+    console.error(
+      `SAFETY STOP: bookings would have gone from ${preCount.toLocaleString()} to ` +
+      `${span.n.toLocaleString()} — impossible under accrual. Restored the previous ` +
+      `database untouched; this upload was NOT applied.`
+    );
+    process.exit(1);
+  }
+
   console.log(
     `Merged ${nb.toLocaleString()} bookings, ${ns.toLocaleString()} sales transactions` +
     (nc ? `, ${nc.toLocaleString()} customer line items.` : '.') +

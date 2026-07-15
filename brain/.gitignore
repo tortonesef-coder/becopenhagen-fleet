@@ -4,3 +4,4 @@ analytics.db
 uploads/
 briefings.db
 analyst.log
+*.bak
