@@ -597,6 +597,9 @@ async function main() {
     `).all(todayStr, lastSyncedDate);
 
     for (const row of dbFuture) {
+      // TEMP TRACE: follow the 31 Aug A3P through the sweep to catch what deletes it.
+      const _t = row.start_date === '2026-08-31' && row.feed_id === 'A3P';
+      if (_t) console.log(`  [trace] 31Aug A3P row: id=${row.availability_id} time=${row.start_time} guide=${row.guide||'—'} bookings=${row.booking_count} | inSeenIds=${seenIds.has(row.availability_id)} | slotSeen=${seenSlots.has(slotKey(row.start_date, row.start_time))}`);
       if (seenIds.has(row.availability_id)) continue;
       // Same tour still present under a different (reissued) ID? Not a cancel —
       // just clean up the stale old-ID row. The guide is NOT carried over: on
@@ -604,6 +607,7 @@ async function main() {
       // already reflects FareHarbor's current assignment. Copying the old guide
       // could wrongly override an assignment FareHarbor actually cleared.
       if (seenSlots.has(slotKey(row.start_date, row.start_time))) {
+        if (_t) console.log(`  [trace] 31Aug A3P DELETED as superseded (slotKey matched another feed at same date+time)`);
         db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
         console.log(`↻ Superseded (ID reissued), not cancelled: ${row.start_date} ${row.start_time} ${row.feed_id}`);
         continue;
