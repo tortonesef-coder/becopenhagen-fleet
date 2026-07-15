@@ -219,6 +219,21 @@
   .brief .body li::before{ content:''; position:absolute; left:2px; top:9px;
     width:5px; height:5px; border-radius:50%; background:var(--kerb-2); }
   .brief .body strong{ color:#fff; font-weight:600; }
+  .working{
+    padding:20px; border-radius:var(--r-lg); background:var(--asphalt-2);
+    border:1px solid var(--kerb); border-left:2px solid var(--lane);
+    display:flex; align-items:center; gap:16px;
+  }
+  .working .wheel{
+    width:34px; height:34px; flex:none; border-radius:50%;
+    border:2.5px solid var(--kerb-2); border-top-color:var(--lane);
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg) } }
+  .working .lines{ min-width:0; }
+  .working .stage{ font-size:14.5px; color:var(--paint); margin-bottom:3px; transition:opacity .3s; }
+  .working .stage.fade{ opacity:0; }
+  .working .sub{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--paint-3); }
   .runbar{ display:flex; align-items:center; gap:10px; margin-bottom:14px; }
   .runbar button{
     font:inherit; font-size:13px; font-weight:600; padding:9px 16px; cursor:pointer;
@@ -740,12 +755,61 @@ async function showBriefings(){
   thread.appendChild(wrap);
 
   $('runNow').onclick = async () => {
-    const b = $('runNow'); b.disabled = true; b.textContent = 'Analysing… (a minute or two)';
+    const b = $('runNow'); b.disabled = true; b.textContent = 'Analysing…';
+    const list = $('briefList');
+
+    // The stages mirror what the analyst actually does; timing is indicative
+    // (the real work is server-side), but each line is a true description of
+    // a phase, not theatre.
+    const card = document.createElement('div');
+    card.className = 'working';
+    card.innerHTML = '<div class="wheel"></div>' +
+      '<div class="lines"><div class="stage"></div><div class="sub"></div></div>';
+    list.prepend(card);
+    const stageEl = card.querySelector('.stage');
+    const subEl = card.querySelector('.sub');
+
+    const stages = [
+      ['Computing the numbers', 'revenue, occupancy, channels, refunds, forward bookings'],
+      ['Reading last week\'s briefing', 'following up on watch items'],
+      ['Investigating', 'the analyst runs its own follow-up queries'],
+      ['Still investigating', 'digging into anything that looks off'],
+      ['Writing the briefing', 'flags, low-hanging fruit, what to watch'],
+    ];
+    let si = 0;
+    const setStage = () => {
+      stageEl.classList.add('fade');
+      setTimeout(() => {
+        stageEl.textContent = stages[si][0];
+        subEl.textContent = stages[si][1];
+        stageEl.classList.remove('fade');
+        if (si < stages.length - 1) si++;
+      }, 300);
+    };
+    setStage();
+    const ticker = setInterval(setStage, 16000);
+    const t0 = Date.now();
+    const clock = setInterval(() => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      subEl.textContent = stages[Math.min(si, stages.length-1)][1] + ' · ' + s + 's';
+    }, 1000);
+
     try{
       const r = await fetch('/api/analyse', { method:'POST' });
+      if (r.status === 401){ location.reload(); return; }
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Analysis failed');
-    }catch(e){ alert(e.message); }
+    }catch(e){
+      stageEl.textContent = 'Analysis failed';
+      subEl.textContent = e.message;
+      card.style.borderLeftColor = 'var(--red)';
+      card.querySelector('.wheel').style.display = 'none';
+      clearInterval(ticker); clearInterval(clock);
+      b.disabled = false; b.textContent = 'Run analysis now';
+      return;
+    }
+    clearInterval(ticker); clearInterval(clock);
+    card.remove();
     b.disabled = false; b.textContent = 'Run analysis now';
     loadBriefs();
   };
