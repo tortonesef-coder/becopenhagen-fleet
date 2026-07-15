@@ -165,7 +165,7 @@ async function login(browser) {
 }
 
 // All item IDs from the discovered API URL (tours + rentals; harmless to request all)
-const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
+const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,741878,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
 
 // Fetch one calendar month by calling the internal API directly (authenticated
 // via the logged-in page's cookies). Deterministic — no response interception.
@@ -597,10 +597,22 @@ async function main() {
     // does (hhmm), so the key matches the stored row's time.
     const seenSlots = new Set(all.map(a => slotKey(a.start_date, hhmm(a.start_at))));
     const lastSyncedDate = all.map(a => a.start_date).sort().pop() || todayStr;
-    const dbFuture = db.prepare(`
+
+    // SAFETY: only ever cancel tours of a feed type we ACTUALLY FETCHED this run.
+    // If a whole tour type is missing from the fetch — e.g. its item ID wasn't in
+    // ALL_ITEM_IDS (H3 was missing and every booked H3 got deleted), or that item
+    // errored — its DB rows must be left ALONE, not swept as "cancelled". Without
+    // this, one missing item ID silently wipes an entire product's bookings.
+    const fetchedFeeds = new Set(all.map(a => a.item?.feed_id).filter(Boolean));
+    const dbFutureAll = db.prepare(`
       SELECT * FROM tour_availabilities
       WHERE feed_type='tour' AND start_date > ? AND start_date <= ?
     `).all(todayStr, lastSyncedDate);
+    const dbFuture = dbFutureAll.filter(row => {
+      if (fetchedFeeds.has(row.feed_id)) return true;
+      console.log(`  ⚠ skipping cancel-check for ${row.feed_id} ${row.start_date} ${row.start_time} — that feed type wasn't fetched this run (not treating as cancelled)`);
+      return false;
+    });
 
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
