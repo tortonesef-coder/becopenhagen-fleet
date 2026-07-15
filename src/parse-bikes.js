@@ -106,4 +106,25 @@ function parseBikeCounts(lines) {
   return need;
 }
 
-module.exports = { parseBikeCounts, classify };
+/**
+ * Count PEOPLE in booking text lines — the companion question to bike counts.
+ * "3 Adults, 1 Child incl. bike rental" -> 4. "11 11PaxPrivate" -> 11.
+ * "2 Adult + Bike" -> 2. Lines with no person-word contribute nothing.
+ * Used so the iCal sync can write the same pax semantics the scraper writes
+ * (FareHarbor customer_count) instead of clobbering it with reservation counts.
+ */
+function parsePaxCount(lines) {
+  let pax = 0;
+  (Array.isArray(lines) ? lines : [lines]).filter(Boolean).forEach(line => {
+    String(line).split(/,|;/).forEach(part => {
+      const m = part.match(/(\d+)\s+(.+)/);
+      if (!m) return;
+      const n = parseInt(m[1], 10);
+      if (!Number.isFinite(n) || n <= 0) return;
+      if (/adult|child|kid|people|person|guest|pax|senior|youth|student|infant|traveler|participant/i.test(m[2])) pax += n;
+    });
+  });
+  return pax;
+}
+
+module.exports = { parseBikeCounts, parsePaxCount, classify };

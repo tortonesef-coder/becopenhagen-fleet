@@ -6,7 +6,7 @@ const { createNotification, resolveNotification } = require('./admin-notifs');
 const { logTourChange } = require('../tour-change-log');
 const { computeBufferedMinutes } = require('../tour-duration');
 const { notifyFirstBooking } = require('../notify-first-booking');
-const { parseBikeCounts } = require('../parse-bikes');
+const { parseBikeCounts, parsePaxCount } = require('../parse-bikes');
 
 function db() { return getDb(); }
 
@@ -257,6 +257,10 @@ function parseIcal(text) {
       total_bikes: totalBikesNeeded,
       bookings,
       booking_count: bookings.length,
+      // People count, parsed from the same booking lines as the bike counts.
+      // syncFeedToDB uses this for TOURS so booking_count carries pax — the same
+      // semantics the v2 scraper writes — instead of reservation counts.
+      pax: parsePaxCount(bookings.map(b => b.what).filter(Boolean)),
       url,
       description,
       _rawBlock: block.substring(0, 4000), // cap size — full VEVENT text for forensic logging
@@ -298,6 +302,11 @@ function syncFeedToDB(feed, events) {
   `);
 
   events.forEach(e => {
+    // TOURS carry PAX in booking_count (same semantics as the v2 scraper /
+    // FareHarbor customer_count). Without this the 90s iCal sync overwrote the
+    // scraper's pax with reservation counts and the two writers oscillated.
+    if (feed.type === 'tour' && e.pax > 0) e.booking_count = e.pax;
+
     // Check previous state for notification triggers
     const prev = db().prepare('SELECT booking_count, guide, total_bikes, bookings_json FROM tour_availabilities WHERE availability_id=?').get(e.uid);
     const prevCount = prev?.booking_count ?? null;
@@ -458,10 +467,14 @@ function syncFeedToDB(feed, events) {
 
     // Before deleting, email any guide assigned to a future slot being removed
     if (feed.type === 'tour') {
+      // Same horizon rule as the DELETE below: a booked tour beyond the feed's
+      // last date is out of view, not cancelled — no email for it.
+      const emailHorizon = events.map(ev => ev.start_date).filter(Boolean).sort().pop() || '1970-01-01';
       const toDelete = db().prepare(`SELECT * FROM tour_availabilities
         WHERE feed_id=? AND availability_id NOT IN (${placeholders})
         AND booking_count > 0
-        AND start_at > datetime('now')`).all(feed.id, ...currentIds);
+        AND date(start_date) <= date(?)
+        AND start_at > datetime('now')`).all(feed.id, ...currentIds, emailHorizon);
       // FareHarbor reissues availability IDs when a private tour is edited, so a
       // missing ID isn't a cancellation if the same feed+date+time is still in
       // the feed under a new ID. Guard against that (see the A3P phantom cancels).
@@ -495,18 +508,30 @@ function syncFeedToDB(feed, events) {
       });
     }
 
+    // HORIZON BOUND: iCal may only delete what it can see the ABSENCE of. The
+    // feed covers a limited date range (often only availabilities with bookings,
+    // and not months ahead) — a booked tour BEYOND the feed's last date isn't
+    // "cancelled", it's simply out of view. Without this bound, the 31 Aug A3P
+    // (47 days out, 11 pax, Federico) was silently re-deleted every 90s after
+    // each hourly scraper re-insert. Rows past the horizon are the scraper's
+    // job; iCal keeps its hands off them.
+    const feedHorizon = events.map(e => e.start_date).filter(Boolean).sort().pop() || null;
     db().prepare(`DELETE FROM tour_availabilities
       WHERE feed_id=?
       AND availability_id NOT IN (${placeholders})
       AND booking_count > 0
+      AND date(start_date) <= date(?)
       AND (start_at > datetime('now') OR start_at < datetime('now', '-1 day'))`)
-      .run(feed.id, ...currentIds);
+      .run(feed.id, ...currentIds, feedHorizon || '1970-01-01');
   } else {
-    // Feed returned zero events (e.g. temporary fetch hiccup) — don't wipe
-    // everything; only clear out anything that's not a recently-completed
-    // tour, same grace-period logic as above.
+    // Feed returned zero events (temporary hiccup, or genuinely nothing booked).
+    // With no events there is NO horizon — iCal can't verify the absence of
+    // anything. So never touch future BOOKED rows here (a hiccup must not wipe
+    // real bookings; cancellations within view are the scraper's job too).
+    // Only clean up unbooked rows and long-past ones.
     db().prepare(`DELETE FROM tour_availabilities
       WHERE feed_id=?
+      AND (booking_count = 0 OR start_at < datetime('now', '-1 day'))
       AND (start_at > datetime('now') OR start_at < datetime('now', '-1 day'))`)
       .run(feed.id);
   }
