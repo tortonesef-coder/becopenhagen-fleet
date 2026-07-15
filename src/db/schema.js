@@ -71,6 +71,11 @@ function getDb() {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     db = new DatabaseSync(DB_PATH);
     db.exec('PRAGMA journal_mode = WAL');
+    // Wait up to 5s for a competing write instead of failing instantly with
+    // "database is locked". The scraper (separate process) and the app write to
+    // the same file; WAL lets them coexist, but without a busy_timeout a write
+    // that lands mid-transaction aborts immediately. This makes it wait & retry.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON');
     initSchema();
   }

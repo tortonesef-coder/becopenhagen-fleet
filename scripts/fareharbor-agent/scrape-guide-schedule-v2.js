@@ -414,6 +414,12 @@ async function main() {
     let upserted = 0;
     const assignmentDigest = new Map(); // member.id -> { member, items: [...] }
 
+    // One transaction for the whole write pass. Without this, each availability
+    // was its own write txn — dozens of separate lock grabs competing with the
+    // live app, which produced "database is locked". A single transaction is far
+    // faster and takes the write lock once, briefly.
+    db.exec('BEGIN IMMEDIATE');
+    try {
     for (const av of all) {
       if (av.start_date < todayStr) continue; // skip past
 
@@ -515,6 +521,11 @@ async function main() {
 
       console.log(`✓ ${av.start_date} ${startTime} ${av.item.feed_id} guide=${av.guide || 'unassigned'} bookings=${av.booking_count}`);
       upserted++;
+    }
+      db.exec('COMMIT');
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw e;
     }
 
     console.log(`\nDone. ${upserted} availabilities synced in one pass.`);
