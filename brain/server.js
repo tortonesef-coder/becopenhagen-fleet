@@ -383,6 +383,39 @@ function validateReport(text, kind) {
   return null;
 }
 
+// Detect a wrong "Report on" basis. A correct incremental export (reported on
+// created date) has all its CREATED dates inside a recent window. If a large
+// share of created dates fall well before the window, the export was almost
+// certainly run on Availability date instead — it swept in old bookings whose
+// TOURS fall in the window. Warning, not rejection: a deliberate full-history
+// re-upload also looks like this, and must stay allowed.
+function checkBasis(text, kind) {
+  const col = 'Created At Date';
+  const lines = text.split('\n');
+  if (lines.length < 3) return null;
+  const header = lines[1].split(',').map(h => h.replace(/"/g, '').trim());
+  const idx = header.indexOf(col);
+  if (idx < 0) return null;
+
+  const dates = [];
+  for (let i = 2; i < Math.min(lines.length, 3000); i++) {
+    const cells = lines[i].split(',');
+    const v = (cells[idx] || '').replace(/"/g, '').trim();
+    const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/) || v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) dates.push(m[3] ? `${m[3]}-${m[2]}-${m[1]}` : v.slice(0, 10));
+  }
+  if (dates.length < 5) return null;
+
+  dates.sort();
+  const span = (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000;
+  // an incremental export should span days-to-weeks of CREATED dates; a
+  // wrong-basis export drags in creations from months or years back
+  if (span > 90 && dates.length < 2500) {
+    return `${kind}: created dates span ${Math.round(span)} days — if this was meant as a weekly export, it was probably run on "Availability date" instead of "created date". (Fine if you meant to upload full history.)`;
+  }
+  return null;
+}
+
 app.post('/api/upload', requireAuth, (req, res) => {
   const { files } = req.body || {};
   if (!Array.isArray(files) || !files.length) {
@@ -404,6 +437,8 @@ app.post('/api/upload', requireAuth, (req, res) => {
     }
     const bad = validateReport(f.text, kind);
     if (bad) { problems.push(bad); continue; }
+    const basis = checkBasis(f.text, kind);
+    if (basis) problems.push(basis);
     found[kind] = { name: f.name, text: f.text };
   }
 
