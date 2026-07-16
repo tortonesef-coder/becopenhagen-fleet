@@ -14,14 +14,14 @@ const TOKEN = 'dbb7dbf5-fa2d-4096-9e8b-dfba97f25352';
 const BASE = 'https://fareharbor.com/integrations/ics/becopenhagen/calendar';
 
 const TOUR_FEEDS = [
-  { id: 'L2P', itemId: '712177', label: 'Private History Tour (2h)',    type: 'tour' },
-  { id: 'L3',  itemId: '707493', label: 'History Tour (3h)',            type: 'tour' },
-  { id: 'L3P', itemId: '713560', label: 'Private History Tour (3h)',    type: 'tour' },
+  { id: 'L2P', itemId: '712177', label: 'Private Liveable City (2h)',    type: 'tour' },
+  { id: 'L3',  itemId: '707493', label: 'Liveable City Tour (3h)',       type: 'tour' },
+  { id: 'L3P', itemId: '713560', label: 'Private Liveable City (3h)',    type: 'tour' },
   { id: 'A3',  itemId: '709131', label: 'Architecture Tour (3h)',       type: 'tour' },
-  { id: 'A3P', itemId: '713563', label: 'Private Architecture Tour (3h)',type: 'tour' },
+  { id: 'A3P', itemId: '713563', label: 'Private Architecture (3h)',    type: 'tour' },
   { id: 'F3',  itemId: '729348', label: 'Food Tour (3h)',               type: 'tour' },
   { id: 'F3P', itemId: '730640', label: 'Private Food Tour (3h)',       type: 'tour' },
-  { id: 'H3',  itemId: '741878', label: 'History Tour New (3h)',        type: 'tour' },
+  { id: 'H3',  itemId: '741878', label: 'History Tour (3h)',            type: 'tour' },
   { id: 'CUSTOM', itemId: '650858', label: 'Custom Tour',               type: 'tour' },
   { id: '1-D', itemId: '190975', label: '1-Day Rental',                 type: 'rental' },
   { id: '2-D', itemId: '190977', label: '2-Day Rental',                 type: 'rental' },
