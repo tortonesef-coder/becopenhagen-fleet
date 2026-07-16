@@ -316,6 +316,20 @@ function initSchema() {
       notified_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Debounce for the v2 scraper's cancellation sweep: counts how many
+    -- CONSECUTIVE hourly runs a future tour slot has been absent from the
+    -- FareHarbor calendar feed. A slot must be missed twice before it is
+    -- treated as cancelled, so a single transient upstream omission (FareHarbor
+    -- intermittently drops one availability from an otherwise-complete response)
+    -- no longer deletes a booked tour and re-notifies it as "new" next hour.
+    -- Reset to nothing as soon as the slot reappears in a run.
+    CREATE TABLE IF NOT EXISTS tour_missing (
+      availability_id TEXT PRIMARY KEY,
+      miss_count      INTEGER NOT NULL DEFAULT 1,
+      first_missed_at TEXT DEFAULT (datetime('now')),
+      last_missed_at  TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS notification_prefs (
       member_id TEXT NOT NULL REFERENCES team_members(id),
       notification_type TEXT NOT NULL,

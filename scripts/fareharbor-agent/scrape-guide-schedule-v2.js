@@ -25,6 +25,13 @@ const { createNotification, resolveNotification } = require('../../src/routes/ad
 
 const COMPANY_SLUG = 'becopenhagen';
 
+// A future tour slot must be absent from the FareHarbor feed for this many
+// CONSECUTIVE hourly runs before the cancellation sweep deletes it. FareHarbor
+// occasionally omits a single availability from one otherwise-healthy calendar
+// response (confirmed 2026-07-16: a booked A3P vanished for one poll, then came
+// back), which previously deleted the row and re-notified it as "new" next hour.
+const CANCEL_MISS_THRESHOLD = 2;
+
 // Item PK → feed config. Only these tour items are synced.
 const TOUR_ITEMS = {
   707493: { feed_id: 'L3',  label: 'Liveable City Tour (3h)' },
@@ -373,6 +380,14 @@ async function main() {
   }
 
   const db = getDb();
+  // Defensive: the scraper is a standalone cron process and may run before the
+  // app restart that creates this table via schema.js. Idempotent.
+  db.exec(`CREATE TABLE IF NOT EXISTS tour_missing (
+    availability_id TEXT PRIMARY KEY,
+    miss_count      INTEGER NOT NULL DEFAULT 1,
+    first_missed_at TEXT DEFAULT (datetime('now')),
+    last_missed_at  TEXT DEFAULT (datetime('now'))
+  )`);
   const activeGuideNames = db.prepare(`SELECT name FROM team_members WHERE active=1`).all().map(r => r.name);
   const browser = await chromium.launch({ headless: true });
 
@@ -620,6 +635,15 @@ async function main() {
       return false;
     });
 
+    // Any slot that reappeared in this run resets its miss counter, so
+    // miss_count only ever reflects CONSECUTIVE misses. tour_missing is tiny
+    // (only currently-missing slots), so read it all and clear the ones now seen.
+    for (const m of db.prepare('SELECT availability_id FROM tour_missing').all()) {
+      if (seenIds.has(m.availability_id)) {
+        db.prepare('DELETE FROM tour_missing WHERE availability_id=?').run(m.availability_id);
+      }
+    }
+
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
       // Same tour still present under a different (reissued) ID? Not a cancel —
@@ -630,6 +654,19 @@ async function main() {
       if (seenSlots.has(slotKey(row.start_date, row.start_time))) {
         db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
         console.log(`↻ Superseded (ID reissued), not cancelled: ${row.start_date} ${row.start_time} ${row.feed_id}`);
+        continue;
+      }
+      // Debounce: a slot absent from a SINGLE run may just be a transient
+      // FareHarbor omission (it dropped one availability from an otherwise
+      // complete response). Require CANCEL_MISS_THRESHOLD consecutive misses
+      // before treating it as a real cancellation — the slot's row is left
+      // untouched in the meantime, so it stays visible and never gets re-added
+      // as a "new" assignment when the feed recovers next hour.
+      const misses = (db.prepare('SELECT miss_count FROM tour_missing WHERE availability_id=?').get(row.availability_id)?.miss_count || 0) + 1;
+      if (misses < CANCEL_MISS_THRESHOLD) {
+        db.prepare(`INSERT INTO tour_missing (availability_id, miss_count) VALUES (?, 1)
+          ON CONFLICT(availability_id) DO UPDATE SET miss_count = miss_count + 1, last_missed_at = datetime('now')`).run(row.availability_id);
+        console.log(`… missing from feed (${misses}/${CANCEL_MISS_THRESHOLD}), deferring cancel: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
         continue;
       }
       console.log(`✗ Removing cancelled slot: ${row.start_date} ${row.start_time} ${row.feed_id} (guide=${row.guide || 'none'})`);
@@ -660,6 +697,7 @@ async function main() {
       }
       db.prepare('DELETE FROM tour_availabilities WHERE availability_id=?').run(row.availability_id);
       db.prepare('DELETE FROM guide_tour_hours WHERE availability_id=? AND start_at > datetime(\'now\')').run(row.availability_id);
+      db.prepare('DELETE FROM tour_missing WHERE availability_id=?').run(row.availability_id);
     }
   } finally {
     await browser.close();
