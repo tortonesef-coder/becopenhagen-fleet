@@ -415,6 +415,49 @@ async function submitSetPassword(memberId) {
   }
 }
 
+// Password reset via the emailed link (/reset-password?token=...). The SPA
+// otherwise ignores the token and falls through to the login screen (see Boot).
+// Renders the sign-in screen as a backdrop, then prompts for a new password and
+// posts it with the token to /auth/reset-password.
+async function showResetPasswordScreen(token) {
+  document.getElementById('screen-identity').classList.add('active');
+  document.getElementById('screen-identity').style.display = 'flex';
+  await showTeamPicker();
+  openModal(`
+    <div class="modal-title">Choose a new password</div>
+    <div class="form-group">
+      <input class="form-input" type="password" id="reset-password" placeholder="New password (min 6 characters)" autocomplete="new-password" autofocus/>
+    </div>
+    <div class="form-group">
+      <input class="form-input" type="password" id="reset-password-confirm" placeholder="Confirm new password" autocomplete="new-password"/>
+    </div>
+    <div id="reset-error" style="color:#e04040;font-size:0.85rem;min-height:1.1rem;margin-bottom:0.4rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="submitResetPassword('${token}')">Set new password</button>
+    </div>
+  `);
+}
+
+async function submitResetPassword(token) {
+  const pw = document.getElementById('reset-password')?.value;
+  const pwConfirm = document.getElementById('reset-password-confirm')?.value;
+  const err = document.getElementById('reset-error');
+  if (pw !== pwConfirm) { if (err) err.textContent = 'Passwords do not match'; return; }
+  if (!pw || pw.length < 6) { if (err) err.textContent = 'Password must be at least 6 characters'; return; }
+
+  try {
+    await api('/auth/reset-password', { method:'POST', body:{ token, password: pw }});
+    // Strip the now-used token from the URL so a refresh can't replay a spent link.
+    history.replaceState({}, '', '/');
+    closeModal();
+    await showTeamPicker();
+    const loginErr = document.getElementById('login-error');
+    if (loginErr) { loginErr.style.color = 'var(--text2)'; loginErr.textContent = 'Password updated — please sign in.'; }
+  } catch(e) {
+    if (err) err.textContent = e.message;
+  }
+}
+
 function showForgotPassword(memberId) {
   openModal(`
     <div class="modal-title">Reset password</div>
@@ -2044,7 +2087,14 @@ function iconGuidesTab(){return`<svg viewBox="0 0 24 24" fill="none" stroke="cur
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-switch-user').addEventListener('click', switchUser);
 
-checkSession();
+// If the user arrived via a password-reset email link, handle the token here
+// instead of falling through to the normal session/login flow (which ignores it).
+const _resetToken = new URLSearchParams(location.search).get('token');
+if (_resetToken && location.pathname.replace(/\/+$/, '') === '/reset-password') {
+  showResetPasswordScreen(_resetToken);
+} else {
+  checkSession();
+}
 
 // ── VOICE ─────────────────────────────────────────────────────────────────
 let mediaRecorder = null;
