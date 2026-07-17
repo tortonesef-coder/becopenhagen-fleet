@@ -481,7 +481,9 @@ async function main() {
         }
       }
 
-      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide, source: 'v2', raw_data: av._raw });
+      // Log the EFFECTIVE guide (what the upsert's COALESCE actually stores) so
+      // a crew-less poll isn't recorded as a phantom guide->null change.
+      logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'guide', old_value: prev?.guide, new_value: av.guide ?? prev?.guide, source: 'v2', raw_data: av._raw });
       logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'booking_count', old_value: prev?.booking_count, new_value: av.booking_count, source: 'v2', raw_data: av._raw });
       if (av.total_bikes > 0) {
         logTourChange(db, { availability_id: av.availability_id, feed_id: av.item.feed_id, start_date: av.start_date, field: 'total_bikes', old_value: prev?.total_bikes, new_value: av.total_bikes, source: 'v2', raw_data: av._raw });
@@ -493,7 +495,14 @@ async function main() {
            start_date, start_time, end_time, booking_count, bikes_needed, total_bikes, last_synced)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
         ON CONFLICT(availability_id) DO UPDATE SET
-          guide=excluded.guide,
+          -- Keep the stored guide when THIS poll resolved none (av.guide null).
+          -- FareHarbor intermittently returns an availability with its crew
+          -- field empty (confirmed 2026-07-16: one poll blanked 90 guides, and
+          -- the next hour re-notified every guide as a "new" assignment). A
+          -- null from v2 means "no crew data this poll", not "unassigned", so
+          -- COALESCE preserves the known guide — genuine reassignments arrive as
+          -- a non-null name (overwrites) or a reissued availability ID.
+          guide=COALESCE(excluded.guide, guide),
           start_at=excluded.start_at, end_at=excluded.end_at,
           start_date=excluded.start_date, start_time=excluded.start_time, end_time=excluded.end_time,
           booking_count=excluded.booking_count, last_synced=excluded.last_synced,
