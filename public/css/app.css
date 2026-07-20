@@ -1290,6 +1290,32 @@ details summary::-webkit-details-marker { display: none; }
 }
 .view-as-banner button:active { background: rgba(255,255,255,0.3); }
 
+/* "Return all my tour bikes" banner — accent CTA bar above the tabbar */
+.return-all-banner {
+  background: var(--accent, #e8a825);
+  color: #1a1a1a;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.55rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  flex-shrink: 0;
+}
+.return-all-banner strong { font-weight: 800; }
+.return-all-banner button {
+  background: #1a1a1a;
+  color: #fff;
+  border: none;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.return-all-banner button:active { opacity: 0.8; }
+
 .identity-btn .iemoji {
   font-size: 1.6rem;
   line-height: 1;

@@ -691,7 +691,7 @@ function showMain() {
   document.getElementById('actor-badge').textContent = state.shopMode ? ('🏪 ' + state.actor.name) : state.actor.name;
   buildTabbar();
   renderTab(landingTab());
-  if (!state.shopMode) checkBorrowedReminder();
+  if (!state.shopMode) { checkBorrowedReminder(); refreshReturnAllBanner(); }
   if (state.actor?.role === 'admin') startNotifPolling();
 }
 
@@ -1610,6 +1610,10 @@ async function submitActionNew() {
       state.action = { type: null, bikes: [], searchQ: '', preloaded: null };
       renderAction(document.getElementById('content'));
     }
+
+    // A tour checkout or a return changes what the guide has out — keep the
+    // "Return all my tour bikes" banner in sync.
+    refreshReturnAllBanner();
 
   } catch(e) { toast(e.message,'error'); }
 }
@@ -4344,6 +4348,52 @@ async function openRentalDetail(availId, ref) {
 function goReturnForRental(bikeIds) {
   closeModal();
   state.action = { type: null, bikes: [...bikeIds], searchQ: '', preloaded: null };
+  renderTab('action');
+  setTimeout(() => selectActionType('return'), 120);
+}
+
+// ── "Return all my tour bikes" banner ─────────────────────────────────────
+// Guides take bikes via Action → Tour, which tags each bike assignment_type=
+// 'tour' and assigned_to=<the guide's name>. So the bikes THIS guide still has
+// out on a tour is a clean filter. A persistent banner offers a one-tap return
+// of the whole set; it opens the normal Return screen pre-filled so they can
+// still drop one a customer kept, or flag one for repair, before confirming.
+// Scoped to tour bikes only — any borrowed/city/rental bikes are left alone.
+async function myTourBikesOut() {
+  const me = (state.actor?.name || '').trim().toLowerCase();
+  if (!me || state.shopMode) return [];
+  const bikes = await api('/api/bikes').catch(() => []);
+  return bikes.filter(b =>
+    b.status === 'out' &&
+    String(b.assignment_type || '').toLowerCase() === 'tour' &&
+    String(b.assigned_to || '').trim().toLowerCase() === me
+  );
+}
+
+async function refreshReturnAllBanner() {
+  const existing = document.getElementById('return-all-banner');
+  if (state.shopMode) { existing?.remove(); return; }
+  let bikes = [];
+  try { bikes = await myTourBikesOut(); } catch { existing?.remove(); return; }
+  if (!bikes.length) { existing?.remove(); return; }
+  let banner = existing;
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'return-all-banner';
+    // Persistent bar just above the tabbar, so it stays across tab switches.
+    document.getElementById('screen-main').insertBefore(banner, document.getElementById('tabbar'));
+  }
+  banner.className = 'return-all-banner';
+  const n = bikes.length;
+  banner.innerHTML = `🚲 You have <strong>${n}</strong> tour bike${n !== 1 ? 's' : ''} out `
+    + `<button onclick="returnAllTourBikes()">Return all</button>`;
+}
+
+async function returnAllTourBikes() {
+  let bikes = [];
+  try { bikes = await myTourBikesOut(); } catch {}
+  if (!bikes.length) { refreshReturnAllBanner(); toast('No tour bikes out to return', ''); return; }
+  state.action = { type: null, bikes: bikes.map(b => b.id), searchQ: '', preloaded: null };
   renderTab('action');
   setTimeout(() => selectActionType('return'), 120);
 }
