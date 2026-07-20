@@ -186,10 +186,18 @@ function parseIcal(text) {
       const due = dueLine ? dueLine.replace('Due:', '').trim() : null;
       const fullyPaid = due === 'DKK0.00' || due === null;
 
-      // What they booked — lines with adult/child/people counts or bike descriptions
+      // What they booked — lines with adult/child/people counts or bike
+      // descriptions. The third clause catches multi-word product names where the
+      // bike keyword isn't glued to the number (e.g. "1 Christiania Cargo Bike",
+      // "1 Adult City Bike (Small)"); the earlier clauses required the keyword
+      // immediately after the count, so those lines were dropped and the rental
+      // silently recorded zero bikes. parseBikeCounts maps the phrase to the
+      // fleet's own type names, and parsePaxCount ignores bike-only lines, so
+      // widening this gate can't inflate pax.
       const whatLines = lines.filter(l =>
         (/\d+\s+(Adult|Child|People)/i.test(l) && !l.startsWith('#')) ||
-        (/\d+\s+(regular|ebike|e-bike|electric|SA|touring|cargo)/i.test(l))
+        (/\d+\s+(regular|ebike|e-bike|electric|SA|touring|cargo)/i.test(l)) ||
+        (/^\d+\s+.*\b(bike|bikes|cykel)\b/i.test(l) && !l.startsWith('#'))
       );
       const what = whatLines.join(', ') || null;
 
