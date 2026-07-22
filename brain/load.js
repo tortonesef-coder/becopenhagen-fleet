@@ -118,7 +118,10 @@ const ITEMS = REGISTRY.items || {};
 const CHANNELS = REGISTRY._channels || {};
 
 function classifyChannel(affiliate, createdBy) {
-  const a = (affiliate || '').trim();
+  let a = (affiliate || '').trim();
+  // FareHarbor is inconsistent: some exports leave Affiliate empty for direct
+  // bookings, others write the literal string "None". Both mean direct.
+  if (a === 'None' || a === 'none') a = '';
   if (a) {
     const def = CHANNELS[a];
     if (def) return [def.name, def.commission, 'OTA'];
