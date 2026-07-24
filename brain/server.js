@@ -423,6 +423,27 @@ function checkBasis(text, kind) {
   if (span > 90 && totalRows < 2500) {
     return `${kind}: created dates span ${Math.round(span)} days across only ${totalRows} rows — if this was meant as a weekly export, it was probably run on "Availability date" instead of "created date". (Fine if you meant to upload a longer history.)`;
   }
+
+  // Second fingerprint, catches availability-basis exports of ANY size:
+  // a created-basis bookings export always contains bookings for FUTURE tour
+  // dates (people book ahead). If the max tour date is capped at the max
+  // created date, the export window was applied to availability dates and the
+  // entire forward pipeline is missing.
+  if (kind === 'bookings') {
+    const si = header.indexOf('Start Date');
+    if (si >= 0) {
+      let maxStart = '', maxCreated = '';
+      for (let i = 2; i < rows.length; i++) {
+        const sd = (rows[i][si] || '').trim().slice(0, 10);
+        const cd = (rows[i][idx] || '').trim().slice(0, 10);
+        if (sd > maxStart) maxStart = sd;
+        if (cd > maxCreated) maxCreated = cd;
+      }
+      if (maxStart && maxCreated && maxStart <= maxCreated) {
+        return `bookings: no future-dated tours at all (latest tour ${maxStart}, latest created ${maxCreated}) — this export was almost certainly run on "Availability date" instead of "Booking created date". Future bookings are missing, which blinds pace and forward-look analysis. Re-export with Report on: Booking created date.`;
+      }
+    }
+  }
   return null;
 }
 
