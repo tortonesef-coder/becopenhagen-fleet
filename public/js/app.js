@@ -2890,6 +2890,11 @@ async function renderGuidesMetrics(el) {
   const team = await api('/api/team').catch(()=>[]);
   const guides = team.filter(g => g.role === 'guide' || g.is_guide);
 
+  // One shared fetch for everyone's unavailability — used for the per-guide
+  // count on the calendar button (and cached so opening the calendar is instant).
+  const allUnavail = await api('/api/guides/unavailability').catch(()=>[]);
+  window._unavailByGuide = allUnavail;
+
   const data = await Promise.all(guides.map(async g => {
     const [worked, upcoming, reviews] = await Promise.all([
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(g.name)}&from=${cycleStart}&to=${cycleEnd}`).catch(()=>({total_minutes:0,count:0})),
@@ -2899,6 +2904,9 @@ async function renderGuidesMetrics(el) {
     const ratio = worked.total_bookings > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.total_bookings) * 100) : null;
     return { ...g, worked, upcoming, reviews, ratio };
   }));
+  // Cache for the calendar modal, so it can resolve a guide by id without
+  // re-fetching or embedding names (and quotes) into inline onclick handlers.
+  window._guidesMetricsCache = data;
 
   el.innerHTML = `
     <div class="detail-section" style="border-top:none;padding-top:0">
@@ -2924,12 +2932,115 @@ async function renderGuidesMetrics(el) {
               <div class="stat-card-label">Rate</div>
             </div>
           </div>
+          <button class="btn btn-secondary unavail-cal-btn" onclick="openGuideUnavailCalendar('${g.id}')">
+            📅 Unavailability${(() => { const n = (window._unavailByGuide||[]).filter(p => p.guide_id === g.id).length; return n ? ` (${n})` : ''; })()}
+          </button>
         </div>`).join('')}
     </div>
   `;
 }
 
+// ── Per-guide unavailability calendar ─────────────────────────────────────
+// Guides mark unavailability as free-form datetime ranges (no "all day" flag),
+// so a day is only shown as FULL when a period genuinely spans 00:00–23:59;
+// anything narrower is PARTIAL and the real times are listed under the grid.
+// from_dt/to_dt are fixed-width "YYYY-MM-DDTHH:MM", so plain string comparison
+// is a correct (and timezone-proof) overlap test.
+function unavailDayInfo(periods, dateStr) {
+  const dayStart = dateStr + 'T00:00';
+  const dayEnd = dateStr + 'T23:59';
+  const hits = periods.filter(p => p.from_dt <= dayEnd && p.to_dt >= dayStart);
+  if (!hits.length) return null;
+  return { full: hits.some(p => p.from_dt <= dayStart && p.to_dt >= dayEnd), hits };
+}
 
+async function openGuideUnavailCalendar(guideId) {
+  const cached = (window._guidesMetricsCache || []).find(g => g.id === guideId);
+  const guideName = cached?.name || guideId;
+  let all = window._unavailByGuide;
+  if (!all) all = await api('/api/guides/unavailability').catch(()=>[]);
+  const now = new Date();
+  window._unavailCal = {
+    guideId, guideName,
+    periods: all.filter(p => p.guide_id === guideId),
+    year: now.getFullYear(), month: now.getMonth(),
+  };
+  openModal(`
+    <div class="modal-title">📅 ${escapeHtml(guideName)} — unavailability</div>
+    <div id="unavail-cal-body"></div>
+  `);
+  renderUnavailCal();
+}
+
+function unavailCalStep(delta) {
+  const st = window._unavailCal;
+  if (!st) return;
+  const d = new Date(st.year, st.month + delta, 1);
+  st.year = d.getFullYear();
+  st.month = d.getMonth();
+  renderUnavailCal();
+}
+
+function renderUnavailCal() {
+  const st = window._unavailCal;
+  const body = document.getElementById('unavail-cal-body');
+  if (!st || !body) return;
+  const { year, month, periods } = st;
+
+  const pad = n => String(n).padStart(2, '0');
+  const monthLabel = new Date(year, month, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  // Monday-first grid (Copenhagen convention).
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = new Date().toISOString().substring(0, 10);
+
+  let cells = '';
+  for (let i = 0; i < firstWeekday; i++) cells += `<div class="ucal-cell ucal-blank"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${pad(month + 1)}-${pad(day)}`;
+    const info = unavailDayInfo(periods, dateStr);
+    const cls = ['ucal-cell'];
+    if (info) cls.push(info.full ? 'ucal-full' : 'ucal-partial');
+    if (dateStr === todayStr) cls.push('ucal-today');
+    const times = info && !info.full
+      ? info.hits.map(h => `${h.from_dt.substring(11)}–${h.to_dt.substring(11)}`).join(' ')
+      : '';
+    cells += `<div class="${cls.join(' ')}"><span>${day}</span>${times ? `<em>${escapeHtml(times.split(' ')[0])}</em>` : ''}</div>`;
+  }
+
+  // Periods overlapping the visible month, for the detail list.
+  const monthStart = `${year}-${pad(month + 1)}-01T00:00`;
+  const monthEnd = `${year}-${pad(month + 1)}-${pad(daysInMonth)}T23:59`;
+  const inMonth = periods
+    .filter(p => p.from_dt <= monthEnd && p.to_dt >= monthStart)
+    .sort((a, b) => a.from_dt.localeCompare(b.from_dt));
+  const fmt = s => s.replace('T', ' ');
+
+  body.innerHTML = `
+    <div class="ucal-nav">
+      <button onclick="unavailCalStep(-1)">‹</button>
+      <strong>${monthLabel}</strong>
+      <button onclick="unavailCalStep(1)">›</button>
+    </div>
+    <div class="ucal-grid ucal-head">
+      ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div>${d}</div>`).join('')}
+    </div>
+    <div class="ucal-grid">${cells}</div>
+    <div class="ucal-legend">
+      <span><i class="sw-full"></i> All day</span>
+      <span><i class="sw-partial"></i> Part of day</span>
+    </div>
+    <div class="ucal-list">
+      ${inMonth.length === 0
+        ? `<div class="ucal-empty">Nothing marked in ${escapeHtml(monthLabel)}</div>`
+        : inMonth.map(p => `
+          <div class="ucal-item">
+            <div>${fmt(p.from_dt)} → ${fmt(p.to_dt)}</div>
+            ${p.reason ? `<div class="ucal-reason">${escapeHtml(p.reason)}</div>` : ''}
+          </div>`).join('')}
+    </div>
+  `;
+}
 
 async function renderAdminReviews(el) {
   el.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';

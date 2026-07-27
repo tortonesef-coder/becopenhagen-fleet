@@ -1290,6 +1290,60 @@ details summary::-webkit-details-marker { display: none; }
 }
 .view-as-banner button:active { background: rgba(255,255,255,0.3); }
 
+/* Per-guide unavailability calendar (Guides & Tours → Guides → 📅) */
+.unavail-cal-btn {
+  margin-top: 0.5rem;
+  width: 100%;
+  font-size: 0.8rem;
+  padding: 0.4rem;
+}
+.ucal-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.ucal-nav strong { font-size: 0.95rem; }
+.ucal-nav button {
+  background: var(--bg2, #2a2a2a); color: var(--text, #fff);
+  border: 1px solid var(--border, #3a3a3a); border-radius: 6px;
+  width: 34px; height: 30px; font-size: 1rem; cursor: pointer;
+}
+.ucal-nav button:active { opacity: 0.7; }
+.ucal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.ucal-head { margin-bottom: 3px; }
+.ucal-head div {
+  text-align: center; font-size: 0.66rem; font-weight: 700;
+  color: var(--text3, #888); text-transform: uppercase;
+}
+.ucal-cell {
+  aspect-ratio: 1 / 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 0.8rem; line-height: 1;
+  background: var(--bg2, #262626); color: var(--text2, #ccc);
+}
+.ucal-cell em { font-style: normal; font-size: 0.5rem; opacity: 0.85; margin-top: 2px; }
+.ucal-blank { background: transparent; }
+.ucal-full { background: var(--red, #d64545); color: #fff; font-weight: 700; }
+.ucal-partial {
+  background: rgba(214, 69, 69, 0.22);
+  color: var(--text, #fff); font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--red, #d64545);
+}
+.ucal-today { outline: 2px solid var(--accent, #e8a825); outline-offset: -2px; }
+.ucal-legend {
+  display: flex; gap: 1rem; justify-content: center;
+  margin: 0.7rem 0 0.2rem; font-size: 0.72rem; color: var(--text3, #888);
+}
+.ucal-legend span { display: flex; align-items: center; gap: 0.3rem; }
+.ucal-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.ucal-legend .sw-full { background: var(--red, #d64545); }
+.ucal-legend .sw-partial { background: rgba(214,69,69,0.22); box-shadow: inset 0 0 0 1px var(--red, #d64545); }
+.ucal-list { margin-top: 0.6rem; }
+.ucal-item {
+  padding: 0.4rem 0; border-bottom: 1px solid var(--border, #3a3a3a); font-size: 0.82rem;
+}
+.ucal-reason { font-size: 0.75rem; color: var(--text3, #888); margin-top: 2px; }
+.ucal-empty { font-size: 0.82rem; color: var(--text3, #888); padding: 0.4rem 0; }
+
 /* "Return all my tour bikes" banner — accent CTA bar above the tabbar */
 .return-all-banner {
   background: var(--accent, #e8a825);
