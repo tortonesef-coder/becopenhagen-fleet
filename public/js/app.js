@@ -922,7 +922,7 @@ function wk7Grid(week) {
   }).join('');
 
   return `<div class="wk7-grid"><div class="wk7-type wk7-corner"></div>${dayHead}${rows}</div>
-    <div class="wk7-note">Booked tours + rentals only — walk-ins and repairs not counted</div>`;
+    <div class="wk7-note">All FareHarbor bookings, walk-ins included — bikes in repair not subtracted</div>`;
 }
 
 async function renderBikes(c) {
