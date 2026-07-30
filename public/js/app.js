@@ -896,8 +896,40 @@ async function renderBikesSubTab() {
   else await renderBikes(el);
 }
 
+// 7-day forward availability grid (Bikes tab). One row per type, one column
+// per day, cell = units still free that day counting tours + rentals booked in
+// FareHarbor. bike_status is deliberately ignored (not maintained). Zero cells
+// show the next day within the window the type frees up again.
+function wk7Grid(week) {
+  const dayHead = week.days.map((d, i) => {
+    const dt = new Date(d + 'T12:00');
+    const dow = dt.toLocaleDateString('en-GB', { weekday: 'short' }).substring(0, 2);
+    return `<div class="wk7-h${i === 0 ? ' wk7-today' : ''}">${i === 0 ? 'Now' : dow}<em>${dt.getDate()}</em></div>`;
+  }).join('');
+
+  const rows = week.types.filter(t => t.supply > 0).map(t => {
+    const cells = t.free.map((f, i) => {
+      const cls = f <= 0 ? 'red' : f === 1 ? 'amber' : 'green';
+      let next = '';
+      if (f <= 0) {
+        const j = t.free.findIndex((v, k) => k > i && v > 0);
+        if (j !== -1) next = `<em>→${new Date(week.days[j] + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }).substring(0, 2)}</em>`;
+      }
+      const over = f < 0 ? ` title="overcommitted by ${-f}"` : '';
+      return `<div class="wk7-cell ${cls}"${over}><span>${Math.max(f, 0)}${f < 0 ? '!' : ''}</span>${next}</div>`;
+    }).join('');
+    return `<div class="wk7-type"><strong>${t.id}</strong><em>${escapeHtml(t.label)}</em></div>${cells}`;
+  }).join('');
+
+  return `<div class="wk7-grid"><div class="wk7-type wk7-corner"></div>${dayHead}${rows}</div>
+    <div class="wk7-note">Booked tours + rentals only — walk-ins and repairs not counted</div>`;
+}
+
 async function renderBikes(c) {
-  const avail = await api('/api/availability');
+  const [avail, week] = await Promise.all([
+    api('/api/availability'),
+    api('/api/availability/week').catch(() => null),
+  ]);
   const types = avail.types;
   const scarce = new Set(['CC','E','SA','AC','AT']);
 
@@ -915,6 +947,11 @@ async function renderBikes(c) {
   }).join('');
 
   c.innerHTML=`
+    ${week ? `
+    <details class="availability-summary" ${window._bikesWeekOpen!==false?'open':''} ontoggle="window._bikesWeekOpen=this.open">
+      <summary>📅 Next 7 days</summary>
+      ${wk7Grid(week)}
+    </details>` : ''}
     <details class="availability-summary" ${window._bikesGridOpen!==false?'open':''} ontoggle="window._bikesGridOpen=this.open">
       <summary>📊 Fleet availability</summary>
       <div class="type-grid" style="margin-top:0.75rem">${gridCards}</div>

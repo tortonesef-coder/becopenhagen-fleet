@@ -28,6 +28,77 @@ router.get('/availability', (req, res) => {
   res.json({ types: rows, adult_pool });
 });
 
+// GET /api/availability/week — rolling 7-day forward availability per bike
+// type, from FareHarbor-derived demand only (tours + rentals in
+// tour_availabilities). Read-only; answers "is there a cargo bike free the
+// day after tomorrow" without faking a booking in FareHarbor.
+//
+// Deliberate semantics (agreed with Fede 2026-07-30):
+//  - Supply = active fleet count per type. bike_status (out/repair/missing) is
+//    IGNORED entirely — that data isn't maintained reliably enough to subtract.
+//  - Rentals commit their bikes from start_date through end_date-1: FareHarbor's
+//    DTEND is start + N×24h, i.e. the RETURN MORNING, so an N-day rental
+//    occupies exactly N calendar days and the bike is sellable again on the
+//    return day (verified against live feed data, 30/30 rows).
+//  - Tours commit bikes only on their start_date, and only when
+//    booking_count > 0 — a zero-pax row is open capacity, not a commitment
+//    (and a 0-pax row with leftover bikes is the stale write-guard signature,
+//    so this doubles as a staleness defence).
+//  - free can go negative (genuinely overcommitted); reported as-is.
+router.get('/availability/week', (req, res) => {
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(new Date(Date.now() + i * 86400000).toISOString().substring(0, 10));
+  const first = days[0], last = days[6];
+
+  const typeRows = db().prepare(`
+    SELECT bt.id, bt.label, bt.sort_order, COUNT(b.id) AS supply
+    FROM bike_types bt LEFT JOIN bikes b ON b.type_id = bt.id AND b.active = 1
+    GROUP BY bt.id ORDER BY bt.sort_order
+  `).all();
+
+  const committed = {}; // type id -> [7]
+  const add = (type, dayIdx, n) => {
+    if (!(type in committed)) committed[type] = [0,0,0,0,0,0,0];
+    committed[type][dayIdx] += n;
+  };
+
+  const tours = db().prepare(`
+    SELECT start_date, bikes_needed FROM tour_availabilities
+    WHERE feed_type='tour' AND booking_count > 0 AND start_date >= ? AND start_date <= ?
+  `).all(first, last);
+  for (const t of tours) {
+    const idx = days.indexOf(t.start_date);
+    if (idx === -1) continue;
+    let bn = {}; try { bn = JSON.parse(t.bikes_needed || '{}'); } catch {}
+    for (const [k, n] of Object.entries(bn)) if (n > 0) add(k, idx, n);
+  }
+
+  const rentals = db().prepare(`
+    SELECT date(start_at) AS s, date(end_at, '-1 day') AS e, bikes_needed
+    FROM tour_availabilities
+    WHERE feed_type='rental' AND date(start_at) <= ? AND date(end_at, '-1 day') >= ?
+  `).all(last, first);
+  for (const r of rentals) {
+    let bn = {}; try { bn = JSON.parse(r.bikes_needed || '{}'); } catch {}
+    const entries = Object.entries(bn).filter(([, n]) => n > 0);
+    if (!entries.length) continue;
+    for (let i = 0; i < 7; i++) {
+      if (days[i] >= r.s && days[i] <= r.e) {
+        for (const [k, n] of entries) add(k, i, n);
+      }
+    }
+  }
+
+  res.json({
+    days,
+    types: typeRows.map(t => ({
+      id: t.id, label: t.label, supply: t.supply,
+      committed: committed[t.id] || [0,0,0,0,0,0,0],
+      free: (committed[t.id] || [0,0,0,0,0,0,0]).map(c => t.supply - c),
+    })),
+  });
+});
+
 router.get('/bikes', (req, res) => {
   const { type, status, search } = req.query;
   let sql = `
