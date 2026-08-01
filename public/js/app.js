@@ -2958,12 +2958,13 @@ async function renderGuidesMetrics(el) {
     const x = i => padL + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
     const y = r => padT + ih - (Math.min(r, 100) / 100) * ih;
 
-    // Line segments: consecutive defined points only.
-    let path = '', pen = false;
+    // One continuous line: zero-booking weeks are bridged straight through
+    // (per Fede) — no dot there, so the absence of data stays visible at the
+    // point level while the line keeps moving.
+    let path = '';
     pts.forEach((p, i) => {
-      if (p.ratio === null) { pen = false; return; }
-      path += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.ratio).toFixed(1)}`;
-      pen = true;
+      if (p.ratio === null) return;
+      path += `${path ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.ratio).toFixed(1)}`;
     });
 
     const dots = pts.map((p, i) => {
