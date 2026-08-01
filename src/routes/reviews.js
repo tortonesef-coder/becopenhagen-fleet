@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb, isNotifEnabled } = require('../db/schema');
 const { sendEmail, EMAIL_FOOTER } = require('../email');
+const { guideMatches } = require('../guide-name-match');
 
 function db() { return getDb(); }
 
@@ -89,6 +90,60 @@ router.get('/', (req, res) => {
   sql += ' ORDER BY gr.review_date DESC, gr.created_at DESC';
 
   res.json(db().prepare(sql).all(...params));
+});
+
+// GET /api/reviews/ratio-history — per-guide review-to-bookings ratio per
+// billing cycle (23rd → 22nd), oldest→newest, capped at the last 6 cycles.
+// Bookings mirror /api/ical/guide-hours "worked" semantics exactly: sum of
+// guide_tour_hours.booking_count for tours that have already STARTED, matched
+// by fuzzy guide name — so each cycle's ratio equals the Rate stat the admin
+// screen already shows for that cycle. Leading cycles empty for every guide
+// (before tracking began) are trimmed.
+router.get('/ratio-history', requireAdmin, (req, res) => {
+  const pad = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const curStartMonth = now.getUTCDate() >= 23 ? now.getUTCMonth() : now.getUTCMonth() - 1;
+  const cycles = [];
+  for (let i = 5; i >= 0; i--) {
+    const s = new Date(Date.UTC(now.getUTCFullYear(), curStartMonth - i, 23));
+    const e = new Date(Date.UTC(now.getUTCFullYear(), curStartMonth - i + 1, 22));
+    cycles.push({
+      from: `${s.getUTCFullYear()}-${pad(s.getUTCMonth() + 1)}-23`,
+      to: `${e.getUTCFullYear()}-${pad(e.getUTCMonth() + 1)}-22`,
+      label: e.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' }),
+    });
+  }
+
+  const guides = db().prepare(`SELECT * FROM team_members WHERE active=1`).all()
+    .filter(m => m.role === 'guide' || m.is_guide);
+  const hoursRows = db().prepare(`
+    SELECT guide, booking_count, start_date FROM guide_tour_hours
+    WHERE datetime(start_at) <= datetime('now') AND start_date >= ?
+  `).all(cycles[0].from);
+  const reviewRows = db().prepare(`
+    SELECT guide_id, review_date FROM guide_reviews WHERE review_date >= ?
+  `).all(cycles[0].from);
+
+  const out = guides.map(g => ({
+    id: g.id, name: g.name,
+    points: cycles.map(c => {
+      const bookings = hoursRows.reduce((s, r) =>
+        s + ((r.start_date >= c.from && r.start_date <= c.to && guideMatches(r.guide, g.name)) ? (r.booking_count || 0) : 0), 0);
+      const reviews = reviewRows.filter(r => r.guide_id === g.id && r.review_date >= c.from && r.review_date <= c.to).length;
+      return { bookings, reviews, ratio: bookings > 0 ? Math.round((reviews / bookings) * 100) : null };
+    }),
+  }));
+
+  // Trim leading cycles that are empty for EVERY guide (pre-tracking era).
+  let firstUseful = 0;
+  while (firstUseful < cycles.length - 1 &&
+         out.every(g => g.points[firstUseful].bookings === 0 && g.points[firstUseful].reviews === 0)) {
+    firstUseful++;
+  }
+  res.json({
+    cycles: cycles.slice(firstUseful),
+    guides: out.map(g => ({ ...g, points: g.points.slice(firstUseful) })),
+  });
 });
 
 // DELETE /api/reviews/:id — admin only

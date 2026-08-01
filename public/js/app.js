@@ -2927,10 +2927,8 @@ async function renderGuidesMetrics(el) {
   const team = await api('/api/team').catch(()=>[]);
   const guides = team.filter(g => g.role === 'guide' || g.is_guide);
 
-  // One shared fetch for everyone's unavailability — used for the per-guide
-  // count on the calendar button (and cached so opening the calendar is instant).
-  const allUnavail = await api('/api/guides/unavailability').catch(()=>[]);
-  window._unavailByGuide = allUnavail;
+  // Review-rate history (per billing cycle, ≤6) for the little per-guide graph.
+  const rateHistory = await api('/api/reviews/ratio-history').catch(() => null);
 
   const data = await Promise.all(guides.map(async g => {
     const [worked, upcoming, reviews] = await Promise.all([
@@ -2941,9 +2939,27 @@ async function renderGuidesMetrics(el) {
     const ratio = worked.total_bookings > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.total_bookings) * 100) : null;
     return { ...g, worked, upcoming, reviews, ratio };
   }));
-  // Cache for the calendar modal, so it can resolve a guide by id without
-  // re-fetching or embedding names (and quotes) into inline onclick handlers.
-  window._guidesMetricsCache = data;
+
+  // Tiny bar row: review rate per cycle. Height is the encoding; the % label
+  // (text tokens, not the bar colour) is always shown, so the green/amber/red
+  // banding — same thresholds as the Rate stat — is reinforcement, never the
+  // only channel. Cycles where the guide had no bookings render as a gap, not
+  // a fake 0%.
+  const sparkHtml = (guideId) => {
+    const h = rateHistory?.guides?.find(g => g.id === guideId);
+    if (!h) return '';
+    let pts = h.points.map((p, i) => ({ ...p, label: rateHistory.cycles[i].label }));
+    while (pts.length && pts[0].bookings === 0 && pts[0].reviews === 0) pts.shift();
+    if (!pts.length) return `<div class="spark-empty">No review history yet</div>`;
+    const slots = pts.map(p => {
+      const tip = `${p.label} cycle: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.bookings} guest${p.bookings !== 1 ? 's' : ''}`;
+      if (p.ratio === null) return `<div class="spark-slot" title="${tip}"><span class="spark-val">–</span><div class="spark-gap"></div><span class="spark-lab">${p.label}</span></div>`;
+      const band = p.ratio >= 33 ? 'green' : p.ratio >= 15 ? 'amber' : 'red';
+      const hpx = Math.max(3, Math.round(Math.min(p.ratio, 100) * 0.34));
+      return `<div class="spark-slot" title="${tip}"><span class="spark-val">${p.ratio}%</span><div class="spark-bar ${band}" style="height:${hpx}px"></div><span class="spark-lab">${p.label}</span></div>`;
+    }).join('');
+    return `<div class="spark-wrap"><span class="spark-title">Review rate</span><div class="spark-row">${slots}</div></div>`;
+  };
 
   el.innerHTML = `
     <div class="detail-section" style="border-top:none;padding-top:0">
@@ -2969,9 +2985,7 @@ async function renderGuidesMetrics(el) {
               <div class="stat-card-label">Rate</div>
             </div>
           </div>
-          <button class="btn btn-secondary unavail-cal-btn" onclick="openGuideUnavailCalendar('${g.id}')">
-            📅 Unavailability${(() => { const n = (window._unavailByGuide||[]).filter(p => p.guide_id === g.id).length; return n ? ` (${n})` : ''; })()}
-          </button>
+          ${sparkHtml(g.id)}
         </div>`).join('')}
     </div>
   `;
@@ -2991,73 +3005,78 @@ function unavailDayInfo(periods, dateStr) {
   return { full: hits.some(p => p.from_dt <= dayStart && p.to_dt >= dayEnd), hits };
 }
 
-async function openGuideUnavailCalendar(guideId) {
-  const cached = (window._guidesMetricsCache || []).find(g => g.id === guideId);
-  const guideName = cached?.name || guideId;
-  let all = window._unavailByGuide;
-  if (!all) all = await api('/api/guides/unavailability').catch(()=>[]);
-  const now = new Date();
-  window._unavailCal = {
-    guideId, guideName,
-    periods: all.filter(p => p.guide_id === guideId),
-    year: now.getFullYear(), month: now.getMonth(),
-  };
-  openModal(`
-    <div class="modal-title">📅 ${escapeHtml(guideName)} — unavailability</div>
-    <div id="unavail-cal-body"></div>
-  `);
-  renderUnavailCal();
-}
-
-function unavailCalStep(delta) {
-  const st = window._unavailCal;
+// Month navigation for the Availability sub-tab's mixed calendar.
+function availCalStep(delta) {
+  const st = window._availCal;
   if (!st) return;
   const d = new Date(st.year, st.month + delta, 1);
   st.year = d.getFullYear();
   st.month = d.getMonth();
-  renderUnavailCal();
+  renderAvailCalParts();
 }
 
-function renderUnavailCal() {
-  const st = window._unavailCal;
-  const body = document.getElementById('unavail-cal-body');
-  if (!st || !body) return;
-  const { year, month, periods } = st;
+function availCalSetGuide(guideId) {
+  if (window._availCal) { window._availCal.guide = guideId; renderAvailCalParts(); }
+}
+
+// Draws the calendar grid + the period list into their containers, from
+// window._availCal state. All-guides mode shows per-guide initial chips in
+// each day cell (solid = all day, outlined = part of day); filtering to one
+// guide switches to the full/partial cell colouring with times.
+function renderAvailCalParts() {
+  const st = window._availCal;
+  const gridEl = document.getElementById('avail-cal-grid');
+  const listEl = document.getElementById('avail-period-list');
+  if (!st || !gridEl || !listEl) return;
+  const { year, month, guide, periods, guideName } = st;
 
   const pad = n => String(n).padStart(2, '0');
   const monthLabel = new Date(year, month, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-  // Monday-first grid (Copenhagen convention).
-  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Monday-first
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayStr = new Date().toISOString().substring(0, 10);
+
+  const byGuide = {};
+  periods.forEach(p => { (byGuide[p.guide_id] = byGuide[p.guide_id] || []).push(p); });
+  const guideIds = Object.keys(byGuide).sort((a, b) => (guideName(a) || a).localeCompare(guideName(b) || b));
 
   let cells = '';
   for (let i = 0; i < firstWeekday; i++) cells += `<div class="ucal-cell ucal-blank"></div>`;
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${year}-${pad(month + 1)}-${pad(day)}`;
-    const info = unavailDayInfo(periods, dateStr);
-    const cls = ['ucal-cell'];
-    if (info) cls.push(info.full ? 'ucal-full' : 'ucal-partial');
-    if (dateStr === todayStr) cls.push('ucal-today');
-    const times = info && !info.full
-      ? info.hits.map(h => `${h.from_dt.substring(11)}–${h.to_dt.substring(11)}`).join(' ')
-      : '';
-    cells += `<div class="${cls.join(' ')}"><span>${day}</span>${times ? `<em>${escapeHtml(times.split(' ')[0])}</em>` : ''}</div>`;
+    const todayCls = dateStr === todayStr ? ' ucal-today' : '';
+    if (guide) {
+      const info = unavailDayInfo(byGuide[guide] || [], dateStr);
+      const cls = ['ucal-cell'];
+      if (info) cls.push(info.full ? 'ucal-full' : 'ucal-partial');
+      const times = info && !info.full
+        ? `${info.hits[0].from_dt.substring(11)}–${info.hits[0].to_dt.substring(11)}` : '';
+      cells += `<div class="${cls.join(' ')}${todayCls}"><span>${day}</span>${times ? `<em>${escapeHtml(times)}</em>` : ''}</div>`;
+    } else {
+      const chips = [];
+      for (const gid of guideIds) {
+        const info = unavailDayInfo(byGuide[gid], dateStr);
+        if (info) chips.push({ gid, full: info.full });
+      }
+      const shown = chips.slice(0, 3).map(c =>
+        `<i class="uchip${c.full ? ' full' : ''}" title="${escapeHtml(guideName(c.gid) || c.gid)}">${escapeHtml((guideName(c.gid) || c.gid).substring(0, 2))}</i>`).join('');
+      const more = chips.length > 3 ? `<i class="uchip more">+${chips.length - 3}</i>` : '';
+      cells += `<div class="ucal-cell ucal-multi${todayCls}"><span>${day}</span><div class="uchips">${shown}${more}</div></div>`;
+    }
   }
 
-  // Periods overlapping the visible month, for the detail list.
   const monthStart = `${year}-${pad(month + 1)}-01T00:00`;
   const monthEnd = `${year}-${pad(month + 1)}-${pad(daysInMonth)}T23:59`;
-  const inMonth = periods
-    .filter(p => p.from_dt <= monthEnd && p.to_dt >= monthStart)
+  const scoped = periods.filter(p => !guide || p.guide_id === guide);
+  const inMonth = scoped.filter(p => p.from_dt <= monthEnd && p.to_dt >= monthStart)
     .sort((a, b) => a.from_dt.localeCompare(b.from_dt));
   const fmt = s => s.replace('T', ' ');
 
-  body.innerHTML = `
+  gridEl.innerHTML = `
     <div class="ucal-nav">
-      <button onclick="unavailCalStep(-1)">‹</button>
+      <button onclick="availCalStep(-1)">‹</button>
       <strong>${monthLabel}</strong>
-      <button onclick="unavailCalStep(1)">›</button>
+      <button onclick="availCalStep(1)">›</button>
     </div>
     <div class="ucal-grid ucal-head">
       ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div>${d}</div>`).join('')}
@@ -3066,17 +3085,20 @@ function renderUnavailCal() {
     <div class="ucal-legend">
       <span><i class="sw-full"></i> All day</span>
       <span><i class="sw-partial"></i> Part of day</span>
-    </div>
-    <div class="ucal-list">
-      ${inMonth.length === 0
-        ? `<div class="ucal-empty">Nothing marked in ${escapeHtml(monthLabel)}</div>`
-        : inMonth.map(p => `
-          <div class="ucal-item">
-            <div>${fmt(p.from_dt)} → ${fmt(p.to_dt)}</div>
+    </div>`;
+
+  listEl.innerHTML = `
+    <div class="detail-section-title" style="margin-top:0.9rem">${guide ? escapeHtml(guideName(guide) || guide) + ' — ' : ''}periods in ${escapeHtml(monthLabel)}</div>
+    ${inMonth.length === 0
+      ? `<div class="ucal-empty">Nothing marked in ${escapeHtml(monthLabel)}</div>`
+      : inMonth.map(p => `
+        <div class="ucal-item" style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem">
+          <div>
+            <div>${guide ? '' : `<strong style="font-size:0.8rem">${escapeHtml(guideName(p.guide_id) || p.guide_id)}</strong> · `}${fmt(p.from_dt)} → ${fmt(p.to_dt)}</div>
             ${p.reason ? `<div class="ucal-reason">${escapeHtml(p.reason)}</div>` : ''}
-          </div>`).join('')}
-    </div>
-  `;
+          </div>
+          <button onclick="adminDeleteUnavailability(${p.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">Remove</button>
+        </div>`).join('')}`;
 }
 
 async function renderAdminReviews(el) {
@@ -3193,35 +3215,40 @@ async function renderAdminAvailability(el) {
     return;
   }
 
-  const fmtDt = s => s ? s.replace('T', ' ').substring(0, 16) : '';
+  // Names come with the periods (admin query joins team_members); build an
+  // id→name lookup so cells/chips/list never show raw ids.
+  const names = {};
+  periods.forEach(p => { if (p.guide_name) names[p.guide_id] = p.guide_name; });
 
-  // Group by guide
-  const byGuide = {};
-  periods.forEach(p => {
-    const name = p.guide_name || p.guide_id;
-    if (!byGuide[name]) byGuide[name] = [];
-    byGuide[name].push(p);
-  });
+  const now = new Date();
+  const prev = window._availCal;
+  window._availCal = {
+    guide: prev?.guide || '',
+    year: prev?.year ?? now.getFullYear(),
+    month: prev?.month ?? now.getMonth(),
+    periods,
+    guideName: id => names[id],
+  };
+  // A previously selected guide may have no periods left — reset to All.
+  if (window._availCal.guide && !periods.some(p => p.guide_id === window._availCal.guide)) window._availCal.guide = '';
+
+  const guideOpts = Object.entries(names).sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([id, name]) => `<option value="${id}" ${window._availCal.guide === id ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
 
   el.innerHTML = `
-    <div class="detail-section" style="border-top:none;padding-top:0">
-      <div class="detail-section-title">Guide unavailability (${periods.length} period${periods.length!==1?'s':''})</div>
-      ${Object.keys(byGuide).length === 0
-        ? '<div style="font-size:0.85rem;color:var(--text3)">No unavailability periods marked</div>'
-        : Object.entries(byGuide).map(([name, ps]) => `
-          <div style="margin-bottom:0.85rem">
-            <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.3rem">${escapeHtml(name)}</div>
-            ${ps.map(p => `
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:0.35rem 0;border-bottom:1px solid var(--border)">
-                <div>
-                  <div style="font-size:0.82rem">${fmtDt(p.from_dt)} → ${fmtDt(p.to_dt)}</div>
-                  ${p.reason ? `<div style="font-size:0.75rem;color:var(--text3)">${escapeHtml(p.reason)}</div>` : ''}
-                </div>
-                <button onclick="adminDeleteUnavailability(${p.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0;margin-left:0.5rem">Remove</button>
-              </div>`).join('')}
-          </div>`).join('')}
+    <div class="detail-section" style="border-top:none;padding-top:0.5rem">
+      <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.75rem">
+        <div class="detail-section-title" style="margin:0;flex:1">Guide unavailability (${periods.length})</div>
+        <select class="form-select" style="max-width:180px" onchange="availCalSetGuide(this.value)">
+          <option value="">All guides</option>
+          ${guideOpts}
+        </select>
+      </div>
+      <div id="avail-cal-grid"></div>
+      <div id="avail-period-list"></div>
     </div>
   `;
+  renderAvailCalParts();
 }
 
 async function adminDeleteUnavailability(id) {
@@ -3229,7 +3256,9 @@ async function adminDeleteUnavailability(id) {
   try {
     await api(`/api/guides/unavailability/${id}`, { method:'DELETE' });
     toast('Removed', 'success');
-    renderAdminAvailability(document.getElementById('admin-tab-content'));
+    // NB: container id is guides-admin-content (admin-tab-content never existed
+    // here — the old wrong id left a stale list after deleting)
+    renderAdminAvailability(document.getElementById('guides-admin-content'));
   } catch(e) {
     toast('Could not remove: ' + e.message, 'error');
   }
