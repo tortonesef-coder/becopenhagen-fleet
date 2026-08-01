@@ -2936,7 +2936,9 @@ async function renderGuidesMetrics(el) {
       api(`/api/ical/guide-hours?guide=${encodeURIComponent(g.name)}&upcoming=1`).catch(()=>({total_minutes:0})),
       api(`/api/reviews?guide_id=${g.id}&from=${cycleStart}&to=${cycleEnd}`).catch(()=>[]),
     ]);
-    const ratio = worked.total_bookings > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.total_bookings) * 100) : null;
+    // Rate denominator is RESERVATIONS (distinct booking refs), not guests —
+    // same definition as the weekly graph below (per Fede 2026-08-02).
+    const ratio = worked.total_reservations > 0 && reviews.length > 0 ? Math.round((reviews.length / worked.total_reservations) * 100) : null;
     return { ...g, worked, upcoming, reviews, ratio };
   }));
 
@@ -2949,7 +2951,7 @@ async function renderGuidesMetrics(el) {
     const h = rateHistory?.guides?.find(g => g.id === guideId);
     if (!h) return '';
     let pts = h.points.map((p, i) => ({ ...p, wk: rateHistory.weeks[i] }));
-    while (pts.length && pts[0].bookings === 0 && pts[0].reviews === 0) pts.shift();
+    while (pts.length && pts[0].reservations === 0 && pts[0].reviews === 0) pts.shift();
     if (!pts.some(p => p.ratio !== null)) return `<div class="rline-empty">No review history yet</div>`;
 
     const W = 640, H = 96, padL = 30, padR = 10, padT = 8, padB = 18;
@@ -2969,7 +2971,7 @@ async function renderGuidesMetrics(el) {
 
     const dots = pts.map((p, i) => {
       if (p.ratio === null) return '';
-      const tip = `Week of ${p.wk.label}: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.bookings} guest${p.bookings !== 1 ? 's' : ''} = ${p.ratio}%`;
+      const tip = `Week of ${p.wk.label}: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.reservations} reservation${p.reservations !== 1 ? 's' : ''} = ${p.ratio}%`;
       return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="3.5" class="rline-dot"/>`
         + `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="9" fill="transparent"><title>${tip}</title></circle>`;
     }).join('');

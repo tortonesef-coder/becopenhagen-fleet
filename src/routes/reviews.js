@@ -92,12 +92,15 @@ router.get('/', (req, res) => {
   res.json(db().prepare(sql).all(...params));
 });
 
-// GET /api/reviews/ratio-history — per-guide review-to-bookings ratio per
+// GET /api/reviews/ratio-history — per-guide review-to-RESERVATIONS ratio per
 // WEEK (Monday-start), oldest→newest, capped at the last 26 weeks (~6 months).
-// Bookings mirror /api/ical/guide-hours "worked" semantics exactly: sum of
-// guide_tour_hours.booking_count for tours that have already STARTED, matched
-// by fuzzy guide name. ratio is null for weeks with 0 bookings (a gap, not
-// 0%). Leading weeks empty for EVERY guide (pre-tracking era) are trimmed.
+// Denominator is reservations (per Fede 2026-08-02), not guests: distinct
+// booking refs from the permanent `bookings` ledger, joined to the guide's
+// STARTED tours (guide_tour_hours, fuzzy guideMatches — same tour set as
+// /guide-hours "worked"). Ledger caveats: it starts 2026-07-01 (earlier weeks
+// have no denominator → gap) and keeps cancelled reservations (no flag), so a
+// pre-tour cancellation still counts. ratio is null for weeks with 0
+// reservations. Leading weeks empty for EVERY guide are trimmed.
 router.get('/ratio-history', requireAdmin, (req, res) => {
   const pad = n => String(n).padStart(2, '0');
   const iso = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
@@ -119,26 +122,31 @@ router.get('/ratio-history', requireAdmin, (req, res) => {
   const guides = db().prepare(`SELECT * FROM team_members WHERE active=1`).all()
     .filter(m => m.role === 'guide' || m.is_guide);
   const hoursRows = db().prepare(`
-    SELECT guide, booking_count, start_date FROM guide_tour_hours
+    SELECT availability_id, guide, start_date FROM guide_tour_hours
     WHERE datetime(start_at) <= datetime('now') AND start_date >= ?
   `).all(weeks[0].from);
   const reviewRows = db().prepare(`
     SELECT guide_id, review_date FROM guide_reviews WHERE review_date >= ?
   `).all(weeks[0].from);
+  const resByAvail = {};
+  for (const r of db().prepare(`
+    SELECT availability_id, COUNT(DISTINCT ref) n FROM bookings
+    WHERE feed_type='tour' AND tour_start_date >= ? GROUP BY availability_id
+  `).all(weeks[0].from)) resByAvail[r.availability_id] = r.n;
 
   const out = guides.map(g => ({
     id: g.id, name: g.name,
     points: weeks.map(w => {
-      const bookings = hoursRows.reduce((s, r) =>
-        s + ((r.start_date >= w.from && r.start_date <= w.to && guideMatches(r.guide, g.name)) ? (r.booking_count || 0) : 0), 0);
+      const reservations = hoursRows.reduce((s, r) =>
+        s + ((r.start_date >= w.from && r.start_date <= w.to && guideMatches(r.guide, g.name)) ? (resByAvail[r.availability_id] || 0) : 0), 0);
       const reviews = reviewRows.filter(r => r.guide_id === g.id && r.review_date >= w.from && r.review_date <= w.to).length;
-      return { bookings, reviews, ratio: bookings > 0 ? Math.round((reviews / bookings) * 100) : null };
+      return { reservations, reviews, ratio: reservations > 0 ? Math.round((reviews / reservations) * 100) : null };
     }),
   }));
 
   let firstUseful = 0;
   while (firstUseful < weeks.length - 1 &&
-         out.every(g => g.points[firstUseful].bookings === 0 && g.points[firstUseful].reviews === 0)) {
+         out.every(g => g.points[firstUseful].reservations === 0 && g.points[firstUseful].reviews === 0)) {
     firstUseful++;
   }
   res.json({

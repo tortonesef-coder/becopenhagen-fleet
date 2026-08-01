@@ -763,11 +763,23 @@ router.get('/guide-hours', (req, res) => {
   // rely on it still having a row for older tours
   const total_bookings = rows.reduce((s, r) => s + (r.booking_count || 0), 0);
 
+  // Reservations (distinct booking refs from the permanent ledger) for the
+  // same tour set — the review-rate denominator per Fede 2026-08-02.
+  // booking_count above is PEOPLE (pax); this is bookings.
+  let total_reservations = 0;
+  if (rows.length) {
+    const ids = rows.map(r => r.availability_id);
+    total_reservations = db().prepare(
+      `SELECT COUNT(DISTINCT ref) c FROM bookings WHERE availability_id IN (${ids.map(() => '?').join(',')})`
+    ).get(...ids).c;
+  }
+
   res.json({
     total_minutes,
     total_hours: Math.round((total_minutes / 60) * 10) / 10,
     count: rows.length,
     total_bookings,
+    total_reservations,
     tours: rows.map(r => ({
       availability_id: r.availability_id,
       feed_id: r.feed_id,
