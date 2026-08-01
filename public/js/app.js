@@ -2282,7 +2282,7 @@ async function renderOpsTab() {
     // Operations shows only the admin's own tours (as a guide). Look 120 days
     // ahead — the default 30-day window was hiding an assigned 31 Aug A3P.
     const name = state.actor?.name;
-    const all = await api('/api/ical/tours?days=120');
+    const all = await api('/api/ical/tours?days=150');
     const mine = all.filter(t => t.guide && guideMatches(t.guide, name));
     renderToursList(el, mine, true);
   }
@@ -3656,7 +3656,7 @@ async function renderTours(c) {
   // Look far enough ahead to catch private tours booked weeks out — a guide
   // assigned an A3P six weeks from now needs to see it. The default 30-day
   // window was hiding a real, assigned 31 Aug A3P (47 days out).
-  const tours = await api('/api/ical/tours?days=120' + (isGuide ? `&guide=${encodeURIComponent(name)}` : ''));
+  const tours = await api('/api/ical/tours?days=150' + (isGuide ? `&guide=${encodeURIComponent(name)}` : ''));
   renderToursList(c, tours, isGuide);
 }
 
@@ -4376,8 +4376,9 @@ async function deleteInvoice(id) {
 }
 
 async function openTourDetail(availId) {
-  // Fetch with extended window to ensure we find it
-  const tours = await api('/api/ical/tours?days=60');
+  // Window must cover everything the Tours lists can show (150d), or a far-out
+  // tour opens to "Tour not found"
+  const tours = await api('/api/ical/tours?days=150');
   const t = tours.find(x=>String(x.availability_id)===String(availId));
   if (!t) { toast('Tour not found — try refreshing', 'error'); return; }
 

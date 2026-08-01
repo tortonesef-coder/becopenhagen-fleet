@@ -398,12 +398,27 @@ async function main() {
     console.log('Fetching resource lookup (guide IDs, guided tour bikes ID)...');
     const { guideResourceIds, bikeResourceTypes, guidedTourBikesId, electricCargoBikeId } = await fetchResourceLookup(page, activeGuideNames);
 
-    // Current month + next month covers 30+ days ahead
+    // PREVIOUS month + current + next 3 (~4 months of forward visibility).
+    //
+    // Forward window (4 months, per Fede 2026-08-01): a tour booked beyond the
+    // window is invisible until the window rolls onto it — a 2 Oct CUSTOM
+    // assigned in late July only surfaced on 1 Aug, emailing a week late.
+    //
+    // PREVIOUS month is NOT optional: FareHarbor's month-grid week-rows start
+    // at the month's first MONDAY, so current-month days before it exist ONLY
+    // in the previous month's trailing week-row. Proven 2026-08-01 (Aug starts
+    // Saturday): the moment July left the window, every booked tour on Aug 1–2
+    // vanished from the fetch and the cancellation sweep deleted it — iCal
+    // recreated it guide-less 90s later, wiping real guide assignments and
+    // firing false unassigned/first-booking alerts, repeating every 2h. The
+    // sweep's safety therefore DEPENDS on prev-month staying in this list.
+    // new Date(y, m+i, 1) normalizes month overflow across year boundaries.
     const now = new Date();
-    const months = [
-      [now.getFullYear(), now.getMonth() + 1],
-      [now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear(), (now.getMonth() + 1) % 12 + 1],
-    ];
+    const months = [];
+    for (let i = -1; i < 4; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      months.push([d.getFullYear(), d.getMonth() + 1]);
+    }
 
     let all = [];
     for (const [y, m] of months) {
