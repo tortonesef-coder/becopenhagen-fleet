@@ -765,12 +765,17 @@ router.get('/guide-hours', (req, res) => {
 
   // Reservations (distinct booking refs from the permanent ledger) for the
   // same tour set — the review-rate denominator per Fede 2026-08-02.
-  // booking_count above is PEOPLE (pax); this is bookings.
+  // booking_count above is PEOPLE (pax); this is bookings. Cancelled
+  // reservations are excluded via the last-seen-within-12h-of-start rule
+  // (see /api/reviews/ratio-history for the empirical basis).
   let total_reservations = 0;
   if (rows.length) {
     const ids = rows.map(r => r.availability_id);
     total_reservations = db().prepare(
-      `SELECT COUNT(DISTINCT ref) c FROM bookings WHERE availability_id IN (${ids.map(() => '?').join(',')})`
+      `SELECT COUNT(DISTINCT b.ref) c
+       FROM bookings b JOIN guide_tour_hours h ON h.availability_id = b.availability_id
+       WHERE b.availability_id IN (${ids.map(() => '?').join(',')})
+         AND datetime(b.last_seen_at) >= datetime(h.start_at, '-12 hours')`
     ).get(...ids).c;
   }
 

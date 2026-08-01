@@ -128,10 +128,18 @@ router.get('/ratio-history', requireAdmin, (req, res) => {
   const reviewRows = db().prepare(`
     SELECT guide_id, review_date FROM guide_reviews WHERE review_date >= ?
   `).all(weeks[0].from);
+  // Cancelled reservations don't count: a live booking stays in the ICS feed
+  // (last_seen_at keeps advancing) until the tour starts, while a cancelled one
+  // freezes at cancellation. Empirically 175/175 live refs were last seen
+  // within 12h of start (all at/after start, none in 0–12h), so the 12h cutoff
+  // excludes cancellations with no observed false exclusions.
   const resByAvail = {};
   for (const r of db().prepare(`
-    SELECT availability_id, COUNT(DISTINCT ref) n FROM bookings
-    WHERE feed_type='tour' AND tour_start_date >= ? GROUP BY availability_id
+    SELECT b.availability_id, COUNT(DISTINCT b.ref) n
+    FROM bookings b JOIN guide_tour_hours h ON h.availability_id = b.availability_id
+    WHERE b.feed_type='tour' AND b.tour_start_date >= ?
+      AND datetime(b.last_seen_at) >= datetime(h.start_at, '-12 hours')
+    GROUP BY b.availability_id
   `).all(weeks[0].from)) resByAvail[r.availability_id] = r.n;
 
   const out = guides.map(g => ({

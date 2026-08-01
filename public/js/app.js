@@ -3019,7 +3019,7 @@ async function renderGuidesMetrics(el) {
               <div class="stat-card-label">Reviews</div>
             </div>
             <div class="stat-card" style="padding:0.5rem 0.6rem">
-              <div class="stat-card-num ${g.ratio===null?'':g.ratio>=33?'green':g.ratio>=15?'amber':'red'}" style="font-size:1.1rem">${g.ratio !== null ? g.ratio + '%' : '—'}</div>
+              <div class="stat-card-num ${g.ratio===null?'':g.ratio>=40?'green':g.ratio>=30?'amber':'red'}" style="font-size:1.1rem" title="${g.ratio===null?'':g.ratio>=40?'Excellent (≥40%)':g.ratio>=30?'Good (≥30%)':'Below 30%'}">${g.ratio !== null ? g.ratio + '%' : '—'}</div>
               <div class="stat-card-label">Rate</div>
             </div>
           </div>
