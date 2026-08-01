@@ -2940,25 +2940,56 @@ async function renderGuidesMetrics(el) {
     return { ...g, worked, upcoming, reviews, ratio };
   }));
 
-  // Tiny bar row: review rate per cycle. Height is the encoding; the % label
-  // (text tokens, not the bar colour) is always shown, so the green/amber/red
-  // banding — same thresholds as the Rate stat — is reinforcement, never the
-  // only channel. Cycles where the guide had no bookings render as a gap, not
-  // a fake 0%.
+  // Full-width weekly line chart of the review-to-bookings ratio (one point
+  // per Monday-start week, ≤26 weeks). The line BREAKS at weeks with no
+  // bookings — a gap, never a fake 0%. Values >100% plot at the cap; the dot
+  // tooltip always carries the true numbers. Aspect-preserved SVG so dots
+  // stay round at any width.
   const sparkHtml = (guideId) => {
     const h = rateHistory?.guides?.find(g => g.id === guideId);
     if (!h) return '';
-    let pts = h.points.map((p, i) => ({ ...p, label: rateHistory.cycles[i].label }));
+    let pts = h.points.map((p, i) => ({ ...p, wk: rateHistory.weeks[i] }));
     while (pts.length && pts[0].bookings === 0 && pts[0].reviews === 0) pts.shift();
-    if (!pts.length) return `<div class="spark-empty">No review history yet</div>`;
-    const slots = pts.map(p => {
-      const tip = `${p.label} cycle: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.bookings} guest${p.bookings !== 1 ? 's' : ''}`;
-      if (p.ratio === null) return `<div class="spark-slot" title="${tip}"><span class="spark-val">–</span><div class="spark-gap"></div><span class="spark-lab">${p.label}</span></div>`;
-      const band = p.ratio >= 33 ? 'green' : p.ratio >= 15 ? 'amber' : 'red';
-      const hpx = Math.max(3, Math.round(Math.min(p.ratio, 100) * 0.34));
-      return `<div class="spark-slot" title="${tip}"><span class="spark-val">${p.ratio}%</span><div class="spark-bar ${band}" style="height:${hpx}px"></div><span class="spark-lab">${p.label}</span></div>`;
+    if (!pts.some(p => p.ratio !== null)) return `<div class="rline-empty">No review history yet</div>`;
+
+    const W = 640, H = 150, padL = 30, padR = 10, padT = 12, padB = 20;
+    const iw = W - padL - padR, ih = H - padT - padB;
+    const n = pts.length;
+    const x = i => padL + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
+    const y = r => padT + ih - (Math.min(r, 100) / 100) * ih;
+
+    // Line segments: consecutive defined points only.
+    let path = '', pen = false;
+    pts.forEach((p, i) => {
+      if (p.ratio === null) { pen = false; return; }
+      path += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.ratio).toFixed(1)}`;
+      pen = true;
+    });
+
+    const dots = pts.map((p, i) => {
+      if (p.ratio === null) return '';
+      const tip = `Week of ${p.wk.label}: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.bookings} guest${p.bookings !== 1 ? 's' : ''} = ${p.ratio}%`;
+      return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="3.5" class="rline-dot"/>`
+        + `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="9" fill="transparent"><title>${tip}</title></circle>`;
     }).join('');
-    return `<div class="spark-wrap"><span class="spark-title">Review rate</span><div class="spark-row">${slots}</div></div>`;
+
+    // Sparse x labels: the first week-row of each month.
+    const xlabels = pts.map((p, i) => p.wk.monthStart
+      ? `<text x="${x(i).toFixed(1)}" y="${H - 5}" class="rline-xlab">${p.wk.label.split(' ')[1]}</text>` : '').join('');
+
+    const grid = [0, 50, 100].map(v =>
+      `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" class="rline-grid"/>`
+      + `<text x="${padL - 5}" y="${y(v) + 3}" class="rline-ylab">${v}</text>`).join('');
+
+    return `<div class="rline-wrap">
+      <div class="rline-title">Review rate — weekly</div>
+      <svg viewBox="0 0 ${W} ${H}" class="rline-svg" role="img" aria-label="Weekly review rate">
+        ${grid}
+        <path d="${path}" class="rline-path"/>
+        ${dots}
+        ${xlabels}
+      </svg>
+    </div>`;
   };
 
   el.innerHTML = `

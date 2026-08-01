@@ -93,24 +93,26 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/reviews/ratio-history — per-guide review-to-bookings ratio per
-// billing cycle (23rd → 22nd), oldest→newest, capped at the last 6 cycles.
+// WEEK (Monday-start), oldest→newest, capped at the last 26 weeks (~6 months).
 // Bookings mirror /api/ical/guide-hours "worked" semantics exactly: sum of
 // guide_tour_hours.booking_count for tours that have already STARTED, matched
-// by fuzzy guide name — so each cycle's ratio equals the Rate stat the admin
-// screen already shows for that cycle. Leading cycles empty for every guide
-// (before tracking began) are trimmed.
+// by fuzzy guide name. ratio is null for weeks with 0 bookings (a gap, not
+// 0%). Leading weeks empty for EVERY guide (pre-tracking era) are trimmed.
 router.get('/ratio-history', requireAdmin, (req, res) => {
   const pad = n => String(n).padStart(2, '0');
+  const iso = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   const now = new Date();
-  const curStartMonth = now.getUTCDate() >= 23 ? now.getUTCMonth() : now.getUTCMonth() - 1;
-  const cycles = [];
-  for (let i = 5; i >= 0; i--) {
-    const s = new Date(Date.UTC(now.getUTCFullYear(), curStartMonth - i, 23));
-    const e = new Date(Date.UTC(now.getUTCFullYear(), curStartMonth - i + 1, 22));
-    cycles.push({
-      from: `${s.getUTCFullYear()}-${pad(s.getUTCMonth() + 1)}-23`,
-      to: `${e.getUTCFullYear()}-${pad(e.getUTCMonth() + 1)}-22`,
-      label: e.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' }),
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+
+  const weeks = [];
+  for (let i = 25; i >= 0; i--) {
+    const s = new Date(monday); s.setUTCDate(s.getUTCDate() - i * 7);
+    const e = new Date(s); e.setUTCDate(e.getUTCDate() + 6);
+    weeks.push({
+      from: iso(s), to: iso(e),
+      label: s.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
+      monthStart: s.getUTCDate() <= 7, // first week-row of a month — used for sparse x labels
     });
   }
 
@@ -119,29 +121,28 @@ router.get('/ratio-history', requireAdmin, (req, res) => {
   const hoursRows = db().prepare(`
     SELECT guide, booking_count, start_date FROM guide_tour_hours
     WHERE datetime(start_at) <= datetime('now') AND start_date >= ?
-  `).all(cycles[0].from);
+  `).all(weeks[0].from);
   const reviewRows = db().prepare(`
     SELECT guide_id, review_date FROM guide_reviews WHERE review_date >= ?
-  `).all(cycles[0].from);
+  `).all(weeks[0].from);
 
   const out = guides.map(g => ({
     id: g.id, name: g.name,
-    points: cycles.map(c => {
+    points: weeks.map(w => {
       const bookings = hoursRows.reduce((s, r) =>
-        s + ((r.start_date >= c.from && r.start_date <= c.to && guideMatches(r.guide, g.name)) ? (r.booking_count || 0) : 0), 0);
-      const reviews = reviewRows.filter(r => r.guide_id === g.id && r.review_date >= c.from && r.review_date <= c.to).length;
+        s + ((r.start_date >= w.from && r.start_date <= w.to && guideMatches(r.guide, g.name)) ? (r.booking_count || 0) : 0), 0);
+      const reviews = reviewRows.filter(r => r.guide_id === g.id && r.review_date >= w.from && r.review_date <= w.to).length;
       return { bookings, reviews, ratio: bookings > 0 ? Math.round((reviews / bookings) * 100) : null };
     }),
   }));
 
-  // Trim leading cycles that are empty for EVERY guide (pre-tracking era).
   let firstUseful = 0;
-  while (firstUseful < cycles.length - 1 &&
+  while (firstUseful < weeks.length - 1 &&
          out.every(g => g.points[firstUseful].bookings === 0 && g.points[firstUseful].reviews === 0)) {
     firstUseful++;
   }
   res.json({
-    cycles: cycles.slice(firstUseful),
+    weeks: weeks.slice(firstUseful),
     guides: out.map(g => ({ ...g, points: g.points.slice(firstUseful) })),
   });
 });
