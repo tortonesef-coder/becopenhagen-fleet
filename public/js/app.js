@@ -2952,7 +2952,7 @@ async function renderGuidesMetrics(el) {
     while (pts.length && pts[0].bookings === 0 && pts[0].reviews === 0) pts.shift();
     if (!pts.some(p => p.ratio !== null)) return `<div class="rline-empty">No review history yet</div>`;
 
-    const W = 640, H = 150, padL = 30, padR = 10, padT = 12, padB = 20;
+    const W = 640, H = 96, padL = 30, padR = 10, padT = 8, padB = 18;
     const iw = W - padL - padR, ih = H - padT - padB;
     const n = pts.length;
     const x = i => padL + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
@@ -2974,9 +2974,13 @@ async function renderGuidesMetrics(el) {
         + `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="9" fill="transparent"><title>${tip}</title></circle>`;
     }).join('');
 
-    // Sparse x labels: the first week-row of each month.
-    const xlabels = pts.map((p, i) => p.wk.monthStart
-      ? `<text x="${x(i).toFixed(1)}" y="${H - 5}" class="rline-xlab">${p.wk.label.split(' ')[1]}</text>` : '').join('');
+    // Week labels on the x axis ("14 Jul" = that week's Monday). Every week
+    // while there are few points; thinned to a stride as history grows so
+    // labels never collide (~9 max), always keeping the last week labeled.
+    const stride = Math.max(1, Math.ceil(n / 9));
+    const xlabels = pts.map((p, i) =>
+      (i % stride === 0 || i === n - 1)
+        ? `<text x="${x(i).toFixed(1)}" y="${H - 5}" class="rline-xlab">${p.wk.label}</text>` : '').join('');
 
     const grid = [0, 50, 100].map(v =>
       `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" class="rline-grid"/>`
