@@ -2942,60 +2942,21 @@ async function renderGuidesMetrics(el) {
     return { ...g, worked, upcoming, reviews, ratio };
   }));
 
-  // Full-width weekly line chart of the review-to-bookings ratio (one point
-  // per Monday-start week, ≤26 weeks). The line BREAKS at weeks with no
-  // bookings — a gap, never a fake 0%. Values >100% plot at the cap; the dot
-  // tooltip always carries the true numbers. Aspect-preserved SVG so dots
-  // stay round at any width.
+  // Weekly review-rate line, drawn AFTER insertion at the container's real
+  // pixel width (fonts, dots and strokes stay crisp instead of scaling up on
+  // wide screens). Placeholder at template time; drawRline() fills it.
+  const rlinePts = {};
   const sparkHtml = (guideId) => {
     const h = rateHistory?.guides?.find(g => g.id === guideId);
     if (!h) return '';
     let pts = h.points.map((p, i) => ({ ...p, wk: rateHistory.weeks[i] }));
     while (pts.length && pts[0].reservations === 0 && pts[0].reviews === 0) pts.shift();
+    while (pts.length && pts[0].ratio === null) pts.shift(); // dead lead weeks: no dot, just space
     if (!pts.some(p => p.ratio !== null)) return `<div class="rline-empty">No review history yet</div>`;
-
-    const W = 640, H = 96, padL = 30, padR = 10, padT = 8, padB = 18;
-    const iw = W - padL - padR, ih = H - padT - padB;
-    const n = pts.length;
-    const x = i => padL + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
-    const y = r => padT + ih - (Math.min(r, 100) / 100) * ih;
-
-    // One continuous line: zero-booking weeks are bridged straight through
-    // (per Fede) — no dot there, so the absence of data stays visible at the
-    // point level while the line keeps moving.
-    let path = '';
-    pts.forEach((p, i) => {
-      if (p.ratio === null) return;
-      path += `${path ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.ratio).toFixed(1)}`;
-    });
-
-    const dots = pts.map((p, i) => {
-      if (p.ratio === null) return '';
-      const tip = `Week of ${p.wk.label}: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.reservations} reservation${p.reservations !== 1 ? 's' : ''} = ${p.ratio}%`;
-      return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="3.5" class="rline-dot"/>`
-        + `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="9" fill="transparent"><title>${tip}</title></circle>`;
-    }).join('');
-
-    // Week labels on the x axis ("14 Jul" = that week's Monday). Every week
-    // while there are few points; thinned to a stride as history grows so
-    // labels never collide (~9 max), always keeping the last week labeled.
-    const stride = Math.max(1, Math.ceil(n / 9));
-    const xlabels = pts.map((p, i) =>
-      (i % stride === 0 || i === n - 1)
-        ? `<text x="${x(i).toFixed(1)}" y="${H - 5}" class="rline-xlab">${p.wk.label}</text>` : '').join('');
-
-    const grid = [0, 50, 100].map(v =>
-      `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" class="rline-grid"/>`
-      + `<text x="${padL - 5}" y="${y(v) + 3}" class="rline-ylab">${v}</text>`).join('');
-
+    rlinePts[guideId] = pts;
     return `<div class="rline-wrap">
       <div class="rline-title">Review rate — weekly</div>
-      <svg viewBox="0 0 ${W} ${H}" class="rline-svg" role="img" aria-label="Weekly review rate">
-        ${grid}
-        <path d="${path}" class="rline-path"/>
-        ${dots}
-        ${xlabels}
-      </svg>
+      <div class="rline-chart" data-rline="${guideId}"></div>
     </div>`;
   };
 
@@ -3027,6 +2988,74 @@ async function renderGuidesMetrics(el) {
         </div>`).join('')}
     </div>
   `;
+  el.querySelectorAll('[data-rline]').forEach(node => drawRline(node, rlinePts[node.dataset.rline]));
+}
+
+// Draws one weekly review-rate chart into its container at true pixel size.
+// Smoothed line (clamped Catmull-Rom — no overshoot past 0/100), soft gradient
+// area, surface-ringed dots with native-title tooltips, a dashed reference
+// line at 30% ("good" threshold), and width-adaptive week labels.
+function drawRline(node, pts) {
+  if (!pts || !pts.length) return;
+  const W = Math.max(node.clientWidth || 640, 260), H = 118;
+  const padL = 34, padR = 14, padT = 10, padB = 20;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const n = pts.length;
+  const x = i => padL + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
+  const y = r => padT + ih - (Math.min(r, 100) / 100) * ih;
+  const yTop = y(100), yBase = y(0);
+
+  const def = [];
+  pts.forEach((p, i) => { if (p.ratio !== null) def.push([x(i), y(p.ratio)]); });
+
+  // Catmull-Rom → cubic Bézier, control-point y clamped to the plot band so a
+  // spike can't overshoot above 100 or dip below 0.
+  const cy = v => Math.max(yTop, Math.min(yBase, v));
+  let line = `M${def[0][0].toFixed(1)},${def[0][1].toFixed(1)}`;
+  for (let i = 0; i < def.length - 1; i++) {
+    const p0 = def[Math.max(i - 1, 0)], p1 = def[i], p2 = def[i + 1], p3 = def[Math.min(i + 2, def.length - 1)];
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = cy(p1[1] + (p2[1] - p0[1]) / 6);
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = cy(p2[1] - (p3[1] - p1[1]) / 6);
+    line += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  const area = `${line}L${def[def.length - 1][0].toFixed(1)},${yBase}L${def[0][0].toFixed(1)},${yBase}Z`;
+
+  const dots = pts.map((p, i) => {
+    if (p.ratio === null) return '';
+    const tip = `Week of ${p.wk.label}: ${p.reviews} review${p.reviews !== 1 ? 's' : ''} / ${p.reservations} reservation${p.reservations !== 1 ? 's' : ''} = ${p.ratio}%`;
+    return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="3.5" class="rline-dot"/>`
+      + `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="10" fill="transparent"><title>${tip}</title></circle>`;
+  }).join('');
+
+  // Week labels: one per ~72px of width, last week always labeled, edge
+  // labels anchored inward so nothing clips.
+  const stride = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 72))));
+  const xlabels = pts.map((p, i) => {
+    if (i % stride !== 0 && i !== n - 1) return '';
+    if (i === n - 1 && n > 1 && (n - 1) % stride !== 0 && (n - 1) % stride < stride / 2) return '';
+    const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+    const lx = i === 0 ? Math.max(x(i) - 8, 2) : i === n - 1 ? Math.min(x(i) + 8, W - 2) : x(i);
+    return `<text x="${lx.toFixed(1)}" y="${H - 6}" class="rline-xlab" text-anchor="${anchor}">${p.wk.label}</text>`;
+  }).join('');
+
+  const gid = `rlg-${node.dataset.rline}`;
+  node.innerHTML = `
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="rline-svg" role="img" aria-label="Weekly review rate">
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--accent, #e8a825)" stop-opacity="0.22"/>
+        <stop offset="1" stop-color="var(--accent, #e8a825)" stop-opacity="0"/>
+      </linearGradient></defs>
+      <line x1="${padL}" y1="${yBase}" x2="${W - padR}" y2="${yBase}" class="rline-axis"/>
+      <line x1="${padL}" y1="${yTop}" x2="${W - padR}" y2="${yTop}" class="rline-grid"/>
+      <line x1="${padL}" y1="${y(30)}" x2="${W - padR}" y2="${y(30)}" class="rline-ref"/>
+      <text x="${padL - 6}" y="${yBase + 3}" class="rline-ylab">0</text>
+      <text x="${padL - 6}" y="${y(30) + 3}" class="rline-ylab rline-ylab-ref">30</text>
+      <text x="${padL - 6}" y="${yTop + 3}" class="rline-ylab">100</text>
+      <path d="${area}" fill="url(#${gid})"/>
+      <path d="${line}" class="rline-path"/>
+      ${dots}
+      ${xlabels}
+    </svg>`;
 }
 
 // ── Per-guide unavailability calendar ─────────────────────────────────────

@@ -1351,13 +1351,17 @@ details summary::-webkit-details-marker { display: none; }
   font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
   color: var(--text3, #888); margin-bottom: 2px;
 }
-.rline-svg { width: 100%; height: auto; display: block; }
-.rline-path { fill: none; stroke: var(--accent, #e8a825); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-.rline-dot { fill: var(--accent, #e8a825); }
-.rline-grid { stroke: var(--border, #3a3a3a); stroke-width: 1; }
-.rline-xlab, .rline-ylab { font-size: 10px; fill: var(--text3, #888); }
+.rline-chart { width: 100%; }
+.rline-svg { display: block; max-width: 100%; }
+.rline-path { fill: none; stroke: var(--accent, #e8a825); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rline-dot { fill: var(--accent, #e8a825); stroke: var(--bg2, #fff); stroke-width: 2; }
+.rline-axis { stroke: var(--border-strong, #ccc9c4); stroke-width: 1; }
+.rline-grid { stroke: var(--border, #e4e1dd); stroke-width: 1; stroke-dasharray: 2 4; }
+.rline-ref { stroke: var(--green, #1a7d4a); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.45; }
+.rline-xlab, .rline-ylab { font-size: 10px; fill: var(--text3, #a8a49f); }
 .rline-xlab { text-anchor: middle; }
 .rline-ylab { text-anchor: end; }
+.rline-ylab-ref { fill: var(--green, #1a7d4a); opacity: 0.75; }
 .rline-empty { font-size: 0.72rem; color: var(--text3, #888); margin-top: 0.55rem; }
 
 .ucal-nav {
