@@ -19,9 +19,19 @@ async function sendReminders() {
       SELECT * FROM tour_availabilities
       WHERE feed_type = 'tour'
         AND guide IS NOT NULL
+        AND booking_count > 0
         AND datetime(replace(replace(start_at,'T',' '),'Z','')) BETWEEN datetime('now', '+15 hours') AND datetime('now', '+17 hours')
         AND availability_id NOT IN (SELECT availability_id FROM tour_reminders)
     `).all();
+    // booking_count > 0: a zero-booking tour is open capacity, not a tour the
+    // guide will run — most commonly a private slot whose booking was CANCELLED
+    // but whose crew assignment was never removed in FareHarbor (the cancel
+    // deletes our row via iCal, then the scraper re-inserts the still-standing
+    // slot from the calendar WITH its stale crew → guide set, bookings 0).
+    // Ibrahim got a "Reminder — A3P tomorrow, Bookings 0" for exactly that, 3
+    // days after the cancellation email. Filtering in the query (rather than
+    // claiming+skipping) means a last-minute booking inside the reminder
+    // window still gets its reminder on a later hourly pass.
 
     const activeMembers = db().prepare(`SELECT id, name, email FROM team_members WHERE active=1 AND email IS NOT NULL`).all();
 
