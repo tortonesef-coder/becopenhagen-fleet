@@ -718,6 +718,32 @@ router.get('/rentals', (req, res) => {
   const pastShopClose = now.getUTCHours() > cutoffHourUTC ||
     (now.getUTCHours() === cutoffHourUTC && now.getUTCMinutes() >= cutoffMinUTC);
 
+  // Single-day mode (?date=YYYY-MM-DD): rentals that STARTED that day, past or
+  // future. Rich rows come from tour_availabilities (kept ~a week back); for
+  // older days the permanent bookings ledger fills in basic reservation
+  // records (customer, duration, price — the bike detail doesn't survive the
+  // availability row). Refs already present in a rich row are deduped out.
+  if (req.query.date) {
+    const date = String(req.query.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'bad date' });
+    const rich = db().prepare(`
+      SELECT * FROM tour_availabilities
+      WHERE feed_type='rental' AND start_date = ? ORDER BY start_at
+    `).all(date).map(r => ({
+      ...r,
+      bikes_needed: JSON.parse(r.bikes_needed || '{}'),
+      bookings: JSON.parse(r.bookings_json || '[]'),
+    }));
+    const seenRefs = new Set();
+    rich.forEach(r => (r.bookings || []).forEach(b => seenRefs.add(String(b.ref))));
+    const basic = db().prepare(`
+      SELECT ref, feed_id, tour_start_date, customer_name, customer_email,
+             customer_phone, source, total
+      FROM bookings WHERE feed_type='rental' AND tour_start_date = ? ORDER BY customer_name
+    `).all(date).filter(b => !seenRefs.has(String(b.ref)));
+    return res.json({ date, rich, basic });
+  }
+
   const startFilter = pastShopClose
     ? `date('now', '+1 day')`
     : `date('now')`;

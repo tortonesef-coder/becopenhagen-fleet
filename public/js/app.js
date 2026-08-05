@@ -3907,9 +3907,10 @@ async function renderTodayBoard(c) {
 }
 
 async function renderRentals(c) {
+  const day = window._rentalsDay || null; // null = the usual "all upcoming" list
   c.innerHTML = `<div class="empty-state"><p>Loading...</p></div>`;
-  const [rentals, bikes] = await Promise.all([
-    api('/api/ical/rentals'),
+  const [data, bikes] = await Promise.all([
+    api('/api/ical/rentals' + (day ? '?date=' + day : '')),
     api('/api/bikes').catch(() => []),
   ]);
   // A booking is "handled" if a bike is currently out against its FareHarbor ref.
@@ -3917,7 +3918,65 @@ async function renderRentals(c) {
     bikes.filter(b => b.status === 'out' && b.fareharbor_booking_ref)
          .map(b => String(b.fareharbor_booking_ref))
   );
-  renderRentalsList(c, rentals, checkedOutRefs);
+
+  const todayStr = new Date().toISOString().substring(0, 10);
+  c.innerHTML = `
+    <div class="rentals-daynav">
+      <button onclick="rentalsStep(-1)" aria-label="Previous day">‹</button>
+      <div class="rentals-daynav-label" onclick="rentalsPickDate()">
+        ${day ? fmtDateFull(day) : 'Upcoming'}
+        <input type="date" id="rentals-datepick" max="" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none">
+      </div>
+      <button onclick="rentalsStep(1)" aria-label="Next day">›</button>
+    </div>
+    ${day ? `<button class="rentals-back" onclick="window._rentalsDay=null;renderRentals(document.getElementById('content'))">← Back to upcoming</button>` : ''}
+    <div id="rentals-day-content"></div>`;
+  document.getElementById('rentals-datepick').addEventListener('change', e => {
+    if (!e.target.value) return;
+    window._rentalsDay = e.target.value;
+    renderRentals(document.getElementById('content'));
+  });
+
+  const el = document.getElementById('rentals-day-content');
+  if (!day) { renderRentalsList(el, data, checkedOutRefs); return; }
+
+  const isPast = day < todayStr;
+  renderRentalsList(el, data.rich, checkedOutRefs, {
+    pastDay: isPast,
+    emptyText: data.basic.length ? '' : 'No rentals on this day',
+  });
+  if (data.basic.length) {
+    el.insertAdjacentHTML('beforeend', `
+      <div class="section-title">Archive — reservation records</div>
+      ${data.basic.map(b => `
+        <div class="rental-card" style="cursor:default">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+            <strong style="font-size:0.9rem">${escapeHtml(b.customer_name || 'Unknown')}</strong>
+            <span style="font-size:0.75rem;color:var(--text3)">${escapeHtml(b.feed_id || '')}</span>
+          </div>
+          <div style="font-size:0.78rem;color:var(--text2);margin-top:2px">
+            ${b.total ? escapeHtml(b.total) + ' · ' : ''}${b.source && b.source !== 'direct' ? escapeHtml(b.source) + ' · ' : ''}${escapeHtml(b.customer_phone || b.customer_email || '')}
+          </div>
+        </div>`).join('')}`);
+  }
+}
+
+// Step the Rentals view one day back/forward. From the default "Upcoming"
+// view, ‹ lands on yesterday and › on tomorrow (single-day views).
+function rentalsStep(delta) {
+  const todayStr = new Date().toISOString().substring(0, 10);
+  const base = window._rentalsDay || todayStr;
+  const d = new Date(base + 'T12:00');
+  d.setDate(d.getDate() + delta);
+  window._rentalsDay = d.toISOString().substring(0, 10);
+  renderRentals(document.getElementById('content'));
+}
+
+function rentalsPickDate() {
+  const inp = document.getElementById('rentals-datepick');
+  if (!inp) return;
+  inp.value = window._rentalsDay || new Date().toISOString().substring(0, 10);
+  if (inp.showPicker) inp.showPicker(); else inp.click();
 }
 
 function renderToursList(el, tours, isGuideView) {
@@ -3959,9 +4018,10 @@ function renderToursList(el, tours, isGuideView) {
   `).join('');
 }
 
-function renderRentalsList(el, rentals, checkedOutRefs = new Set()) {
+function renderRentalsList(el, rentals, checkedOutRefs = new Set(), opts = {}) {
   if (rentals.length === 0) {
-    el.innerHTML = '<div class="empty-state"><p>No upcoming rentals</p></div>';
+    // opts.emptyText '' means: render nothing (caller appends its own content).
+    el.innerHTML = opts.emptyText === '' ? '' : `<div class="empty-state"><p>${opts.emptyText || 'No upcoming rentals'}</p></div>`;
     return;
   }
 
@@ -3982,8 +4042,10 @@ function renderRentalsList(el, rentals, checkedOutRefs = new Set()) {
     if (!byDate[d]) byDate[d] = [];
     byDate[d].push(b);
   });
-  // Within each day, sink already-handed-out bookings to the bottom.
-  Object.values(byDate).forEach(list => list.sort((a, b) => (a._done ? 1 : 0) - (b._done ? 1 : 0)));
+  // Within each day, sink already-handed-out bookings to the bottom — but not
+  // in past-day view: there "bikes out" means NOT RETURNED YET, which should
+  // stay prominent, not dimmed away.
+  if (!opts.pastDay) Object.values(byDate).forEach(list => list.sort((a, b) => (a._done ? 1 : 0) - (b._done ? 1 : 0)));
 
   const sourceColors = {
     'GetYourGuide': { bg:'#FFE8E2', fg:'#CC3D1F' },
@@ -4004,7 +4066,7 @@ function renderRentalsList(el, rentals, checkedOutRefs = new Set()) {
         : '';
       const comment = b.comments ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:var(--surface2);border-radius:6px;font-size:0.78rem;color:var(--text2);line-height:1.45;white-space:pre-wrap">${escapeHtml(b.comments)}</div>` : '';
       const bikes = b.what ? `<div style="margin-top:0.35rem;font-size:0.82rem;font-weight:600;color:var(--blue)">${escapeHtml(b.what)}</div>` : '';
-      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}','${b.ref}')" style="${b._done ? 'opacity:0.5' : ''}">
+      return `<div class="rental-card" onclick="openRentalDetail('${b._avail_id}','${b.ref}')" style="${b._done && !opts.pastDay ? 'opacity:0.5' : ''}">
         <div class="rental-card-top">
           <span class="rental-duration-badge">${b._feed_id}</span>
           <span class="rental-time">${b._start_time || ''}${b._end_time ? ' – ' + b._end_time : ''}</span>

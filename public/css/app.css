@@ -1327,7 +1327,28 @@ details summary::-webkit-details-marker { display: none; }
   margin-top: 0.45rem; text-align: center;
 }
 
-/* Mixed unavailability calendar (Guides & Tours → Availability) */
+/* Rentals day navigation (‹ date › with hidden native date picker) */
+.rentals-daynav {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; margin: 0.25rem 0 0.5rem;
+}
+.rentals-daynav button {
+  background: var(--bg2, #fff); color: var(--text, #1a1917);
+  border: 1px solid var(--border, #e4e1dd); border-radius: 8px;
+  width: 40px; height: 34px; font-size: 1.05rem; cursor: pointer; flex-shrink: 0;
+}
+.rentals-daynav button:active { opacity: 0.7; }
+.rentals-daynav-label {
+  position: relative; flex: 1; text-align: center;
+  font-weight: 700; font-size: 0.95rem; cursor: pointer;
+  padding: 0.35rem 0; border-radius: 8px;
+}
+.rentals-daynav-label:active { background: var(--bg3, #f0eeec); }
+.rentals-back {
+  display: block; margin: 0 auto 0.6rem;
+  background: none; border: none; cursor: pointer;
+  color: var(--text2, #6b6762); font-size: 0.8rem; font-weight: 600;
+}
 .ucal-cell.ucal-multi {
   justify-content: flex-start;
   padding-top: 3px;
