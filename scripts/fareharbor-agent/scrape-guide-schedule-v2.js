@@ -177,6 +177,11 @@ async function login(browser) {
 // All item IDs from the discovered API URL (tours + rentals; harmless to request all)
 const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,741878,744545,747188,747179,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
 
+// Items the daily new-item watchdog must NOT alert about, even though they're
+// not configured. 747189: same English name as A3 (709131), zero bookings —
+// Fede said ignore (2026-08-05, suspected duplicate/re-listing).
+const WATCHDOG_IGNORED_ITEM_IDS = new Set(['747189']);
+
 // Fetch one calendar month by calling the internal API directly (authenticated
 // via the logged-in page's cookies). Deterministic — no response interception.
 async function fetchMonth(page, year, month) {
@@ -726,6 +731,10 @@ async function main() {
       db.prepare('DELETE FROM guide_tour_hours WHERE availability_id=? AND start_at > datetime(\'now\')').run(row.availability_id);
       db.prepare('DELETE FROM tour_missing WHERE availability_id=?').run(row.availability_id);
     }
+
+    // Daily new-item watchdog — needs the authenticated page, so it runs
+    // before the browser closes. Non-fatal by construction.
+    await checkForNewItems(page, db);
   } finally {
     await browser.close();
   }
@@ -738,6 +747,51 @@ async function main() {
       ON CONFLICT(key) DO UPDATE SET value=datetime('now')`).run();
     console.log('✓ Heartbeat recorded (scraper_last_success).');
   } catch (e) { console.error('Could not record heartbeat:', e.message); }
+}
+
+// Daily watchdog: compare FareHarbor's active item list against what the app
+// has configured, and raise an admin alert (+ email, via EMAIL_ADMIN_TYPES)
+// for any active item the app doesn't know. A new product created in
+// FareHarbor is otherwise SILENTLY INVISIBLE until hand-added to both configs
+// — that's what made Ibrahim's A3G tours disappear (and H3 before it). Runs at
+// most once per UTC day (guarded by app_settings) and never breaks the scrape.
+async function checkForNewItems(page, db) {
+  try {
+    const today = new Date().toISOString().substring(0, 10);
+    const last = db.prepare(`SELECT value FROM app_settings WHERE key='fh_items_checked_date'`).get()?.value;
+    if (last === today) return;
+
+    const resp = await page.request.get(
+      `https://fareharbor.com/api/v1/companies/${COMPANY_SLUG}/items/?include-archived=no`, { timeout: 30000 });
+    if (!resp.ok()) { console.log(`Item watchdog: HTTP ${resp.status()} — will retry next run`); return; }
+    const items = (await resp.json()).items || [];
+    if (!items.length) { console.log('Item watchdog: empty item list — will retry next run'); return; }
+
+    const known = new Set(ALL_ITEM_IDS.split(','));
+    let newCount = 0;
+    for (const it of items) {
+      const pk = String(it.pk || '');
+      if (!pk || known.has(pk) || WATCHDOG_IGNORED_ITEM_IDS.has(pk)) {
+        // Previously-flagged item that has since been configured: clear its alert.
+        if (pk && known.has(pk)) resolveNotification('new_fh_item', 'fh-item-' + pk);
+        continue;
+      }
+      newCount++;
+      createNotification(
+        'new_fh_item',
+        `New FareHarbor item: ${(it.name || '(unnamed)').substring(0, 80)}`,
+        `Item ${pk} is active in FareHarbor but NOT configured in the app — its tours are invisible until added. ` +
+        `Add it to TOUR_FEEDS (src/routes/ical.js) and TOUR_ITEMS + ALL_ITEM_IDS (scrape-guide-schedule-v2.js), ` +
+        `or add the id to WATCHDOG_IGNORED_ITEM_IDS to silence this alert.`,
+        'fh-item-' + pk
+      );
+    }
+    db.prepare(`INSERT INTO app_settings (key, value) VALUES ('fh_items_checked_date', ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(today);
+    console.log(`Item watchdog: ${items.length} active items, ${newCount} unconfigured${newCount ? ' → alerted' : ''}.`);
+  } catch (e) {
+    console.error('Item watchdog error (non-fatal):', e.message);
+  }
 }
 
 main().catch(e => { console.error('Fatal:', e.message); process.exit(1); });

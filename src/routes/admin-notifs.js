@@ -7,7 +7,7 @@ function db() { return getDb(); }
 
 // Alert types that also email the admin directly (in addition to the in-app
 // alert). Kept deliberately narrow — high-signal, act-on-it-now alerts.
-const EMAIL_ADMIN_TYPES = new Set(['unavailability', 'unassigned_tour_urgent']);
+const EMAIL_ADMIN_TYPES = new Set(['unavailability', 'unassigned_tour_urgent', 'new_fh_item']);
 
 function adminAlertEmail() {
   // Federico's on-file address, with a stable fallback.
