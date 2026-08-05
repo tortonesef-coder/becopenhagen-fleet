@@ -30,6 +30,9 @@ const CANONICAL = {
   F3:  'Food Tour (3h)',
   F3P: 'Private Food Tour (3h)',
   H3:  'History Tour (3h)',
+  H3P: 'Private History (3h)',
+  A3G: 'Architecture Tour German (3h)',
+  A3F: 'Architecture Tour French (3h)',
   CUSTOM: 'Custom Tour',
 };
 

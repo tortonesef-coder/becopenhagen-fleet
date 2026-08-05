@@ -38,6 +38,9 @@ const TOUR_ITEMS = {
   709131: { feed_id: 'A3',  label: 'Architecture Tour (3h)' },
   729348: { feed_id: 'F3',  label: 'Food Tour (3h)' },
   741878: { feed_id: 'H3',  label: 'History Tour (3h)' },
+  744545: { feed_id: 'H3P', label: 'Private History (3h)' },
+  747188: { feed_id: 'A3G', label: 'Architecture Tour German (3h)' },
+  747179: { feed_id: 'A3F', label: 'Architecture Tour French (3h)' },
   713560: { feed_id: 'L3P', label: 'Private Liveable City (3h)' },
   713563: { feed_id: 'A3P', label: 'Private Architecture (3h)' },
   730640: { feed_id: 'F3P', label: 'Private Food Tour (3h)' },
@@ -172,7 +175,7 @@ async function login(browser) {
 }
 
 // All item IDs from the discovered API URL (tours + rentals; harmless to request all)
-const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,741878,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
+const ALL_ITEM_IDS = '712177,707493,713560,709131,713563,729348,730640,741878,744545,747188,747179,650858,190975,190977,190978,190980,651114,651124,190983,651812,652669,652693,652695,652697,652699,652703,190987,702701,706960,583653,190971,201570,201571';
 
 // Fetch one calendar month by calling the internal API directly (authenticated
 // via the logged-in page's cookies). Deterministic — no response interception.
