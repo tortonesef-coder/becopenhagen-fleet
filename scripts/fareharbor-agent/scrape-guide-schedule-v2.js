@@ -186,6 +186,7 @@ const WATCHDOG_IGNORED_ITEM_IDS = new Set(['747189']);
 // via the logged-in page's cookies). Deterministic — no response interception.
 async function fetchMonth(page, year, month) {
   const results = [];
+  let complete = true;
   // A month spans up to 6 week-rows, but most use only 4-5. Requesting a
   // week-row past the end of the month returns HTTP 400 — that's "no such week",
   // not a failure. So a 400 just means we've run past the month's end: stop,
@@ -206,10 +207,11 @@ async function fetchMonth(page, year, month) {
       }
     }
     if (past_end) break; // no later week-rows exist either
+    if (!ok) complete = false; // a real week-row genuinely failed after retries
   }
   if (results.length === 0) throw new Error(`No calendar data for ${year}-${month}`);
-  console.log(`  (${results.length} week-rows fetched)`);
-  return results;
+  console.log(`  (${results.length} week-rows fetched${complete ? '' : ', INCOMPLETE'})`);
+  return { results, complete };
 }
 
 // Extract real bike counts from resource_use_summaries, excluding
@@ -429,12 +431,19 @@ async function main() {
     }
 
     let all = [];
+    // A fetch is COMPLETE only if every month returned every real week-row.
+    // Partial data is fine for UPSERTS (fresh info still flows) but must never
+    // feed the deletion sweep: on 2026-08-07 a FareHarbor brownout spanned two
+    // consecutive runs, defeating the 2-miss debounce — booked weekend tours
+    // were deleted off partial fetches and 9 false cancel emails went out.
+    let fetchComplete = true;
     for (const [y, m] of months) {
       // Isolate each month: a failure fetching/parsing one month must not abort
       // the others (an August-blocking crash is how we lost every August tour).
       try {
         console.log(`Fetching calendar ${y}-${String(m).padStart(2, '0')}...`);
-        const jsonResponses = await fetchMonth(page, y, m);
+        const { results: jsonResponses, complete } = await fetchMonth(page, y, m);
+        if (!complete) fetchComplete = false;
         let monthCount = 0;
         for (const json of jsonResponses) {
           const avs = extractAvailabilities(json, activeGuideNames, guideResourceIds, guidedTourBikesId, electricCargoBikeId, bikeResourceTypes);
@@ -443,6 +452,7 @@ async function main() {
         }
         console.log(`  ${monthCount} tour availabilities found (before dedup)`);
       } catch (e) {
+        fetchComplete = false;
         console.error(`  ERROR fetching ${y}-${String(m).padStart(2,'0')}: ${e.message} — continuing with other months`);
       }
     }
@@ -639,6 +649,18 @@ async function main() {
     // Deletion pass: any future tour slot in the DB that is NOT in the calendar
     // anymore has been cancelled/closed in FareHarbor. Delete + notify guide.
     const seenIds = new Set(all.map(a => a.availability_id));
+
+    // Slots seen this run are positive evidence — clear their miss counters
+    // even on an incomplete fetch.
+    for (const m of db.prepare('SELECT availability_id FROM tour_missing').all()) {
+      if (seenIds.has(m.availability_id)) {
+        db.prepare('DELETE FROM tour_missing WHERE availability_id=?').run(m.availability_id);
+      }
+    }
+
+    if (!fetchComplete) {
+      console.log('⚠ Fetch INCOMPLETE — skipping the cancellation sweep entirely (absence from a partial fetch is not evidence of cancellation).');
+    } else {
     // FareHarbor reissues an availability's internal ID when a private tour is
     // edited/reassigned, so "this ID vanished from the feed" does NOT mean the
     // tour was cancelled — the SAME slot often reappears under a fresh ID. Only
@@ -666,15 +688,6 @@ async function main() {
       console.log(`  ⚠ skipping cancel-check for ${row.feed_id} ${row.start_date} ${row.start_time} — that feed type wasn't fetched this run (not treating as cancelled)`);
       return false;
     });
-
-    // Any slot that reappeared in this run resets its miss counter, so
-    // miss_count only ever reflects CONSECUTIVE misses. tour_missing is tiny
-    // (only currently-missing slots), so read it all and clear the ones now seen.
-    for (const m of db.prepare('SELECT availability_id FROM tour_missing').all()) {
-      if (seenIds.has(m.availability_id)) {
-        db.prepare('DELETE FROM tour_missing WHERE availability_id=?').run(m.availability_id);
-      }
-    }
 
     for (const row of dbFuture) {
       if (seenIds.has(row.availability_id)) continue;
@@ -731,6 +744,7 @@ async function main() {
       db.prepare('DELETE FROM guide_tour_hours WHERE availability_id=? AND start_at > datetime(\'now\')').run(row.availability_id);
       db.prepare('DELETE FROM tour_missing WHERE availability_id=?').run(row.availability_id);
     }
+    } // end fetchComplete gate
 
     // Daily new-item watchdog — needs the authenticated page, so it runs
     // before the browser closes. Non-fatal by construction.
