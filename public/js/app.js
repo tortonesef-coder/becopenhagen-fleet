@@ -44,13 +44,28 @@ const state = {
 async function api(path, opts={}) {
   const headers = {'Content-Type':'application/json'};
   if (state.viewingAs && state.actor?.id) headers['X-View-As'] = state.actor.id;
-  const r = await fetch(path, {
-    headers,
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!r.ok) { const e=await r.json().catch(()=>({error:r.statusText})); throw new Error(e.error||r.statusText); }
-  return r.json();
+  // cache:'no-store' belt-and-braces with the server's Cache-Control header —
+  // iOS Safari must never answer an API GET from its cache. The timeout stops
+  // a request from hanging forever on dying shop Wi-Fi (the "it never
+  // finishes uploading" feeling); callers can pass timeoutMs for slow ops.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || 20000);
+  try {
+    const r = await fetch(path, {
+      headers,
+      cache: 'no-store',
+      signal: ctrl.signal,
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!r.ok) { const e=await r.json().catch(()=>({error:r.statusText})); throw new Error(e.error||r.statusText); }
+    return r.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('No connection — check Wi-Fi and try again');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Fire-and-forget page view logging — never blocks or throws into the caller
@@ -810,13 +825,14 @@ function animateCounts(root) {
   });
 }
 
-async function renderTab(id) {
+async function renderTab(id, opts = {}) {
   setActiveTab(id);
-  logPageView(id);
+  if (!opts.silent) logPageView(id); // silent = auto-refresh, not a real visit
+  window._lastTabRender = Date.now();
   const titles={bikes:'Bikes',action:'Action',log:'Log',tickets:'Tickets',tours:'Tours',rentals:'Rentals',profile:'Profile',operations:'Operations',fleet:'Fleet','guides-admin':'Guides & Tours','notifs-admin':'Alerts','app-admin':'App',today:'Today'};
   document.getElementById('view-title').textContent=titles[id]||id;
   const c=document.getElementById('content');
-  if(id!=='action') c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
+  if(id!=='action' && !opts.silent) c.innerHTML = skeletonHTML(); // action renders instantly, no fetch
   if(id==='bikes') await renderBikesTab(c);
   else if(id==='today') await renderTodayBoard(c);
   else if(id==='action') renderAction(c);
@@ -2128,6 +2144,35 @@ function iconGuidesTab(){return`<svg viewBox="0 0 24 24" fill="none" stroke="cur
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-switch-user').addEventListener('click', switchUser);
 
+// ── Auto-refresh: keep devices in sync ────────────────────────────────────
+// The app only refetched data on tab switches, so a change made on one device
+// (a checkout on the iPad) stayed invisible on another until someone navigated.
+// Two triggers: picking the device back up (visibility/focus) and a 60s
+// heartbeat for devices that sit open on the counter. Refreshes are SILENT
+// (no page-view logging, no skeleton wipe) and heavily guarded — never while
+// a modal is open, an input is focused, bikes are selected mid-action, or on
+// tabs with form state.
+const REFRESH_SAFE_TABS = new Set(['today', 'rentals', 'tours', 'bikes', 'tickets', 'log']);
+async function silentRefresh() {
+  if (!state.actor || document.visibilityState !== 'visible') return;
+  const tab = state.currentTab;
+  if (!REFRESH_SAFE_TABS.has(tab)) return;
+  if (Date.now() - (window._lastTabRender || 0) < 8000) return; // just rendered
+  if (!document.getElementById('modal-overlay')?.classList.contains('hidden')) return;
+  const ae = document.activeElement;
+  if (ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName)) return;
+  if (state.action?.bikes?.length) return;
+  const c = document.getElementById('content');
+  const scroll = c ? c.scrollTop : 0;
+  try {
+    await renderTab(tab, { silent: true });
+    if (c) c.scrollTop = scroll;
+  } catch {} // a failed background refresh must never surface an error
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') silentRefresh(); });
+window.addEventListener('focus', () => silentRefresh());
+setInterval(silentRefresh, 60000);
+
 // If the user arrived via a password-reset email link, handle the token here
 // instead of falling through to the normal session/login flow (which ignores it).
 const _resetToken = new URLSearchParams(location.search).get('token');
@@ -2180,6 +2225,7 @@ async function processVoiceRecording(actionType, mimeType, stream) {
 
     const result = await api('/api/voice/transcribe', {
       method: 'POST',
+      timeoutMs: 45000, // audio upload + Whisper round-trip needs longer than JSON ops
       body: { audio_base64: base64, audio_type: mimeType, action_type: actionType }
     });
 

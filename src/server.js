@@ -63,6 +63,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// API/auth/session responses must NEVER be served from a browser cache — iOS
+// Safari heuristically caches GETs that lack Cache-Control, which made a change
+// on one shop device (e.g. a checkout) invisible on another until Safari's
+// cached copy expired. no-store forces every request to hit the server.
+app.use(['/api', '/auth', '/session'], (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 app.use('/api/voice', require('./routes/voice'));
 app.use('/webhooks', require('./routes/webhooks'));
 const { router: icalRouter, startPolling } = require('./routes/ical');
